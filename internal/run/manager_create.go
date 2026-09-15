@@ -41,6 +41,7 @@ import (
 	"github.com/majorcontext/moat/internal/provider"
 	awsprov "github.com/majorcontext/moat/internal/providers/aws"
 	"github.com/majorcontext/moat/internal/providers/claude" // only for settings types (LoadAllSettings, Settings, MarketplaceConfig) - provider setup uses provider interfaces
+	codexprov "github.com/majorcontext/moat/internal/providers/codex"
 	copilotprov "github.com/majorcontext/moat/internal/providers/copilot"
 	"github.com/majorcontext/moat/internal/runctx"
 	"github.com/majorcontext/moat/internal/secrets"
@@ -226,6 +227,8 @@ func (m *Manager) Create(ctx context.Context, opts Options) (resRun *Run, retErr
 	// not, they are appended to providerEnv as before so the key is not lost.
 	scopeAnthropicKeyToShell := hasGrant(opts.Grants, "claude") && hasGrant(opts.Grants, "anthropic")
 	var anthropicShellEnv []string
+	scopeOpenAIKeyToShell := hasGrant(opts.Grants, "codex") && hasGrant(opts.Grants, "openai")
+	var openaiShellEnv []string
 	var hostAddr string // Host address for proxy (may be rewritten for custom networks)
 	var mounts []container.MountConfig
 	var tmpfsMounts []container.TmpfsMount
@@ -442,10 +445,10 @@ func (m *Manager) Create(ctx context.Context, opts Options) (resRun *Run, retErr
 				}
 
 				// Map grant name to credential store key (handles aliases like
-				// "openai" → codex provider but credential stored under "openai").
+				// Logical grants may resolve to a versioned internal store key.
 				credName := credentialStoreKey(grantName, grant)
 				log.Debug("processing grant", "grant", grant, "credName", credName)
-				cred, getErr := store.Get(credName)
+				cred, actualCredName, getErr := loadCredentialForGrant(store, grantName, grant)
 				if getErr != nil {
 					// Should not happen: validateGrants checks before resource allocation.
 					cleanupDaemonRun()
@@ -453,6 +456,7 @@ func (m *Manager) Create(ctx context.Context, opts Options) (resRun *Run, retErr
 				}
 				// Convert credential for new provider interface
 				provCred := provider.FromLegacy(cred)
+				credName = actualCredName
 
 				// Store MCP credential on RunContext so the daemon proxy can
 				// resolve it by grant name during MCP relay requests. This
@@ -462,6 +466,10 @@ func (m *Manager) Create(ctx context.Context, opts Options) (resRun *Run, retErr
 				if opts.Config != nil {
 					for _, mcp := range opts.Config.MCP {
 						if mcp.Auth != nil && mcp.Auth.Grant == grant {
+							if credName == credential.ProviderCodexSubscription {
+								cleanupDaemonRun()
+								return nil, fmt.Errorf("MCP server %q cannot use the Codex subscription grant; use an openai API-key grant", mcp.Name)
+							}
 							serverHost := mcp.URL
 							if u, parseErr := url.Parse(mcp.URL); parseErr == nil {
 								serverHost = u.Host
@@ -474,7 +482,11 @@ func (m *Manager) Create(ctx context.Context, opts Options) (resRun *Run, retErr
 				// Use new provider registry (supports aliases like "anthropic" -> "claude")
 				// MCP grants (e.g., "mcp:test") have no registered provider — they are
 				// handled by the proxy MCP relay, not by provider.ConfigureProxy.
-				prov := provider.Get(grantName)
+				providerName := grantName
+				if credName == credential.ProviderOpenAI && provider.ResolveName(grantName) == providerCodex {
+					providerName = "openai"
+				}
+				prov := provider.Get(providerName)
 				if prov == nil {
 					continue
 				}
@@ -492,6 +504,8 @@ func (m *Manager) Create(ctx context.Context, opts Options) (resRun *Run, retErr
 				log.Debug("adding provider env vars", "provider", credName, "vars", envVars)
 				if scopeAnthropicKeyToShell && credName == credential.ProviderAnthropic {
 					anthropicShellEnv = append(anthropicShellEnv, envVars...)
+				} else if scopeOpenAIKeyToShell && credName == credential.ProviderOpenAI {
+					openaiShellEnv = append(openaiShellEnv, envVars...)
 				} else {
 					providerEnv = append(providerEnv, envVars...)
 				}
@@ -671,6 +685,9 @@ func (m *Manager) Create(ctx context.Context, opts Options) (resRun *Run, retErr
 		// message rather than letting the run register and misbehave.
 		if !slices.Contains(daemonCapabilities, daemon.CapHostGatewayV2) {
 			return nil, fmt.Errorf("proxy daemon is too old for this CLI (missing 'host-gateway-v2' capability); run 'moat proxy restart' to upgrade")
+		}
+		if hasGrant(opts.Grants, "codex") && (!slices.Contains(daemonCapabilities, daemon.CapCredentialRefs) || !slices.Contains(daemonCapabilities, daemon.CapCredentialBundles)) {
+			return nil, fmt.Errorf("proxy daemon is too old for Codex subscription auth; run 'moat proxy restart' to upgrade")
 		}
 
 		// Get proxy host address — needed for registration, proxy URL, and firewall.
@@ -994,6 +1011,16 @@ region = %s
 		if err != nil {
 			cleanupDaemonRun()
 			return nil, fmt.Errorf("resolving versions: %w", err)
+		}
+	}
+	if hasGrant(opts.Grants, "codex") {
+		for _, dep := range depList {
+			if dep.Name == "codex-cli" {
+				if err := codexprov.ValidateVersion(dep.Version); err != nil {
+					cleanupDaemonRun()
+					return nil, err
+				}
+			}
 		}
 	}
 
@@ -1482,7 +1509,9 @@ region = %s
 	// This includes auth config for OpenAI tokens.
 	var codexConfig *provider.ContainerConfig
 	hasCodexLocalMCP := opts.Config != nil && len(opts.Config.Codex.MCP) > 0
-	if !isPiRun && (needsCodexInit || hasCodexLocalMCP || (opts.Config != nil && opts.Config.ShouldSyncCodexLogs())) {
+	willStageCodex := !isPiRun && (needsCodexInit || hasCodexLocalMCP || (opts.Config != nil && opts.Config.ShouldSyncCodexLogs()))
+	scopeOpenAIKeyToShell = scopeOpenAIKeyToShell && willStageCodex
+	if willStageCodex {
 		codexProvider := provider.GetAgent("codex")
 		if codexProvider == nil {
 			cleanupDaemonRun()
@@ -1500,6 +1529,10 @@ region = %s
 		codexConfig = cfg
 		mounts = append(mounts, codexConfig.Mounts...)
 		proxyEnv = append(proxyEnv, codexConfig.Env...)
+		openaiShellEnv = nil
+	}
+	if len(openaiShellEnv) > 0 {
+		proxyEnv = append(proxyEnv, openaiShellEnv...)
 	}
 
 	// Set up GitHub Copilot CLI staging directory using the provider interface.
@@ -2740,6 +2773,9 @@ func buildRegisterRequest(rc *daemon.RunContext, grants []string) daemon.Registe
 		CopilotGitHubAuth: rc.CopilotGitHubAuth,
 		AWSConfig:         rc.AWSConfig,
 		CredProfile:       credential.ActiveProfile,
+	}
+	if hasGrant(grants, "codex") {
+		req.CredentialRefs = append(req.CredentialRefs, "codex")
 	}
 
 	for host, creds := range rc.Credentials {

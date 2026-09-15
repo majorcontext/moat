@@ -41,11 +41,13 @@ const configHeader = `# Moat-generated Codex configuration - do not edit.
 // key/value pairs to the table they follow, so a scalar emitted after
 // [shell_environment_policy] would land inside it.
 type Config struct {
-	ApprovalPolicy         string                   `toml:"approval_policy"`
-	SandboxMode            string                   `toml:"sandbox_mode"`
-	ShellEnvironmentPolicy ShellEnvironmentPolicy   `toml:"shell_environment_policy"`
-	Projects               map[string]ProjectConfig `toml:"projects,omitempty"`
-	MCPServers             map[string]MCPServer     `toml:"mcp_servers,omitempty"`
+	CLIAuthCredentialsStore string                   `toml:"cli_auth_credentials_store"`
+	ChatGPTBaseURL          string                   `toml:"chatgpt_base_url"`
+	ApprovalPolicy          string                   `toml:"approval_policy"`
+	SandboxMode             string                   `toml:"sandbox_mode"`
+	ShellEnvironmentPolicy  ShellEnvironmentPolicy   `toml:"shell_environment_policy"`
+	Projects                map[string]ProjectConfig `toml:"projects,omitempty"`
+	MCPServers              map[string]MCPServer     `toml:"mcp_servers,omitempty"`
 }
 
 // ShellEnvironmentPolicy controls the environment Codex passes to the commands
@@ -90,9 +92,11 @@ type MCPServer struct {
 // proxy. moat curates the container environment already.
 func NewConfig(requireApproval bool) Config {
 	cfg := Config{
-		ApprovalPolicy:         ApprovalNever,
-		SandboxMode:            SandboxFullAccess,
-		ShellEnvironmentPolicy: ShellEnvironmentPolicy{Inherit: "all"},
+		CLIAuthCredentialsStore: "file",
+		ChatGPTBaseURL:          subscriptionOrigin,
+		ApprovalPolicy:          ApprovalNever,
+		SandboxMode:             SandboxFullAccess,
+		ShellEnvironmentPolicy:  ShellEnvironmentPolicy{Inherit: "all"},
 		Projects: map[string]ProjectConfig{
 			WorkspacePath: {TrustLevel: "trusted"},
 		},

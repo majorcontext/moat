@@ -1,6 +1,8 @@
 package daemon
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/majorcontext/moat/internal/credential"
@@ -51,6 +53,31 @@ func TestRunContext_SetCredentialHeader(t *testing.T) {
 	}
 	if cred.Name != "x-api-key" || cred.Value != "sk-ant-123" {
 		t.Errorf("unexpected credential: %+v", cred)
+	}
+}
+
+func TestRunContext_SetCredentialBundleConvertsAtomically(t *testing.T) {
+	rc := NewRunContext("run-bundle")
+	rc.SetCredentialBundle("chatgpt.com", credential.CredentialBundle{
+		ID: "codex-subscription-v1", Grant: "codex", RequireAll: true,
+		Scope: credential.CredentialScope{RequireTLS: true, Origins: []string{"https://chatgpt.com"}, Methods: []string{"POST"}, PathPrefixes: []string{"/backend-api/codex"}},
+		Replacements: []credential.HeaderReplacement{
+			{Name: "Authorization", Placeholder: "fake", Value: "real"},
+			{Name: "ChatGPT-Account-ID", Placeholder: "fake-account", Value: "real-account"},
+		},
+	})
+
+	data := rc.ToProxyContextData()
+	bundles := data.CredentialBundles
+	if len(bundles) != 1 || len(bundles[0].Replacements) != 2 || !bundles[0].RequireAll {
+		t.Fatalf("unexpected proxy bundle: %+v", bundles)
+	}
+	serialized, err := json.Marshal(rc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(serialized), "real-account") || strings.Contains(string(serialized), `"credential_bundles"`) {
+		t.Fatalf("RunContext serialization exposed credential bundle: %s", serialized)
 	}
 }
 

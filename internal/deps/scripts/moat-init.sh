@@ -202,6 +202,12 @@ fi
 # When MOAT_CODEX_INIT is set to the staging directory path, copy files
 # from the staging area to their final locations (~/.codex).
 if [ -n "$MOAT_CODEX_INIT" ] && [ -d "$MOAT_CODEX_INIT" ]; then
+
+  CODEX_VERSION="$(codex --version 2>/dev/null | awk '{print $2}')"
+  case "$CODEX_VERSION" in
+    0.146.*|0.147.*|0.148.*|0.149.*|0.150.*|0.151.*|0.152.*|0.153.*|0.154.*) ;;
+    *) echo "Moat: unsupported Codex CLI version $CODEX_VERSION (supported: 0.146.x through 0.154.x)" >&2; exit 1 ;;
+  esac
   # Determine target home directory
   if [ "$(id -u)" = "0" ] && id moatuser >/dev/null 2>&1; then
     TARGET_HOME="/home/moatuser"
@@ -225,6 +231,9 @@ if [ -n "$MOAT_CODEX_INIT" ] && [ -d "$MOAT_CODEX_INIT" ]; then
   # Copy AGENTS.md if present (runtime context for agent awareness)
   [ -f "$MOAT_CODEX_INIT/AGENTS.md" ] && \
     cp -p "$MOAT_CODEX_INIT/AGENTS.md" "$TARGET_HOME/.codex/"
+
+  [ -f "$MOAT_CODEX_INIT/openai-env.sh" ] && \
+    cp -p "$MOAT_CODEX_INIT/openai-env.sh" "$TARGET_HOME/.codex/"
 
   # Ensure moatuser owns the staged files if we're running as root.
   #

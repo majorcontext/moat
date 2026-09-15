@@ -41,14 +41,14 @@ func TestSetupCodexStaging_GrantNotDeclared(t *testing.T) {
 
 // TestSetupCodexStaging_AgentsDerivedGrantSatisfiesLocalMCP reproduces the
 // full CLI pipeline for the regression fixed alongside this test: `agents:
-// [codex]` derives the "openai" grant, but ExpandAgents deliberately returns
+// [codex]` derives the "codex" grant, but ExpandAgents deliberately returns
 // it instead of writing it into cfg.Grants (see its doc comment). Without the
 // intcli.AppendDerivedGrants write-back that `moat run`/`moat wt`/RunProvider
 // now perform after grant resolution, cfg.Grants stays empty and a local
 // codex.mcp entry declaring `grant: openai` is rejected here as "not
 // declared in top-level grants list" even though no top-level `grants:` was
 // ever needed — the agents: entry alone should suffice.
-func TestSetupCodexStaging_AgentsDerivedGrantSatisfiesLocalMCP(t *testing.T) {
+func TestSetupCodexStaging_SubscriptionGrantDoesNotAuthorizeOpenAIKeyForLocalMCP(t *testing.T) {
 	m := &Manager{}
 	cfg := &config.Config{Agents: []string{"codex"}}
 	cfg.Codex.MCP = map[string]config.MCPServerSpec{"srv": {Grant: "openai", Command: "run"}}
@@ -58,13 +58,43 @@ func TestSetupCodexStaging_AgentsDerivedGrantSatisfiesLocalMCP(t *testing.T) {
 		t.Fatalf("ExpandAgents: %v", err)
 	}
 	intcli.AppendDerivedGrants(cfg, derived)
-	if !strings.Contains(strings.Join(cfg.Grants, ","), "openai") {
-		t.Fatalf("expected openai written back into cfg.Grants by AppendDerivedGrants; got %v", cfg.Grants)
+	if !strings.Contains(strings.Join(cfg.Grants, ","), "codex") {
+		t.Fatalf("expected codex written back into cfg.Grants by AppendDerivedGrants; got %v", cfg.Grants)
 	}
 
 	fake := &captureAgentProvider{}
-	if _, err := m.setupCodexStaging(context.Background(), fake, Options{Config: cfg}, &Run{}, false, "", "", nil); err != nil {
-		t.Fatalf("expected agents:-derived openai grant to satisfy the local MCP grant check, got error: %v", err)
+	if _, err := m.setupCodexStaging(context.Background(), fake, Options{Config: cfg}, &Run{}, false, "", "", nil); err == nil {
+		t.Fatal("subscription grant must not satisfy a local MCP server's OpenAI API-key grant")
+	}
+}
+
+func TestSetupCodexStaging_DeclaredGrantControlsCredentialSelection(t *testing.T) {
+	store := newGrantsTestStore(t)
+	for _, cred := range []credential.Credential{
+		{Provider: credential.ProviderCodexSubscription, Token: "subscription-secret"},
+		{Provider: credential.ProviderOpenAI, Token: "api-key-secret"},
+	} {
+		if err := store.Save(cred); err != nil {
+			t.Fatal(err)
+		}
+	}
+	openStore := func() (*credential.FileStore, error) { return store, nil }
+	m := &Manager{}
+
+	openAIOnly := &captureAgentProvider{}
+	if _, err := m.setupCodexStaging(context.Background(), openAIOnly, Options{Grants: []string{"openai"}}, &Run{}, true, "", "", openStore); err != nil {
+		t.Fatal(err)
+	}
+	if got := openAIOnly.got.Credential; got == nil || got.Provider != string(credential.ProviderOpenAI) || got.Token != "api-key-secret" {
+		t.Fatalf("openai-only staging selected the wrong credential: %+v", got)
+	}
+
+	codexPreferred := &captureAgentProvider{}
+	if _, err := m.setupCodexStaging(context.Background(), codexPreferred, Options{Grants: []string{"codex", "openai"}}, &Run{}, true, "", "", openStore); err != nil {
+		t.Fatal(err)
+	}
+	if got := codexPreferred.got.Credential; got == nil || got.Provider != string(credential.ProviderCodexSubscription) || got.Token != "subscription-secret" {
+		t.Fatalf("codex staging did not prefer the subscription credential: %+v", got)
 	}
 }
 

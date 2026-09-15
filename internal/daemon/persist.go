@@ -292,18 +292,53 @@ func resolveCredentials(rc *RunContext, grants []string, mcpServers []config.MCP
 			continue
 		}
 
-		credName := resolveCredName(grantName, grant)
-		cred, err := store.Get(credName)
+		isCodex := provider.ResolveName(grantName) == "codex"
+		if isCodex {
+			// Refresh tokens rotate. Share the same lock as background refresh,
+			// and only read the store after taking it, so concurrent run
+			// registrations cannot both redeem a stale refresh token.
+			codexRefreshMu.Lock()
+		}
+		cred, credName, err := loadCredentialForGrant(store, grantName, grant)
 		if err != nil {
+			if isCodex {
+				codexRefreshMu.Unlock()
+			}
 			return fmt.Errorf("grant %q: credential not found: %w", grantName, err)
 		}
 		provCred := provider.FromLegacy(cred)
+		if credName == credential.ProviderCodexSubscription && (provCred.ExpiresAt.IsZero() || time.Until(provCred.ExpiresAt) < 10*time.Minute) {
+			if refreshable, ok := provider.Get("codex").(provider.RefreshableProvider); ok && refreshable.CanRefresh(provCred) {
+				refreshCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				updated, refreshErr := refreshable.Refresh(refreshCtx, nil, provCred)
+				cancel()
+				if refreshErr != nil {
+					codexRefreshMu.Unlock()
+					return fmt.Errorf("refreshing Codex subscription: %w", refreshErr)
+				}
+				persisted := credential.Credential{
+					Provider: credName, Token: updated.Token, Scopes: updated.Scopes,
+					ExpiresAt: updated.ExpiresAt, CreatedAt: updated.CreatedAt, Metadata: updated.Metadata,
+				}
+				if err := store.Save(persisted); err != nil {
+					codexRefreshMu.Unlock()
+					return fmt.Errorf("persisting refreshed Codex subscription: %w", err)
+				}
+				provCred = updated
+			}
+		}
+		if isCodex {
+			codexRefreshMu.Unlock()
+		}
 
 		// Store MCP credential on RunContext (runs for all grants, not just
 		// provider-less ones, because oauth: grants have a registered provider
 		// but still need their credential stored for the MCP relay).
 		for _, mcp := range mcpServers {
 			if mcp.Auth != nil && mcp.Auth.Grant == grant {
+				if credName == credential.ProviderCodexSubscription {
+					return fmt.Errorf("MCP server %q cannot use the Codex subscription grant", mcp.Name)
+				}
 				serverHost := mcp.URL
 				if u, parseErr := url.Parse(mcp.URL); parseErr == nil {
 					serverHost = u.Host
@@ -312,7 +347,11 @@ func resolveCredentials(rc *RunContext, grants []string, mcpServers []config.MCP
 			}
 		}
 
-		prov := provider.Get(grantName)
+		providerName := grantName
+		if credName == credential.ProviderOpenAI && provider.ResolveName(grantName) == "codex" {
+			providerName = "openai"
+		}
+		prov := provider.Get(providerName)
 		if prov == nil {
 			continue
 		}

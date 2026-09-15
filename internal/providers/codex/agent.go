@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
+	"github.com/majorcontext/moat/internal/credential"
 	"github.com/majorcontext/moat/internal/provider"
 )
 
@@ -37,6 +39,9 @@ func (p *Provider) PrepareContainer(ctx context.Context, opts provider.PrepareOp
 	// servers from config.toml only, so both the remote (relay) and local
 	// (child process) servers go into the same [mcp_servers] table.
 	codexCfg := NewConfig(opts.CodexRequireApproval)
+	if opts.Credential != nil && opts.Credential.Provider == string(credential.ProviderOpenAI) {
+		codexCfg.ChatGPTBaseURL = ""
+	}
 	mcpServers, mcpErr := buildMCPServers(opts)
 	if mcpErr != nil {
 		cleanupFn()
@@ -55,11 +60,20 @@ func (p *Provider) PrepareContainer(ctx context.Context, opts provider.PrepareOp
 			return nil, fmt.Errorf("writing context file: %w", err)
 		}
 	}
+	if opts.ScopeOpenAIKeyToShell {
+		if err := os.WriteFile(filepath.Join(tmpDir, OpenAIShellEnvFileName), []byte(RenderOpenAIShellEnv()), 0o600); err != nil {
+			cleanupFn()
+			return nil, fmt.Errorf("writing OpenAI shell environment: %w", err)
+		}
+	}
 
 	// Build container environment
 	// Include credential env vars plus the init mount path for moat-init script
 	env := p.ContainerEnv(opts.Credential)
 	env = append(env, "MOAT_CODEX_INIT="+CodexInitMountPath)
+	if opts.ScopeOpenAIKeyToShell {
+		env = append(env, "BASH_ENV="+OpenAIShellEnvPath)
+	}
 
 	// Build mounts - staging directory for init
 	mounts := []provider.MountConfig{
@@ -114,16 +128,31 @@ func buildMCPServers(opts provider.PrepareOpts) (map[string]MCPServer, error) {
 // PopulateStagingDir populates the Codex staging directory with auth configuration.
 //
 // Files added:
-//   - auth.json (placeholder API key - real auth is via proxy)
+//   - auth.json (synthetic subscription tokens or a placeholder API key)
 //
 // SECURITY: The real token is NEVER written to the container filesystem.
 // Authentication is handled by the TLS-intercepting proxy at the network layer.
 func PopulateStagingDir(cred *provider.Credential, stagingDir string) error {
-	// API key - use a placeholder that looks like a valid API key
-	// This bypasses local format validation in Codex CLI.
-	// The proxy will inject the real key in the Authorization header.
-	authFile := map[string]string{
-		"OPENAI_API_KEY": OpenAIAPIKeyPlaceholder,
+	if cred != nil && cred.Provider == string(credential.ProviderOpenAI) {
+		authJSON, err := json.MarshalIndent(map[string]any{"OPENAI_API_KEY": OpenAIAPIKeyPlaceholder}, "", "  ")
+		if err != nil {
+			return fmt.Errorf("marshaling auth file: %w", err)
+		}
+		if err := os.WriteFile(filepath.Join(stagingDir, "auth.json"), authJSON, 0o600); err != nil {
+			return fmt.Errorf("writing auth file: %w", err)
+		}
+		return nil
+	}
+	authFile := map[string]any{
+		"auth_mode":      "chatgptAuthTokens",
+		"OPENAI_API_KEY": nil,
+		"tokens": map[string]string{
+			"id_token":      credential.GenerateIDTokenPlaceholder(syntheticAccountID),
+			"access_token":  credential.GenerateAccessTokenPlaceholder(syntheticAccountID),
+			"refresh_token": credential.ProxyInjectedPlaceholder,
+			"account_id":    syntheticAccountID,
+		},
+		"last_refresh": time.Now().UTC().Format(time.RFC3339),
 	}
 
 	authJSON, err := json.MarshalIndent(authFile, "", "  ")

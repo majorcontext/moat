@@ -127,7 +127,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 		RunCount:     s.registry.Count(),
 		StartedAt:    s.startedAt.Format(time.RFC3339),
 		Commit:       BuildCommit,
-		Capabilities: []string{CapKeepPolicy, CapKeepBodyPolicy, CapHostGatewayV2},
+		Capabilities: []string{CapKeepPolicy, CapKeepBodyPolicy, CapHostGatewayV2, CapCredentialRefs, CapCredentialBundles},
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -151,6 +151,22 @@ func (s *Server) handleRegisterRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rc := req.ToRunContext()
+	if len(req.CredentialRefs) > 0 {
+		key, err := credential.DefaultEncryptionKey()
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, RegisterResponse{Error: "opening credential store"})
+			return
+		}
+		store, err := credential.NewFileStore(storeDirForRun(rc), key)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, RegisterResponse{Error: "opening credential store"})
+			return
+		}
+		if err := resolveCredentials(rc, req.CredentialRefs, req.MCPServers, store); err != nil {
+			writeJSON(w, http.StatusBadRequest, RegisterResponse{Error: err.Error()})
+			return
+		}
+	}
 
 	// On Linux with Docker host networking, the host gateway is 127.0.0.1 and
 	// the proxy also listens on 127.0.0.1. Implicitly allow the proxy port so

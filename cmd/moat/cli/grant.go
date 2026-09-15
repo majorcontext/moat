@@ -13,6 +13,7 @@ import (
 	"github.com/majorcontext/moat/internal/provider"
 	"github.com/majorcontext/moat/internal/providers/aws"
 	claudeprov "github.com/majorcontext/moat/internal/providers/claude"
+	codexprov "github.com/majorcontext/moat/internal/providers/codex"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
@@ -25,6 +26,7 @@ var (
 	awsExternalID      string
 	awsProfile         string
 	grantBaseURL       string
+	grantDeviceAuth    bool
 )
 
 var grantCmd = &cobra.Command{
@@ -67,6 +69,7 @@ func init() {
 	grantCmd.Flags().StringVar(&awsExternalID, "external-id", "", "External ID for role assumption")
 	grantCmd.Flags().StringVar(&awsProfile, "aws-profile", "", "AWS shared config profile for role assumption (falls back to AWS_PROFILE env var if not set)")
 	grantCmd.Flags().StringVar(&grantBaseURL, "base-url", "", "endpoint the key authenticates against, for an Anthropic-compatible gateway (anthropic only)")
+	grantCmd.Flags().BoolVar(&grantDeviceAuth, "device-auth", false, "use device-code login (codex only)")
 }
 
 // saveCredential stores a credential and returns the file path.
@@ -90,14 +93,11 @@ func runGrant(cmd *cobra.Command, args []string) error {
 	providerName := args[0]
 
 	// Map CLI names to provider names
-	// "openai" is the CLI name, but the provider is registered as "codex"
 	// "google" is an alias for "gemini"
 	// "anthropic" and "claude" are separate registered providers; no remapping needed
 	switch providerName {
 	case "copilot":
 		return fmt.Errorf("GitHub Copilot CLI uses GitHub credentials.\n\nRun: moat grant github")
-	case "openai":
-		providerName = "codex"
 	case "google":
 		providerName = "gemini"
 	}
@@ -132,6 +132,12 @@ Options:
 	// For AWS, pass the CLI flags via context
 	if providerName == "aws" {
 		ctx = aws.WithGrantOptions(ctx, awsRole, awsRegion, awsSessionDuration, awsExternalID, awsProfile)
+	}
+	if grantDeviceAuth {
+		if providerName != "codex" {
+			return fmt.Errorf("--device-auth applies to the codex grant, not %s", args[0])
+		}
+		ctx = codexprov.WithGrantOptions(ctx, true)
 	}
 
 	// --base-url marks the key as belonging to an Anthropic-compatible gateway

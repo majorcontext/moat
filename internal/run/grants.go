@@ -94,8 +94,7 @@ func DetectMissingGrants(grants []string, cfg *config.Config, store *credential.
 			add(MissingGrant{Grant: grant, Reason: ReasonUnknownProvider, FixCommand: fix, Promptable: false})
 			continue
 		}
-		credName := credentialStoreKey(grantName, grant)
-		if _, err := store.Get(credName); err != nil {
+		if _, _, err := loadCredentialForGrant(store, grantName, grant); err != nil {
 			reason := classifyMissingReason(err)
 			// AWS needs mandatory flags (--role, …); cannot prompt cleanly. A
 			// read failure (permission/corrupt file) isn't fixed by re-granting
@@ -116,6 +115,16 @@ func DetectMissingGrants(grants []string, cfg *config.Config, store *credential.
 	if cfg != nil {
 		for _, mcp := range cfg.MCP {
 			if mcp.Auth == nil || mcp.Auth.Grant == "" {
+				continue
+			}
+			if provider.ResolveName(strings.Split(mcp.Auth.Grant, ":")[0]) == providerCodex {
+				add(MissingGrant{
+					Grant:      mcp.Auth.Grant,
+					Reason:     ReasonUnknownProvider,
+					FixCommand: "replace the MCP auth grant with openai",
+					Promptable: false,
+					Detail:     "Codex subscription credentials cannot be used for MCP servers",
+				})
 				continue
 			}
 			if _, err := store.Get(credential.Provider(mcp.Auth.Grant)); err != nil {

@@ -11,10 +11,7 @@ import (
 	"github.com/majorcontext/moat/internal/provider"
 )
 
-// providerCodex is the provider registry name for the Codex/OpenAI agent.
-// The provider registry resolves "openai" → "codex" via alias
-// (see internal/providers/codex/provider.go), but credentials are stored
-// under credential.ProviderOpenAI — not under this name.
+// providerCodex is the provider registry name for the Codex agent.
 const providerCodex = "codex"
 
 // imageNeeds holds the results of grant/dependency analysis for image building.
@@ -51,9 +48,8 @@ func resolveImageNeedsWithStore(grants []string, depList []deps.Dependency, stor
 	for _, grant := range grants {
 		grantName := strings.Split(grant, ":")[0]
 
-		// canonical is the provider registry name (e.g. "codex" for an
-		// "openai" grant). This is NOT a credential store key — each case
-		// uses the appropriate credential.Provider* constant for store lookups.
+		// canonical is the provider registry name. This is not necessarily a
+		// credential store key; each case uses the appropriate constant.
 		canonical := provider.ResolveName(grantName)
 
 		switch canonical {
@@ -71,8 +67,13 @@ func resolveImageNeedsWithStore(grants []string, depList []deps.Dependency, stor
 			}
 
 		case providerCodex:
-			// The "openai" grant resolves to "codex" via provider alias.
-			// Credentials are stored under ProviderOpenAI.
+			if store != nil {
+				if _, err := store.Get(credential.ProviderCodexSubscription); err == nil {
+					initSet["codex"] = true
+				}
+			}
+
+		case "openai":
 			if store != nil {
 				if _, err := store.Get(credential.ProviderOpenAI); err == nil {
 					initSet["codex"] = true
@@ -125,10 +126,9 @@ func resolveImageNeedsWithStore(grants []string, depList []deps.Dependency, stor
 	return needs
 }
 
-// credentialStoreKey maps a grant name to the credential store key.
-// Most providers store credentials under a key matching the resolved provider
-// name, but the codex provider is an exception: the provider registry name is
-// "codex" (aliased from "openai"), but credentials are stored under "openai".
+// credentialStoreKey maps a grant name to its primary credential store key.
+// Codex uses a versioned internal key; loadCredentialForGrant implements its
+// explicit OpenAI API-key fallback.
 // For namespaced grants like "oauth:notion", the full grant name is used as
 // the store key so that each OAuth integration has its own credential entry.
 // MCP grants ("mcp:<name>" or the deprecated "mcp-<name>") likewise use the
@@ -143,7 +143,7 @@ func credentialStoreKey(baseName, fullGrant string) credential.Provider {
 	}
 	canonical := provider.ResolveName(baseName)
 	if canonical == providerCodex {
-		return credential.ProviderOpenAI
+		return credential.ProviderCodexSubscription
 	}
 	if canonical == "copilot" {
 		return credential.ProviderGitHub
@@ -154,6 +154,20 @@ func credentialStoreKey(baseName, fullGrant string) credential.Provider {
 		return credential.Provider(fullGrant)
 	}
 	return credential.Provider(canonical)
+}
+
+func loadCredentialForGrant(store credential.Store, baseName, fullGrant string) (*credential.Credential, credential.Provider, error) {
+	key := credentialStoreKey(baseName, fullGrant)
+	cred, err := store.Get(key)
+	if err == nil {
+		return cred, key, nil
+	}
+	if provider.ResolveName(baseName) == providerCodex {
+		if fallback, fallbackErr := store.Get(credential.ProviderOpenAI); fallbackErr == nil {
+			return fallback, credential.ProviderOpenAI, nil
+		}
+	}
+	return nil, key, err
 }
 
 func hasDep(depList []deps.Dependency, name string) bool {

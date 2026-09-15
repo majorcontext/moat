@@ -543,6 +543,18 @@ func TestValidateMCPGrants(t *testing.T) {
 			wantErr: true,
 			errMsg:  "MCP server 'missing' requires grant 'mcp-missing' but it's not configured",
 		},
+		{
+			name: "codex subscription grant is rejected",
+			mcp: []config.MCPServerConfig{
+				{
+					Name: "subscription",
+					URL:  "https://example.com",
+					Auth: &config.MCPAuthConfig{Grant: "codex", Header: "Authorization"},
+				},
+			},
+			wantErr: true,
+			errMsg:  "cannot use the Codex subscription grant",
+		},
 	}
 
 	for _, tt := range tests {

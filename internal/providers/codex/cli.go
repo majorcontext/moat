@@ -153,8 +153,8 @@ func runCodex(cmd *cobra.Command, args []string) error {
 // GetCredentialName returns the name under which the Codex credential is stored.
 // Returns empty string if no credential exists.
 func GetCredentialName() string {
-	// Check both provider names (codex is the internal name, openai is legacy)
-	for _, name := range []string{"codex", "openai"} {
+	// Prefer subscription auth, with a separate OpenAI API key as fallback.
+	for _, name := range []credential.Provider{credential.ProviderCodexSubscription, credential.ProviderOpenAI} {
 		key, err := credential.DefaultEncryptionKey()
 		if err != nil {
 			continue
@@ -163,8 +163,11 @@ func GetCredentialName() string {
 		if err != nil {
 			continue
 		}
-		if _, err := store.Get(credential.Provider(name)); err == nil {
-			return name
+		if _, err := store.Get(name); err == nil {
+			if name == credential.ProviderCodexSubscription {
+				return "codex"
+			}
+			return "openai"
 		}
 	}
 	return ""

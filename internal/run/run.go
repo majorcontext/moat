@@ -315,12 +315,11 @@ func validateGrants(grants []string, store *credential.FileStore) error {
 			continue
 		}
 
-		// Map grant name to credential store key (handles aliases like
-		// "openai" → codex provider but credential stored under "openai").
-		credName := credentialStoreKey(grantName, grant)
-
-		// Check credential exists and can be decrypted
-		_, err := store.Get(credName)
+		// Map the grant name to its credential store key.
+		// Check credential exists and can be decrypted. A logical Codex grant
+		// prefers subscription auth and accepts a separate OpenAI API key only
+		// as a compatibility fallback.
+		_, _, err := loadCredentialForGrant(store, grantName, grant)
 		if err != nil {
 			grantCmd := grantToCommand(grant)
 			switch {
@@ -380,6 +379,9 @@ func validateMCPGrants(cfg *config.Config, store *credential.FileStore) error {
 	for _, mcp := range cfg.MCP {
 		if mcp.Auth == nil || mcp.Auth.Grant == "" {
 			continue // No auth required (or no grant named)
+		}
+		if provider.ResolveName(strings.Split(mcp.Auth.Grant, ":")[0]) == providerCodex {
+			return fmt.Errorf("MCP server %q cannot use the Codex subscription grant; use an openai API-key grant", mcp.Name)
 		}
 
 		_, err := store.Get(credential.Provider(mcp.Auth.Grant))

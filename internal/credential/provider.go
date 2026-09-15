@@ -114,9 +114,11 @@ func GenerateAccessTokenPlaceholder(accountID string) string {
 		"aud":       []string{"https://api.openai.com/v1"},
 		"client_id": codexCLIClientID,
 		"exp":       9999999999, // Far future expiration
-		"iat":       time.Now().Unix(),
-		"iss":       "https://auth.openai.com",
-		"sub":       "moat-proxy-placeholder",
+		// Fixed so independently constructed staging and proxy configurations
+		// produce the exact same placeholder bytes.
+		"iat": 1700000000,
+		"iss": "https://auth.openai.com",
+		"sub": "moat-proxy-placeholder",
 		"https://api.openai.com/auth": map[string]interface{}{
 			"chatgpt_account_id":      accountID,
 			"chatgpt_account_user_id": "user-moat-placeholder__" + accountID,
@@ -174,6 +176,36 @@ type ProxyConfigurer interface {
 	// URL paths, Authorization headers, and request bodies for a specific host.
 	// Body substitution is limited to 64KB requests to avoid memory issues.
 	SetTokenSubstitution(host, placeholder, realToken string)
+}
+
+// HeaderReplacement describes one exact placeholder-to-secret replacement.
+type HeaderReplacement struct {
+	Name        string
+	Placeholder string
+	Value       string
+}
+
+// CredentialScope constrains credential injection to an exact request shape.
+type CredentialScope struct {
+	RequireTLS   bool
+	Origins      []string
+	Methods      []string
+	PathPrefixes []string
+}
+
+// CredentialBundle groups multiple headers that must be replaced atomically.
+type CredentialBundle struct {
+	ID           string
+	Grant        string
+	Scope        CredentialScope
+	Replacements []HeaderReplacement
+	RequireAll   bool
+}
+
+// CredentialBundleConfigurer is implemented by proxy contexts that support
+// atomic, request-scoped multi-header credentials.
+type CredentialBundleConfigurer interface {
+	SetCredentialBundle(host string, bundle CredentialBundle)
 }
 
 // IsOAuthToken returns true if the token appears to be a Claude Code OAuth token.

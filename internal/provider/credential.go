@@ -51,6 +51,10 @@ type PrepareOpts struct {
 	// billing. Claude-specific; ignored by other agents.
 	ScopeAnthropicKeyToShell bool
 
+	// ScopeOpenAIKeyToShell keeps an OpenAI API-key placeholder out of the
+	// Codex process when subscription and API-key grants coexist.
+	ScopeOpenAIKeyToShell bool
+
 	// CodexRequireApproval keeps Codex's own approval prompts and sandbox
 	// enabled instead of moat's default of turning both off (the container is
 	// already the isolation boundary, and Codex's sandbox blocks the network

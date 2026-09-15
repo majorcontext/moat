@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestIsOAuthToken(t *testing.T) {
@@ -194,5 +195,14 @@ func TestGenerateAccessTokenPlaceholder(t *testing.T) {
 	// Verify issuer
 	if payload["iss"] != "https://auth.openai.com" {
 		t.Errorf("iss = %v, want https://auth.openai.com", payload["iss"])
+	}
+}
+
+func TestGenerateAccessTokenPlaceholderDeterministic(t *testing.T) {
+	first := GenerateAccessTokenPlaceholder("acct-stable")
+	time.Sleep(time.Millisecond)
+	second := GenerateAccessTokenPlaceholder("acct-stable")
+	if first != second {
+		t.Fatal("access-token placeholder must be byte-stable across proxy and staging construction")
 	}
 }

@@ -25,11 +25,16 @@ const (
 	ProviderAWS       Provider = "aws"
 	ProviderAnthropic Provider = "anthropic"
 	ProviderClaude    Provider = "claude"
+	ProviderCodex     Provider = "codex"
 	ProviderOpenAI    Provider = "openai"
-	ProviderGemini    Provider = "gemini"
-	ProviderNpm       Provider = "npm"
-	ProviderGraphite  Provider = "graphite"
-	ProviderMeta      Provider = "meta"
+	// ProviderCodexSubscription is intentionally not a public grant name.
+	// Keeping a versioned storage key prevents older binaries from treating a
+	// refresh-token bundle as an OpenAI API key.
+	ProviderCodexSubscription Provider = "codex-subscription-v1"
+	ProviderGemini            Provider = "gemini"
+	ProviderNpm               Provider = "npm"
+	ProviderGraphite          Provider = "graphite"
+	ProviderMeta              Provider = "meta"
 )
 
 // Credential represents a stored credential.
@@ -61,7 +66,7 @@ func RegisterDynamicProvider(p Provider) {
 
 // KnownProviders returns a list of all known credential providers.
 func KnownProviders() []Provider {
-	base := []Provider{ProviderGitHub, ProviderAWS, ProviderAnthropic, ProviderClaude, ProviderOpenAI, ProviderGemini, ProviderNpm, ProviderGraphite, ProviderMeta}
+	base := []Provider{ProviderGitHub, ProviderAWS, ProviderAnthropic, ProviderClaude, ProviderCodex, ProviderOpenAI, ProviderGemini, ProviderNpm, ProviderGraphite, ProviderMeta}
 	known := make([]Provider, 0, len(base)+len(dynamicProviders))
 	known = append(known, base...)
 	return append(known, dynamicProviders...)
@@ -70,7 +75,7 @@ func KnownProviders() []Provider {
 // IsKnownProvider returns true if the provider is a known credential provider.
 func IsKnownProvider(p Provider) bool {
 	switch p {
-	case ProviderGitHub, ProviderAWS, ProviderAnthropic, ProviderClaude, ProviderOpenAI, ProviderGemini, ProviderNpm, ProviderGraphite, ProviderMeta:
+	case ProviderGitHub, ProviderAWS, ProviderAnthropic, ProviderClaude, ProviderCodex, ProviderOpenAI, ProviderGemini, ProviderNpm, ProviderGraphite, ProviderMeta:
 		return true
 	default:
 		for _, dp := range dynamicProviders {

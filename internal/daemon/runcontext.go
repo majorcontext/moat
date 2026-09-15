@@ -53,6 +53,7 @@ type RunContext struct {
 	AuthToken   string `json:"auth_token"`
 
 	Credentials          map[string][]CredentialEntry                `json:"credentials"`
+	CredentialBundles    map[string][]credential.CredentialBundle    `json:"-"` // contains secrets; never serialize
 	ExtraHeaders         map[string][]ExtraHeaderEntry               `json:"extra_headers"`
 	RemoveHeaders        map[string][]string                         `json:"remove_headers"`
 	TokenSubstitutions   map[string]TokenSubstitutionEntry           `json:"token_substitutions"`
@@ -90,12 +91,26 @@ func NewRunContext(runID string) *RunContext {
 	return &RunContext{
 		RunID:                runID,
 		Credentials:          make(map[string][]CredentialEntry),
+		CredentialBundles:    make(map[string][]credential.CredentialBundle),
 		ExtraHeaders:         make(map[string][]ExtraHeaderEntry),
 		RemoveHeaders:        make(map[string][]string),
 		TokenSubstitutions:   make(map[string]TokenSubstitutionEntry),
 		ResponseTransformers: make(map[string][]credential.ResponseTransformer),
 		RegisteredAt:         time.Now(),
 	}
+}
+
+// SetCredentialBundle implements credential.CredentialBundleConfigurer.
+func (rc *RunContext) SetCredentialBundle(host string, bundle credential.CredentialBundle) {
+	rc.mu.Lock()
+	defer rc.mu.Unlock()
+	for i, existing := range rc.CredentialBundles[host] {
+		if existing.ID == bundle.ID {
+			rc.CredentialBundles[host][i] = bundle
+			return
+		}
+	}
+	rc.CredentialBundles[host] = append(rc.CredentialBundles[host], bundle)
 }
 
 // CancelRefresh cancels the token refresh goroutine, if any.
@@ -311,6 +326,25 @@ func (rc *RunContext) ToProxyContextData() *proxy.RunContextData {
 	for host, creds := range rc.Credentials {
 		for _, c := range creds {
 			d.Credentials[host] = append(d.Credentials[host], proxy.CredentialHeader{Name: c.Name, Value: c.Value, Grant: c.Grant})
+		}
+	}
+	for _, bundles := range rc.CredentialBundles {
+		for _, bundle := range bundles {
+			converted := proxy.CredentialBundle{
+				ID: bundle.ID, Grant: bundle.Grant, RequireAll: bundle.RequireAll,
+				Scope: proxy.CredentialScope{
+					RequireTLS:   bundle.Scope.RequireTLS,
+					Origins:      append([]string(nil), bundle.Scope.Origins...),
+					Methods:      append([]string(nil), bundle.Scope.Methods...),
+					PathPrefixes: append([]string(nil), bundle.Scope.PathPrefixes...),
+				},
+			}
+			for _, replacement := range bundle.Replacements {
+				converted.Replacements = append(converted.Replacements, proxy.HeaderReplacement{
+					Name: replacement.Name, Placeholder: replacement.Placeholder, Value: replacement.Value,
+				})
+			}
+			d.CredentialBundles = append(d.CredentialBundles, converted)
 		}
 	}
 
