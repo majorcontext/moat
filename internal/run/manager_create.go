@@ -1510,7 +1510,6 @@ region = %s
 	var codexConfig *provider.ContainerConfig
 	hasCodexLocalMCP := opts.Config != nil && len(opts.Config.Codex.MCP) > 0
 	willStageCodex := !isPiRun && (needsCodexInit || hasCodexLocalMCP || (opts.Config != nil && opts.Config.ShouldSyncCodexLogs()))
-	scopeOpenAIKeyToShell = scopeOpenAIKeyToShell && willStageCodex
 	if willStageCodex {
 		codexProvider := provider.GetAgent("codex")
 		if codexProvider == nil {

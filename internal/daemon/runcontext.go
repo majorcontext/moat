@@ -53,7 +53,7 @@ type RunContext struct {
 	AuthToken   string `json:"auth_token"`
 
 	Credentials          map[string][]CredentialEntry                `json:"credentials"`
-	CredentialBundles    map[string][]credential.CredentialBundle    `json:"-"` // contains secrets; never serialize
+	CredentialBundles    map[string][]credential.Bundle              `json:"-"` // contains secrets; never serialize
 	ExtraHeaders         map[string][]ExtraHeaderEntry               `json:"extra_headers"`
 	RemoveHeaders        map[string][]string                         `json:"remove_headers"`
 	TokenSubstitutions   map[string]TokenSubstitutionEntry           `json:"token_substitutions"`
@@ -91,7 +91,7 @@ func NewRunContext(runID string) *RunContext {
 	return &RunContext{
 		RunID:                runID,
 		Credentials:          make(map[string][]CredentialEntry),
-		CredentialBundles:    make(map[string][]credential.CredentialBundle),
+		CredentialBundles:    make(map[string][]credential.Bundle),
 		ExtraHeaders:         make(map[string][]ExtraHeaderEntry),
 		RemoveHeaders:        make(map[string][]string),
 		TokenSubstitutions:   make(map[string]TokenSubstitutionEntry),
@@ -100,8 +100,8 @@ func NewRunContext(runID string) *RunContext {
 	}
 }
 
-// SetCredentialBundle implements credential.CredentialBundleConfigurer.
-func (rc *RunContext) SetCredentialBundle(host string, bundle credential.CredentialBundle) {
+// SetCredentialBundle implements credential.BundleConfigurer.
+func (rc *RunContext) SetCredentialBundle(host string, bundle credential.Bundle) {
 	rc.mu.Lock()
 	defer rc.mu.Unlock()
 	for i, existing := range rc.CredentialBundles[host] {

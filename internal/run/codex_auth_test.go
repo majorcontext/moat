@@ -11,7 +11,7 @@ import (
 
 func TestBuildRegisterRequest_CodexUsesSecretFreeCredentialRef(t *testing.T) {
 	rc := daemon.NewRunContext("run-codex")
-	rc.SetCredentialBundle("chatgpt.com", credential.CredentialBundle{
+	rc.SetCredentialBundle("chatgpt.com", credential.Bundle{
 		ID: "codex-subscription-v1",
 		Replacements: []credential.HeaderReplacement{
 			{Name: "Authorization", Placeholder: "fake", Value: "sentinel-real-access-token"},

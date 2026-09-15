@@ -17,7 +17,9 @@ import (
 	"github.com/majorcontext/moat/internal/provider"
 )
 
-type grantOptions struct{ deviceAuth bool }
+type grantOptions struct {
+	deviceAuth bool
+}
 type grantOptionsKey struct{}
 
 func WithGrantOptions(ctx context.Context, deviceAuth bool) context.Context {
@@ -51,16 +53,16 @@ var codexVersionPattern = regexp.MustCompile(`(?m)(\d+)\.(\d+)\.(\d+)`)
 // Execute starts a fresh Codex login in a private one-use CODEX_HOME. It does
 // not import or overwrite the user's ordinary ~/.codex/auth.json.
 func (g *Grant) Execute(ctx context.Context) (*provider.Credential, error) {
-	codexPath, err := exec.LookPath("codex")
-	if err != nil {
-		return nil, fmt.Errorf("Codex CLI is required for subscription login; install a supported codex-cli first: %w", err)
+	codexPath, lookupErr := exec.LookPath("codex")
+	if lookupErr != nil {
+		return nil, fmt.Errorf("Codex CLI is required for subscription login; install a supported codex-cli first: %w", lookupErr)
 	}
 	if err := checkCodexVersion(ctx, codexPath); err != nil {
 		return nil, err
 	}
-	tmpDir, err := os.MkdirTemp("", "moat-codex-login-*")
-	if err != nil {
-		return nil, fmt.Errorf("creating private Codex login directory: %w", err)
+	tmpDir, tempErr := os.MkdirTemp("", "moat-codex-login-*")
+	if tempErr != nil {
+		return nil, fmt.Errorf("creating private Codex login directory: %w", tempErr)
 	}
 	defer os.RemoveAll(tmpDir)
 	if err := os.Chmod(tmpDir, 0o700); err != nil {
@@ -83,16 +85,16 @@ func (g *Grant) Execute(ctx context.Context) (*provider.Credential, error) {
 	}
 
 	authPath := filepath.Join(tmpDir, "auth.json")
-	info, err := os.Stat(authPath)
-	if err != nil {
-		return nil, fmt.Errorf("Codex login did not produce auth.json: %w", err)
+	info, statErr := os.Stat(authPath)
+	if statErr != nil {
+		return nil, fmt.Errorf("Codex login did not produce auth.json: %w", statErr)
 	}
 	if info.Mode().Perm()&0o077 != 0 {
 		return nil, fmt.Errorf("Codex login produced auth.json with unsafe permissions %o", info.Mode().Perm())
 	}
-	authBytes, err := os.ReadFile(authPath)
-	if err != nil {
-		return nil, fmt.Errorf("Codex login did not produce auth.json: %w", err)
+	authBytes, readErr := os.ReadFile(authPath)
+	if readErr != nil {
+		return nil, fmt.Errorf("Codex login did not produce auth.json: %w", readErr)
 	}
 	var authFile codexAuthFile
 	if err := json.Unmarshal(authBytes, &authFile); err != nil {
@@ -109,9 +111,9 @@ func (g *Grant) Execute(ctx context.Context) (*provider.Credential, error) {
 			return nil, fmt.Errorf("Codex login returned conflicting account identities")
 		}
 	}
-	stored, err := json.Marshal(&authFile.Tokens.SubscriptionAuth)
-	if err != nil {
-		return nil, fmt.Errorf("encoding Codex subscription credential: %w", err)
+	stored, marshalErr := json.Marshal(&authFile.Tokens.SubscriptionAuth)
+	if marshalErr != nil {
+		return nil, fmt.Errorf("encoding Codex subscription credential: %w", marshalErr)
 	}
 	return &provider.Credential{
 		Provider:  string(credential.ProviderCodexSubscription),

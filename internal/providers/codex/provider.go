@@ -35,7 +35,7 @@ func (p *Provider) Grant(ctx context.Context) (*provider.Credential, error) {
 // atomic bundle. Older proxy implementations do not receive a fallback static
 // credential: failing closed is safer than widening a subscription token.
 func (p *Provider) ConfigureProxy(proxyConfig provider.ProxyConfigurer, cred *provider.Credential) {
-	bundles, ok := proxyConfig.(credential.CredentialBundleConfigurer)
+	bundles, ok := proxyConfig.(credential.BundleConfigurer)
 	if !ok {
 		return
 	}
@@ -43,10 +43,10 @@ func (p *Provider) ConfigureProxy(proxyConfig provider.ProxyConfigurer, cred *pr
 	if err != nil {
 		return
 	}
-	bundles.SetCredentialBundle(subscriptionHost, credential.CredentialBundle{
+	bundles.SetCredentialBundle(subscriptionHost, credential.Bundle{
 		ID:    string(credential.ProviderCodexSubscription),
 		Grant: "codex",
-		Scope: credential.CredentialScope{
+		Scope: credential.Scope{
 			RequireTLS:   true,
 			Origins:      []string{subscriptionOrigin},
 			Methods:      []string{"GET", "POST"},

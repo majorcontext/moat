@@ -17,14 +17,14 @@ import (
 type mockProxyConfigurer struct {
 	credentials map[string]string
 	headers     map[string]map[string]string
-	bundles     map[string]credential.CredentialBundle
+	bundles     map[string]credential.Bundle
 }
 
 func newMockProxyConfigurer() *mockProxyConfigurer {
 	return &mockProxyConfigurer{
 		credentials: make(map[string]string),
 		headers:     make(map[string]map[string]string),
-		bundles:     make(map[string]credential.CredentialBundle),
+		bundles:     make(map[string]credential.Bundle),
 	}
 }
 
@@ -61,7 +61,7 @@ func (m *mockProxyConfigurer) RemoveRequestHeader(host, header string) {}
 
 func (m *mockProxyConfigurer) SetTokenSubstitution(host, placeholder, realToken string) {}
 
-func (m *mockProxyConfigurer) SetCredentialBundle(host string, bundle credential.CredentialBundle) {
+func (m *mockProxyConfigurer) SetCredentialBundle(host string, bundle credential.Bundle) {
 	m.bundles[host] = bundle
 }
 

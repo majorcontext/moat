@@ -185,27 +185,27 @@ type HeaderReplacement struct {
 	Value       string
 }
 
-// CredentialScope constrains credential injection to an exact request shape.
-type CredentialScope struct {
+// Scope constrains credential injection to an exact request shape.
+type Scope struct {
 	RequireTLS   bool
 	Origins      []string
 	Methods      []string
 	PathPrefixes []string
 }
 
-// CredentialBundle groups multiple headers that must be replaced atomically.
-type CredentialBundle struct {
+// Bundle groups multiple headers that must be replaced atomically.
+type Bundle struct {
 	ID           string
 	Grant        string
-	Scope        CredentialScope
+	Scope        Scope
 	Replacements []HeaderReplacement
 	RequireAll   bool
 }
 
-// CredentialBundleConfigurer is implemented by proxy contexts that support
+// BundleConfigurer is implemented by proxy contexts that support
 // atomic, request-scoped multi-header credentials.
-type CredentialBundleConfigurer interface {
-	SetCredentialBundle(host string, bundle CredentialBundle)
+type BundleConfigurer interface {
+	SetCredentialBundle(host string, bundle Bundle)
 }
 
 // IsOAuthToken returns true if the token appears to be a Claude Code OAuth token.

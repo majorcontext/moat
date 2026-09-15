@@ -58,9 +58,9 @@ func TestRunContext_SetCredentialHeader(t *testing.T) {
 
 func TestRunContext_SetCredentialBundleConvertsAtomically(t *testing.T) {
 	rc := NewRunContext("run-bundle")
-	rc.SetCredentialBundle("chatgpt.com", credential.CredentialBundle{
+	rc.SetCredentialBundle("chatgpt.com", credential.Bundle{
 		ID: "codex-subscription-v1", Grant: "codex", RequireAll: true,
-		Scope: credential.CredentialScope{RequireTLS: true, Origins: []string{"https://chatgpt.com"}, Methods: []string{"POST"}, PathPrefixes: []string{"/backend-api/codex"}},
+		Scope: credential.Scope{RequireTLS: true, Origins: []string{"https://chatgpt.com"}, Methods: []string{"POST"}, PathPrefixes: []string{"/backend-api/codex"}},
 		Replacements: []credential.HeaderReplacement{
 			{Name: "Authorization", Placeholder: "fake", Value: "real"},
 			{Name: "ChatGPT-Account-ID", Placeholder: "fake-account", Value: "real-account"},

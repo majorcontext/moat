@@ -53,8 +53,8 @@ func (p *Provider) Refresh(ctx context.Context, _ provider.ProxyConfigurer, cred
 		AccessToken  string `json:"access_token"`
 		RefreshToken string `json:"refresh_token"`
 	}
-	if err := json.NewDecoder(limited).Decode(&refreshed); err != nil {
-		return nil, fmt.Errorf("parsing Codex refresh response: %w", err)
+	if decodeErr := json.NewDecoder(limited).Decode(&refreshed); decodeErr != nil {
+		return nil, fmt.Errorf("parsing Codex refresh response: %w", decodeErr)
 	}
 	if refreshed.AccessToken == "" {
 		return nil, fmt.Errorf("Codex refresh response omitted access_token")
