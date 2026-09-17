@@ -135,7 +135,7 @@ moat run [flags] [path] [-- command]
 | `--no-prompt` | Never prompt to grant missing credentials; fail with the missing-grants error instead. Also set via `MOAT_NO_PROMPT=1`. Prompting only happens on an interactive terminal. |
 | `--tty-trace FILE` | Capture terminal I/O to file for debugging (e.g., `session.json`) |
 
-`--grant` **replaces** `moat.yaml`'s configured grants rather than adding to them — this includes grants derived from [`agents:`](./02-moat-yaml.md#agents). `moat run --grant github` with `agents: [claude, codex]` runs with only the `github` grant; neither agent's credential is injected, so an agent that needs one fails to authenticate inside the container. Pass every grant you need explicitly (`--grant github --grant claude --grant openai`), or omit `--grant` to use `moat.yaml`'s grants (including `agents:`-derived ones) unmodified.
+`--grant` **replaces** `moat.yaml`'s configured grants rather than adding to them — this includes grants derived from [`agents:`](./02-moat-yaml.md#agents). `moat run --grant github` with `agents: [claude, codex]` runs with only the `github` grant; neither agent's credential is injected, so an agent that needs one fails to authenticate inside the container. Pass every grant you need explicitly (`--grant github --grant claude --grant codex`), or omit `--grant` to use `moat.yaml`'s grants (including `agents:`-derived ones) unmodified.
 
 ### Execution modes
 
@@ -676,6 +676,21 @@ moat run --profile lunaroute -- claude
 ```
 
 The models the gateway serves can live with the profile too, so they do not have to be repeated per project — see [Profile environment variables](./03-environment.md#profile-environment-variables).
+
+### moat grant codex
+
+Starts a separate ChatGPT/Codex login owned by Moat. The host Codex CLI must be
+version 0.146.x–0.154.x. Use `--device-auth` for device-code login. Moat does not
+copy the user's normal Codex credential cache.
+
+```bash
+moat grant codex
+moat grant codex --device-auth
+```
+
+Revoke it with `moat revoke codex`. The credential is stored under an internal
+versioned key, but `moat grant list` and `moat revoke` both use the name you
+granted.
 
 ### moat grant openai
 

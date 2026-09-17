@@ -18,7 +18,8 @@ Supported providers:
   github            GitHub token
   claude            Claude Code OAuth token
   anthropic         Anthropic API key
-  openai            OpenAI API key or OAuth credentials
+  codex             ChatGPT subscription login for Codex CLI
+  openai            OpenAI API key
   aws               AWS IAM role configuration
   mcp:<name>        MCP server credential (mcp-<name> also accepted)
 
@@ -53,7 +54,11 @@ func init() {
 func runRevoke(cmd *cobra.Command, args []string) error {
 	providerName := args[0]
 
-	provider := credential.Provider(providerName)
+	// Revoke by the name users grant. The Codex subscription is stored under a
+	// versioned internal key that is deliberately not a public grant name, so
+	// without this mapping `moat revoke codex` would report "no credential
+	// found" for a credential `moat grant codex` had just created.
+	provider := credential.StoreKeyForGrant(providerName)
 
 	key, err := credential.DefaultEncryptionKey()
 	if err != nil {

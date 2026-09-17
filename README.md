@@ -92,10 +92,13 @@ moat claude -p "fix the failing tests"  # Non-interactive
 ### Codex
 
 ```bash
-moat grant openai      # One-time: imports your Codex credentials
+moat grant codex       # One-time: separate ChatGPT subscription login for Moat
 moat codex             # Interactive mode
 moat codex -p "explain this codebase"   # Non-interactive
 ```
+
+Use `moat grant openai` instead when you want API-key billing. The two grants
+are separate and can coexist; Codex prefers the subscription grant.
 
 ### GitHub Copilot CLI
 

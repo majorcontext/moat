@@ -41,6 +41,7 @@ import (
 	"github.com/majorcontext/moat/internal/provider"
 	awsprov "github.com/majorcontext/moat/internal/providers/aws"
 	"github.com/majorcontext/moat/internal/providers/claude" // only for settings types (LoadAllSettings, Settings, MarketplaceConfig) - provider setup uses provider interfaces
+	codexprov "github.com/majorcontext/moat/internal/providers/codex"
 	copilotprov "github.com/majorcontext/moat/internal/providers/copilot"
 	"github.com/majorcontext/moat/internal/runctx"
 	"github.com/majorcontext/moat/internal/secrets"
@@ -226,6 +227,13 @@ func (m *Manager) Create(ctx context.Context, opts Options) (resRun *Run, retErr
 	// not, they are appended to providerEnv as before so the key is not lost.
 	scopeAnthropicKeyToShell := hasGrant(opts.Grants, "claude") && hasGrant(opts.Grants, "anthropic")
 	var anthropicShellEnv []string
+	scopeOpenAIKeyToShell := hasGrant(opts.Grants, "codex") && hasGrant(opts.Grants, "openai")
+	var openaiShellEnv []string
+	// Set when the codex grant actually resolved to a stored subscription
+	// rather than falling back to an OpenAI API key. Only that case needs the
+	// daemon's bundle capabilities and a version-verified Codex CLI, so gates
+	// keyed on the grant name alone would punish API-key-only users.
+	var codexSubscriptionAuth bool
 	var hostAddr string // Host address for proxy (may be rewritten for custom networks)
 	var mounts []container.MountConfig
 	var tmpfsMounts []container.TmpfsMount
@@ -442,10 +450,10 @@ func (m *Manager) Create(ctx context.Context, opts Options) (resRun *Run, retErr
 				}
 
 				// Map grant name to credential store key (handles aliases like
-				// "openai" → codex provider but credential stored under "openai").
+				// Logical grants may resolve to a versioned internal store key.
 				credName := credentialStoreKey(grantName, grant)
 				log.Debug("processing grant", "grant", grant, "credName", credName)
-				cred, getErr := store.Get(credName)
+				cred, actualCredName, getErr := loadCredentialForGrant(store, grantName, grant)
 				if getErr != nil {
 					// Should not happen: validateGrants checks before resource allocation.
 					cleanupDaemonRun()
@@ -453,6 +461,10 @@ func (m *Manager) Create(ctx context.Context, opts Options) (resRun *Run, retErr
 				}
 				// Convert credential for new provider interface
 				provCred := provider.FromLegacy(cred)
+				credName = actualCredName
+				if credName == credential.ProviderCodexSubscription {
+					codexSubscriptionAuth = true
+				}
 
 				// Store MCP credential on RunContext so the daemon proxy can
 				// resolve it by grant name during MCP relay requests. This
@@ -462,6 +474,10 @@ func (m *Manager) Create(ctx context.Context, opts Options) (resRun *Run, retErr
 				if opts.Config != nil {
 					for _, mcp := range opts.Config.MCP {
 						if mcp.Auth != nil && mcp.Auth.Grant == grant {
+							if credName == credential.ProviderCodexSubscription {
+								cleanupDaemonRun()
+								return nil, fmt.Errorf("MCP server %q cannot use the Codex subscription grant; use an openai API-key grant", mcp.Name)
+							}
 							serverHost := mcp.URL
 							if u, parseErr := url.Parse(mcp.URL); parseErr == nil {
 								serverHost = u.Host
@@ -474,7 +490,11 @@ func (m *Manager) Create(ctx context.Context, opts Options) (resRun *Run, retErr
 				// Use new provider registry (supports aliases like "anthropic" -> "claude")
 				// MCP grants (e.g., "mcp:test") have no registered provider — they are
 				// handled by the proxy MCP relay, not by provider.ConfigureProxy.
-				prov := provider.Get(grantName)
+				providerName := grantName
+				if credName == credential.ProviderOpenAI && provider.ResolveName(grantName) == providerCodex {
+					providerName = "openai"
+				}
+				prov := provider.Get(providerName)
 				if prov == nil {
 					continue
 				}
@@ -492,6 +512,8 @@ func (m *Manager) Create(ctx context.Context, opts Options) (resRun *Run, retErr
 				log.Debug("adding provider env vars", "provider", credName, "vars", envVars)
 				if scopeAnthropicKeyToShell && credName == credential.ProviderAnthropic {
 					anthropicShellEnv = append(anthropicShellEnv, envVars...)
+				} else if scopeOpenAIKeyToShell && credName == credential.ProviderOpenAI {
+					openaiShellEnv = append(openaiShellEnv, envVars...)
 				} else {
 					providerEnv = append(providerEnv, envVars...)
 				}
@@ -671,6 +693,12 @@ func (m *Manager) Create(ctx context.Context, opts Options) (resRun *Run, retErr
 		// message rather than letting the run register and misbehave.
 		if !slices.Contains(daemonCapabilities, daemon.CapHostGatewayV2) {
 			return nil, fmt.Errorf("proxy daemon is too old for this CLI (missing 'host-gateway-v2' capability); run 'moat proxy restart' to upgrade")
+		}
+		// Only subscription auth needs secret-free refs and scoped bundles. A
+		// codex grant that fell back to an OpenAI API key registers through the
+		// ordinary credential path and works against any daemon.
+		if codexSubscriptionAuth && (!slices.Contains(daemonCapabilities, daemon.CapCredentialRefs) || !slices.Contains(daemonCapabilities, daemon.CapCredentialBundles)) {
+			return nil, fmt.Errorf("proxy daemon is too old for Codex subscription auth; run 'moat proxy restart' to upgrade")
 		}
 
 		// Get proxy host address — needed for registration, proxy URL, and firewall.
@@ -994,6 +1022,21 @@ region = %s
 		if err != nil {
 			cleanupDaemonRun()
 			return nil, fmt.Errorf("resolving versions: %w", err)
+		}
+	}
+	// The subscription adapter targets a specific Codex CLI range. Check the
+	// version the image will actually install: ResolveVersions only fills in
+	// runtime deps, so an unpinned "codex-cli" still has an empty Version here
+	// and the registry default is what GenerateDockerfile will use.
+	if codexSubscriptionAuth {
+		for _, dep := range depList {
+			if dep.Name != "codex-cli" {
+				continue
+			}
+			if err := codexprov.ValidateVersion(effectiveCodexVersion(dep)); err != nil {
+				cleanupDaemonRun()
+				return nil, err
+			}
 		}
 	}
 
@@ -1430,13 +1473,16 @@ region = %s
 	// needs no config file, and the section explaining the scoping is what stops
 	// an agent from "fixing" the placeholder key by exporting it globally.
 	var renderedContext string
-	if opts.Config != nil || scopeAnthropicKeyToShell {
+	if opts.Config != nil || scopeAnthropicKeyToShell || scopeOpenAIKeyToShell {
 		buildOpts := runctx.BuildOptions{WorkspaceMode: opts.WorkspaceMode}
 		if dockerConfig != nil {
 			buildOpts.DockerMode = dockerConfig.Mode
 		}
 		if scopeAnthropicKeyToShell {
 			buildOpts.AnthropicKeyEnv = "ANTHROPIC_API_KEY"
+		}
+		if scopeOpenAIKeyToShell {
+			buildOpts.OpenAIKeyEnv = "OPENAI_API_KEY"
 		}
 		rc := runctx.BuildFromConfig(opts.Config, r.ID, buildOpts)
 		renderedContext = runctx.Render(rc)
@@ -1482,7 +1528,8 @@ region = %s
 	// This includes auth config for OpenAI tokens.
 	var codexConfig *provider.ContainerConfig
 	hasCodexLocalMCP := opts.Config != nil && len(opts.Config.Codex.MCP) > 0
-	if !isPiRun && (needsCodexInit || hasCodexLocalMCP || (opts.Config != nil && opts.Config.ShouldSyncCodexLogs())) {
+	willStageCodex := !isPiRun && (needsCodexInit || hasCodexLocalMCP || (opts.Config != nil && opts.Config.ShouldSyncCodexLogs()))
+	if willStageCodex {
 		codexProvider := provider.GetAgent("codex")
 		if codexProvider == nil {
 			cleanupDaemonRun()
@@ -1500,7 +1547,21 @@ region = %s
 		codexConfig = cfg
 		mounts = append(mounts, codexConfig.Mounts...)
 		proxyEnv = append(proxyEnv, codexConfig.Env...)
+		openaiShellEnv = nil
 	}
+
+	// Codex staging did not run, so no BASH_ENV file was staged for the OpenAI
+	// key. Mirror the Claude fallback above: export it container-wide rather
+	// than dropping it, since without Codex in play nothing can be overridden.
+	if len(openaiShellEnv) > 0 {
+		log.Debug("codex staging skipped; exporting openai key container-wide", "vars", openaiShellEnv)
+		proxyEnv = append(proxyEnv, openaiShellEnv...)
+	}
+
+	// Claude and Codex can each stage a BASH_ENV file, and only one BASH_ENV
+	// can win. Reconcile explicitly rather than depending on append order plus
+	// the runtime preferring the last duplicate.
+	proxyEnv = resolveBashEnv(proxyEnv)
 
 	// Set up GitHub Copilot CLI staging directory using the provider interface.
 	var copilotConfig *provider.ContainerConfig
@@ -2741,6 +2802,11 @@ func buildRegisterRequest(rc *daemon.RunContext, grants []string) daemon.Registe
 		AWSConfig:         rc.AWSConfig,
 		CredProfile:       credential.ActiveProfile,
 	}
+	// A credential bundle holds secrets and is never serialized, so the daemon
+	// has to resolve it from the encrypted store itself. Deriving the refs from
+	// the installed bundles keeps the request secret-free and avoids asking for
+	// a ref when the grant resolved to an ordinary API key instead.
+	req.CredentialRefs = rc.CredentialBundleGrants()
 
 	for host, creds := range rc.Credentials {
 		for _, cred := range creds {
@@ -2895,6 +2961,61 @@ func grantToPlaceholder(grant string) string {
 	default:
 		return credential.ProxyInjectedPlaceholder
 	}
+}
+
+// effectiveCodexVersion is the codex-cli version the image will actually
+// install. ResolveVersions only fills in runtime dependencies, so an unpinned
+// npm dep such as codex-cli still has an empty Version here and the registry
+// default is what GenerateDockerfile uses.
+func effectiveCodexVersion(dep deps.Dependency) string {
+	if dep.Version != "" {
+		return dep.Version
+	}
+	if spec, ok := deps.GetSpec(dep.Name); ok {
+		return spec.Default
+	}
+	return ""
+}
+
+// resolveBashEnv collapses duplicate BASH_ENV entries down to a single winner.
+//
+// Both agent providers may stage one: Claude for a shell-scoped Anthropic key,
+// Codex for a shell-scoped OpenAI key. The Codex file sources the Claude file,
+// so when both are present Codex is the only choice that keeps both keys
+// reachable — picking Claude's would silently drop OPENAI_API_KEY and the
+// codex() guard function that keeps nested launches on subscription auth.
+//
+// Leaving both in the slice would make correctness depend on whether the
+// container runtime takes the first or the last occurrence of a repeated key.
+func resolveBashEnv(env []string) []string {
+	const prefix = "BASH_ENV="
+	winner := ""
+	count := 0
+	for _, item := range env {
+		if !strings.HasPrefix(item, prefix) {
+			continue
+		}
+		count++
+		if winner == "" || strings.Contains(item, codexprov.OpenAIShellEnvFileName) {
+			winner = item
+		}
+	}
+	if count < 2 {
+		return env
+	}
+	out := make([]string, 0, len(env)-count+1)
+	written := false
+	for _, item := range env {
+		if strings.HasPrefix(item, prefix) {
+			if !written {
+				out = append(out, winner)
+				written = true
+			}
+			continue
+		}
+		out = append(out, item)
+	}
+	return out
 }
 
 // hasGrant checks whether a grant name appears in the grants list.

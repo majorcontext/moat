@@ -2,74 +2,84 @@ package codex
 
 import (
 	"context"
+	"time"
 
+	"github.com/majorcontext/moat/internal/credential"
+	"github.com/majorcontext/moat/internal/log"
 	"github.com/majorcontext/moat/internal/provider"
 )
 
-// Provider implements provider.CredentialProvider and provider.AgentProvider
-// for OpenAI Codex CLI credentials.
-type Provider struct{}
-
-// Ensure Provider implements the required interfaces.
-var (
-	_ provider.CredentialProvider = (*Provider)(nil)
-	_ provider.AgentProvider      = (*Provider)(nil)
+const (
+	subscriptionHost       = "chatgpt.com"
+	subscriptionOrigin     = "https://chatgpt.com"
+	subscriptionPathPrefix = "/backend-api/codex"
+	syntheticAccountID     = "moat-proxy-codex-account"
 )
 
-func init() {
-	provider.Register(&Provider{})
-	// Register "openai" as an alias so credentials stored under either name work
-	provider.RegisterAlias("openai", "codex")
-}
+type Provider struct{}
 
-// Name returns the provider identifier.
-func (p *Provider) Name() string {
-	return "codex"
-}
+var (
+	_ provider.CredentialProvider  = (*Provider)(nil)
+	_ provider.AgentProvider       = (*Provider)(nil)
+	_ provider.RefreshableProvider = (*Provider)(nil)
+)
 
-// Grant acquires OpenAI credentials interactively or from environment.
+func init() { provider.Register(&Provider{}) }
+
+func (p *Provider) Name() string { return "codex" }
+
 func (p *Provider) Grant(ctx context.Context) (*provider.Credential, error) {
-	g := NewGrant()
-	cred, err := g.Execute(ctx)
-	if err != nil {
-		return nil, err
+	return NewGrant().Execute(ctx)
+}
+
+// ConfigureProxy installs the real access token and account identity as one
+// atomic bundle. Older proxy implementations do not receive a fallback static
+// credential: failing closed is safer than widening a subscription token.
+func (p *Provider) ConfigureProxy(proxyConfig provider.ProxyConfigurer, cred *provider.Credential) {
+	bundles, ok := proxyConfig.(credential.BundleConfigurer)
+	if !ok {
+		// Failing closed is right, but failing closed silently leaves the user
+		// staring at 401s with nothing to explain them.
+		log.Warn("Codex subscription not installed: proxy does not support credential bundles")
+		return
 	}
-	return cred, nil
+	auth, err := decodeSubscriptionAuth(cred)
+	if err != nil {
+		log.Warn("Codex subscription not installed: stored credential is unreadable", "error", err)
+		return
+	}
+	bundles.SetCredentialBundle(subscriptionHost, credential.Bundle{
+		ID:    string(credential.ProviderCodexSubscription),
+		Grant: "codex",
+		Scope: credential.Scope{
+			RequireTLS:   true,
+			Origins:      []string{subscriptionOrigin},
+			Methods:      []string{"GET", "POST"},
+			PathPrefixes: []string{subscriptionPathPrefix},
+		},
+		RequireAll: true,
+		Replacements: []credential.HeaderReplacement{
+			{Name: "Authorization", Placeholder: "Bearer " + credential.GenerateAccessTokenPlaceholder(syntheticAccountID), Value: "Bearer " + auth.AccessToken},
+			{Name: "ChatGPT-Account-ID", Placeholder: syntheticAccountID, Value: auth.AccountID},
+		},
+	})
 }
 
-// ConfigureProxy sets up proxy headers for OpenAI API.
-// The proxy intercepts requests to api.openai.com and injects the
-// Authorization header with the real API key.
-func (p *Provider) ConfigureProxy(proxy provider.ProxyConfigurer, cred *provider.Credential) {
-	// OpenAI uses Bearer token authentication for API keys
-	proxy.SetCredentialWithGrant("api.openai.com", "Authorization", "Bearer "+cred.Token, "codex")
-}
+// Subscription auth is represented by synthetic auth.json, not an API-key env
+// var. In particular OPENAI_API_KEY must not override Codex's selected mode.
+func (p *Provider) ContainerEnv(*provider.Credential) []string { return nil }
 
-// ContainerEnv returns environment variables for OpenAI.
-// Sets OPENAI_API_KEY with a placeholder that looks like a valid API key.
-// This tells Codex CLI it's authenticated (skips login prompts) and
-// bypasses local format validation.
-// The real token is injected by the proxy at the network layer.
-func (p *Provider) ContainerEnv(cred *provider.Credential) []string {
-	return []string{"OPENAI_API_KEY=" + OpenAIAPIKeyPlaceholder}
-}
-
-// ContainerMounts returns mounts needed for OpenAI/Codex.
-// This method returns empty because Codex setup uses the staging directory
-// approach instead of direct mounts. The staging directory is populated by
-// PrepareContainer and copied to the container at startup by moat-init.
-func (p *Provider) ContainerMounts(cred *provider.Credential, containerHome string) ([]provider.MountConfig, string, error) {
-	// No direct mounts - we use the staging directory approach instead
+func (p *Provider) ContainerMounts(*provider.Credential, string) ([]provider.MountConfig, string, error) {
 	return nil, "", nil
 }
 
-// Cleanup cleans up OpenAI resources.
-func (p *Provider) Cleanup(cleanupPath string) {
-	// Nothing to clean up - staging directory is handled by the caller
+func (p *Provider) Cleanup(string) {}
+
+func (p *Provider) ImpliedDependencies() []string { return nil }
+
+func (p *Provider) CanRefresh(cred *provider.Credential) bool {
+	_, err := decodeSubscriptionAuth(cred)
+	return err == nil
 }
 
-// ImpliedDependencies returns dependencies implied by the Codex provider.
-// Codex doesn't imply any specific tool dependencies.
-func (p *Provider) ImpliedDependencies() []string {
-	return nil
-}
+func (p *Provider) RefreshInterval() time.Duration { return 5 * time.Minute }

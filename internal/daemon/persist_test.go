@@ -480,8 +480,7 @@ func TestResolveCredentials_OpenAI(t *testing.T) {
 			credential.ProviderOpenAI: {Provider: credential.ProviderOpenAI, Token: "sk-test"},
 		},
 	}
-	// "openai" resolves to "codex" via provider alias, but credentials
-	// are stored under credential.ProviderOpenAI ("openai").
+	// OpenAI API-key auth remains independent from Codex subscription auth.
 	if err := resolveCredentials(rc, []string{"openai"}, nil, store); err != nil {
 		t.Fatalf("resolveCredentials(openai) = %v, want nil", err)
 	}
