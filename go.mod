@@ -15,7 +15,7 @@ require (
 	github.com/docker/docker v28.5.2+incompatible
 	github.com/docker/go-connections v0.6.0
 	github.com/go-git/go-git/v5 v5.17.1
-	github.com/majorcontext/gatekeeper v0.22.2-0.20260915004136-f4687eccfea6
+	github.com/majorcontext/gatekeeper v0.23.0
 	github.com/majorcontext/keep v0.6.0
 	github.com/mattn/go-isatty v0.0.20
 	github.com/moby/buildkit v0.28.1
