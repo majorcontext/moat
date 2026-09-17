@@ -680,12 +680,15 @@ The models the gateway serves can live with the profile too, so they do not have
 ### moat grant codex
 
 Starts a separate ChatGPT/Codex login owned by Moat. The host Codex CLI must be
-version 0.146.x–0.154.x. Use `--device-auth` for device-code login. Moat does not
-copy the user's normal Codex credential cache.
+version 0.146.x–0.154.x. Moat does not copy the user's normal Codex credential
+cache.
+
+The login always uses Codex's device-code flow, which prints a link and a
+one-time code rather than redirecting to a localhost callback, so the same
+command works locally, over SSH, and on headless hosts.
 
 ```bash
 moat grant codex
-moat grant codex --device-auth
 ```
 
 Revoke it with `moat revoke codex`. The credential is stored under an internal

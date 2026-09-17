@@ -15,16 +15,8 @@ import (
 
 	"github.com/majorcontext/moat/internal/credential"
 	"github.com/majorcontext/moat/internal/provider"
+	"github.com/majorcontext/moat/internal/ui"
 )
-
-type grantOptions struct {
-	deviceAuth bool
-}
-type grantOptionsKey struct{}
-
-func WithGrantOptions(ctx context.Context, deviceAuth bool) context.Context {
-	return context.WithValue(ctx, grantOptionsKey{}, grantOptions{deviceAuth: deviceAuth})
-}
 
 // SubscriptionAuth is the encrypted payload stored for a Codex subscription.
 // It is never staged into the container or sent over the daemon API.
@@ -76,11 +68,22 @@ func (g *Grant) Execute(ctx context.Context) (*provider.Credential, error) {
 		return nil, fmt.Errorf("writing private Codex login config: %w", err)
 	}
 
-	args := []string{"login"}
-	if opts, _ := ctx.Value(grantOptionsKey{}).(grantOptions); opts.deviceAuth {
-		args = append(args, "--device-auth")
-	}
-	cmd := exec.CommandContext(ctx, codexPath, args...)
+	// Always the device-code flow. Ordinary `codex login` completes through a
+	// browser redirect to a localhost callback on the machine running Codex,
+	// which only works where that machine has a usable browser — so it would
+	// make the grant succeed locally and fail over SSH or on a headless host,
+	// and force the user to know which case they are in before running it.
+	// Device code prints a link and a one-time code instead: the browser can
+	// be anywhere, so one flow covers every case and there is nothing to
+	// choose. It yields the same ChatGPT-backed credentials, not an API key.
+	//
+	// It also keeps Codex from advising `codex login --device-auth` on its way
+	// past, which read against this flow would send the user to overwrite the
+	// very ~/.codex credential the private CODEX_HOME exists to protect.
+	ui.Info("Moat is starting a separate Codex login in a private, temporary CODEX_HOME.")
+	ui.Info("Your own ~/.codex login is not read or changed.")
+
+	cmd := exec.CommandContext(ctx, codexPath, "login", "--device-auth")
 	cmd.Env = isolatedCodexEnv(os.Environ(), tmpDir)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	if err := cmd.Run(); err != nil {

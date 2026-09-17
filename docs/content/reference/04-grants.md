@@ -235,7 +235,7 @@ $ moat run --grant claude --grant anthropic ./my-project
 ## Codex subscription
 
 ```bash
-moat grant codex [--device-auth]
+moat grant codex
 ```
 
 This launches an isolated ChatGPT login and stores a separately issued refresh

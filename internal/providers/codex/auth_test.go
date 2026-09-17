@@ -112,3 +112,30 @@ func (r rewriteTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	clone.URL, _ = clone.URL.Parse(r.target)
 	return http.DefaultTransport.RoundTrip(clone)
 }
+
+// The grant must always use the device-code flow. Ordinary `codex login`
+// finishes through a browser redirect to a localhost callback on the machine
+// running Codex, so it succeeds on a laptop and fails over SSH or on a
+// headless host — and no flag should make the user predict which they are.
+func TestGrantAlwaysUsesDeviceCodeLogin(t *testing.T) {
+	body, err := os.ReadFile("grant.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(body)
+
+	if !strings.Contains(source, `exec.CommandContext(ctx, codexPath, "login", "--device-auth")`) {
+		t.Error("the grant does not invoke `codex login --device-auth` unconditionally")
+	}
+	// No opt-out: a browser-login path would reintroduce the case that only
+	// works on some machines, and Codex's own advice to reach it names a
+	// command that writes to the user's real ~/.codex.
+	if strings.Contains(source, "grantOptions") || strings.Contains(source, "deviceAuth") {
+		t.Error("device-code login must not be conditional on a grant option")
+	}
+	// The private CODEX_HOME is the guarantee worth stating out loud, since
+	// Codex's own output gives the user no reason to expect it.
+	if !strings.Contains(source, "private, temporary CODEX_HOME") {
+		t.Error("the grant should tell the user its login is isolated from ~/.codex")
+	}
+}

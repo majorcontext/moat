@@ -23,9 +23,16 @@ temporary `CODEX_HOME`; it never reads or changes your normal
 
 ```bash
 moat grant codex
-# For a terminal without a usable browser:
-moat grant codex --device-auth
 ```
+
+The login uses Codex's device-code flow: it prints a link and a one-time code,
+and you sign in from a browser anywhere — the same command works on your laptop,
+over SSH, and on a headless host. Do not run `codex login` yourself to complete
+it; that writes to your ordinary `CODEX_HOME` instead of Moat's temporary one.
+
+Device-code login is in beta and a workspace administrator can disable it. If
+it is unavailable for your account, `moat grant openai` with an API key is the
+supported alternative.
 
 Moat stores its separately issued refresh credential encrypted as
 `codex-subscription-v1`. The temporary plaintext login directory is deleted.
