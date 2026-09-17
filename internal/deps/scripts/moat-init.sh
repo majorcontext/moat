@@ -203,11 +203,21 @@ fi
 # from the staging area to their final locations (~/.codex).
 if [ -n "$MOAT_CODEX_INIT" ] && [ -d "$MOAT_CODEX_INIT" ]; then
 
-  CODEX_VERSION="$(codex --version 2>/dev/null | awk '{print $2}')"
-  case "$CODEX_VERSION" in
-    0.146.*|0.147.*|0.148.*|0.149.*|0.150.*|0.151.*|0.152.*|0.153.*|0.154.*) ;;
-    *) echo "Moat: unsupported Codex CLI version $CODEX_VERSION (supported: 0.146.x through 0.154.x)" >&2; exit 1 ;;
-  esac
+  # Subscription auth stages a synthetic auth.json whose format is only known
+  # to work on a verified Codex range, so re-check the executable that actually
+  # got installed. Every other mode (API key, MCP-only, log sync) stages files
+  # that any Codex version can read, and must not be blocked by this gate.
+  if [ "$MOAT_CODEX_SUBSCRIPTION_AUTH" = "1" ]; then
+    if ! command -v codex >/dev/null 2>&1; then
+      echo "Moat: the codex grant needs the codex-cli dependency; add 'codex-cli' to dependencies in moat.yaml" >&2
+      exit 1
+    fi
+    CODEX_VERSION="$(codex --version 2>/dev/null | awk '{print $2}')"
+    case "$CODEX_VERSION" in
+      0.146.*|0.147.*|0.148.*|0.149.*|0.150.*|0.151.*|0.152.*|0.153.*|0.154.*) ;;
+      *) echo "Moat: unsupported Codex CLI version ${CODEX_VERSION:-unknown} for subscription auth (supported: 0.146.x through 0.154.x); pin codex-cli@0.154.0 in moat.yaml dependencies or use 'moat grant openai'" >&2; exit 1 ;;
+    esac
+  fi
   # Determine target home directory
   if [ "$(id -u)" = "0" ] && id moatuser >/dev/null 2>&1; then
     TARGET_HOME="/home/moatuser"

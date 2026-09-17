@@ -1,6 +1,7 @@
 package run
 
 import (
+	"errors"
 	"sort"
 	"strings"
 
@@ -156,13 +157,21 @@ func credentialStoreKey(baseName, fullGrant string) credential.Provider {
 	return credential.Provider(canonical)
 }
 
+// loadCredentialForGrant resolves a grant to the stored credential it should
+// use, plus the store key that credential actually came from.
+//
+// The logical codex grant prefers subscription auth and accepts a separately
+// stored OpenAI API key as a compatibility fallback. That fallback is limited
+// to a genuinely absent subscription: a decrypt or read failure means the
+// credential exists but cannot be opened, and silently switching such a user
+// onto API-key billing would hide the actionable error (see classifyMissingReason).
 func loadCredentialForGrant(store credential.Store, baseName, fullGrant string) (*credential.Credential, credential.Provider, error) {
 	key := credentialStoreKey(baseName, fullGrant)
 	cred, err := store.Get(key)
 	if err == nil {
 		return cred, key, nil
 	}
-	if provider.ResolveName(baseName) == providerCodex {
+	if errors.Is(err, credential.ErrNotFound) && provider.ResolveName(baseName) == providerCodex {
 		if fallback, fallbackErr := store.Get(credential.ProviderOpenAI); fallbackErr == nil {
 			return fallback, credential.ProviderOpenAI, nil
 		}

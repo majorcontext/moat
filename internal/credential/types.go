@@ -37,6 +37,28 @@ const (
 	ProviderMeta              Provider = "meta"
 )
 
+// StoreKeyForGrant maps a user-facing grant name to the key its credential is
+// stored under. They differ only where a grant deliberately keeps an internal,
+// versioned identity: the Codex subscription is stored as
+// ProviderCodexSubscription so an older binary cannot mistake a refresh-token
+// bundle for an OpenAI API key.
+func StoreKeyForGrant(grant string) Provider {
+	if grant == string(ProviderCodex) {
+		return ProviderCodexSubscription
+	}
+	return Provider(grant)
+}
+
+// GrantNameForStoreKey is the inverse of StoreKeyForGrant, for display. It lets
+// output name a credential the way the user would grant or revoke it instead of
+// exposing an internal store key.
+func GrantNameForStoreKey(key Provider) string {
+	if key == ProviderCodexSubscription {
+		return string(ProviderCodex)
+	}
+	return string(key)
+}
+
 // Credential represents a stored credential.
 type Credential struct {
 	Provider  Provider          `json:"provider"`

@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -292,43 +293,30 @@ func resolveCredentials(rc *RunContext, grants []string, mcpServers []config.MCP
 			continue
 		}
 
-		isCodex := provider.ResolveName(grantName) == "codex"
-		if isCodex {
-			// Refresh tokens rotate. Share the same lock as background refresh,
-			// and only read the store after taking it, so concurrent run
-			// registrations cannot both redeem a stale refresh token.
-			codexRefreshMu.Lock()
-		}
 		cred, credName, err := loadCredentialForGrant(store, grantName, grant)
 		if err != nil {
-			if isCodex {
-				codexRefreshMu.Unlock()
-			}
 			return fmt.Errorf("grant %q: credential not found: %w", grantName, err)
 		}
 		provCred := provider.FromLegacy(cred)
-		if credName == credential.ProviderCodexSubscription && (provCred.ExpiresAt.IsZero() || time.Until(provCred.ExpiresAt) < 10*time.Minute) {
-			if refreshable, ok := provider.Get("codex").(provider.RefreshableProvider); ok && refreshable.CanRefresh(provCred) {
-				refreshCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-				updated, refreshErr := refreshable.Refresh(refreshCtx, nil, provCred)
-				cancel()
-				if refreshErr != nil {
-					codexRefreshMu.Unlock()
-					return fmt.Errorf("refreshing Codex subscription: %w", refreshErr)
-				}
-				persisted := credential.Credential{
-					Provider: credName, Token: updated.Token, Scopes: updated.Scopes,
-					ExpiresAt: updated.ExpiresAt, CreatedAt: updated.CreatedAt, Metadata: updated.Metadata,
-				}
-				if err := store.Save(persisted); err != nil {
-					codexRefreshMu.Unlock()
-					return fmt.Errorf("persisting refreshed Codex subscription: %w", err)
-				}
+		if credName == credential.ProviderCodexSubscription {
+			// Refresh before the bundle is installed so the container does not
+			// race an asynchronous startup refresh with its first request.
+			updated, refreshErr := refreshCodexSubscription(context.Background(), store, provCred)
+			switch {
+			case refreshErr == nil:
 				provCred = updated
+			case errors.Is(refreshErr, provider.ErrTokenRevoked):
+				// Permanent: no amount of retrying helps and the run would only
+				// produce 401s, so fail with the regrant instruction.
+				return fmt.Errorf("grant %q: %w", grantName, refreshErr)
+			default:
+				// Transient (network, timeout, a busy store). The stored token
+				// is refreshed ahead of expiry, so it is usually still valid —
+				// registering with it beats failing the run outright, and the
+				// background refresh loop will retry.
+				log.Warn("Codex subscription refresh failed; using stored credential",
+					"run_id", rc.RunID, "error", refreshErr)
 			}
-		}
-		if isCodex {
-			codexRefreshMu.Unlock()
 		}
 
 		// Store MCP credential on RunContext (runs for all grants, not just

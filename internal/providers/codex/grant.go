@@ -48,7 +48,10 @@ type Grant struct{}
 
 func NewGrant() *Grant { return &Grant{} }
 
-var codexVersionPattern = regexp.MustCompile(`(?m)(\d+)\.(\d+)\.(\d+)`)
+// codexVersionPattern matches a bare semver triple. checkCodexVersion anchors
+// it to the codex-cli line of `codex --version` rather than scanning the whole
+// output, so an unrelated version number cannot be mistaken for Codex's own.
+var codexVersionPattern = regexp.MustCompile(`^(\d+)\.(\d+)\.(\d+)`)
 
 // Execute starts a fresh Codex login in a private one-use CODEX_HOME. It does
 // not import or overwrite the user's ordinary ~/.codex/auth.json.
@@ -118,7 +121,7 @@ func (g *Grant) Execute(ctx context.Context) (*provider.Credential, error) {
 	return &provider.Credential{
 		Provider:  string(credential.ProviderCodexSubscription),
 		Token:     string(stored),
-		ExpiresAt: jwtExpiry(authFile.Tokens.AccessToken),
+		ExpiresAt: accessTokenExpiry(authFile.Tokens.AccessToken, time.Now()),
 		CreatedAt: time.Now(),
 		Metadata: map[string]string{
 			provider.MetaKeyTokenSource: "codex-subscription",
@@ -149,11 +152,50 @@ func checkCodexVersion(ctx context.Context, codexPath string) error {
 	if err != nil {
 		return fmt.Errorf("checking Codex CLI version: %w", err)
 	}
-	match := codexVersionPattern.FindStringSubmatch(string(out))
-	if len(match) != 4 {
-		return fmt.Errorf("unsupported Codex CLI version output %q; supported versions are 0.146.x through 0.154.x", strings.TrimSpace(string(out)))
+	version := parseCodexVersionOutput(string(out))
+	if version == "" {
+		return fmt.Errorf("could not read a Codex CLI version from %q; supported versions are 0.146.x through 0.154.x", strings.TrimSpace(string(out)))
 	}
-	return ValidateVersion(match[0])
+	return ValidateVersion(version)
+}
+
+// parseCodexVersionOutput extracts Codex's own version from `codex --version`,
+// which prints "codex-cli <semver>".
+//
+// It anchors on the line Codex names itself on. Scanning the whole output for
+// the first version-shaped token would let a warning line, or a bundled
+// component's version, be validated as if it were Codex's — rejecting a
+// supported install, or worse, accepting an unsupported one.
+func parseCodexVersionOutput(out string) string {
+	lines := strings.Split(out, "\n")
+	for _, line := range lines {
+		if strings.Contains(strings.ToLower(line), "codex") {
+			if version := versionField(line); version != "" {
+				return version
+			}
+		}
+	}
+	// Fall back to a line that is nothing but a version, in case the "codex-cli"
+	// prefix ever changes. Anything more ambiguous is reported as unreadable.
+	for _, line := range lines {
+		if fields := strings.Fields(line); len(fields) == 1 {
+			if version := versionField(line); version != "" {
+				return version
+			}
+		}
+	}
+	return ""
+}
+
+// versionField returns the first whitespace-separated field on the line that
+// begins with a semver triple.
+func versionField(line string) string {
+	for _, field := range strings.Fields(line) {
+		if version := codexVersionPattern.FindString(field); version != "" {
+			return version
+		}
+	}
+	return ""
 }
 
 // ValidateVersion checks the Codex auth adapter's explicitly supported range.

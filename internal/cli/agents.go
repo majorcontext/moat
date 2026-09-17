@@ -244,10 +244,11 @@ func ExpandAgents(cfg *config.Config) ([]string, error) {
 // resolution — Config.ShouldSyncCodexLogs/ShouldSyncGeminiLogs and
 // buildLocalMCPConfig's grant validation (internal/run/manager_agentinit.go)
 // — that read cfg.Grants directly rather than the resolved grants list.
-// Without this write-back, an agents:-derived grant (e.g. "openai" from
-// `agents: [codex]`) is invisible to them: log sync silently stays off, and a
-// local MCP server's `grant: openai` is rejected as "not declared in
-// top-level grants list" even though the credential is provisioned.
+// Without this write-back, an agents:-derived grant (e.g. "codex" from
+// `agents: [codex]`, or from its `agents: [openai]` alias) is invisible to
+// them: log sync silently stays off, and a local MCP server whose `grant:`
+// names that credential is rejected as "not declared in top-level grants list"
+// even though the credential is provisioned.
 func AppendDerivedGrants(cfg *config.Config, derivedGrants []string) {
 	if cfg == nil {
 		return

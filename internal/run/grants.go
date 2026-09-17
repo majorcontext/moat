@@ -83,6 +83,30 @@ func DetectMissingGrants(grants []string, cfg *config.Config, store *credential.
 		missing = append(missing, m)
 	}
 
+	// An MCP server naming the Codex subscription is rejected outright by
+	// validateMCPGrants whether or not the credential exists. Record those
+	// first: AppendMCPGrants also copies the grant into the generic list, and
+	// the generic loop would otherwise claim the name with a promptable
+	// "not configured" entry, sending the user through an interactive ChatGPT
+	// login for a configuration that can never be accepted.
+	if cfg != nil {
+		for _, mcp := range cfg.MCP {
+			if mcp.Auth == nil || mcp.Auth.Grant == "" {
+				continue
+			}
+			if provider.ResolveName(strings.Split(mcp.Auth.Grant, ":")[0]) != providerCodex {
+				continue
+			}
+			add(MissingGrant{
+				Grant:      mcp.Auth.Grant,
+				Reason:     ReasonUnknownProvider,
+				FixCommand: "replace the MCP auth grant with openai",
+				Promptable: false,
+				Detail:     "Codex subscription credentials cannot be used for MCP servers",
+			})
+		}
+	}
+
 	// Generic grants (skips ssh and mcp, which have dedicated handling below).
 	for _, grant := range grants {
 		grantName := strings.Split(grant, ":")[0]
@@ -118,14 +142,7 @@ func DetectMissingGrants(grants []string, cfg *config.Config, store *credential.
 				continue
 			}
 			if provider.ResolveName(strings.Split(mcp.Auth.Grant, ":")[0]) == providerCodex {
-				add(MissingGrant{
-					Grant:      mcp.Auth.Grant,
-					Reason:     ReasonUnknownProvider,
-					FixCommand: "replace the MCP auth grant with openai",
-					Promptable: false,
-					Detail:     "Codex subscription credentials cannot be used for MCP servers",
-				})
-				continue
+				continue // already recorded above, before the generic loop
 			}
 			if _, err := store.Get(credential.Provider(mcp.Auth.Grant)); err != nil {
 				reason := classifyMissingReason(err)

@@ -243,8 +243,20 @@ credential encrypted under a versioned internal key. The container sees only a
 synthetic Codex auth file. The daemon replaces its bearer and account headers
 as one TLS-only bundle on the default ChatGPT Codex backend path.
 
-Subscription auth supports Codex CLI 0.146.x–0.154.x. Re-run `moat grant codex`
-if refresh is revoked. Custom or managed ChatGPT base URLs are not supported.
+Subscription auth supports Codex CLI 0.146.x–0.154.x, checked both against the
+`codex-cli` version the image installs and against the executable actually
+present in the container. Pin a supported version with `codex-cli@<version>` in
+`dependencies` if your project overrides it.
+
+Re-run `moat grant codex` if refresh is revoked. Custom or managed ChatGPT base
+URLs are not supported.
+
+The subscription cannot be used as an MCP server credential — it is scoped to
+ChatGPT's Codex backend and nothing else. An `mcp` entry declaring
+`auth.grant: codex` is rejected; use `openai` for MCP servers that need an
+OpenAI key.
+
+Revoke with `moat revoke codex`.
 
 ## OpenAI API key
 

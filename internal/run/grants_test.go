@@ -258,3 +258,84 @@ func TestDetectMissingGrantsDecryptFailed(t *testing.T) {
 		}
 	}
 }
+
+// An MCP server naming the Codex subscription is rejected by validateMCPGrants
+// whether or not a credential exists, so the detector must report it the same
+// way in both worlds. It previously reported a promptable "not configured"
+// grant when the subscription was absent, sending the user through a full
+// interactive ChatGPT login for a config that is then rejected anyway.
+func TestDetectMissingGrants_CodexMCPGrantIsNeverPromptable(t *testing.T) {
+	cfg := &config.Config{MCP: []config.MCPServerConfig{
+		{Name: "srv", URL: "https://example.com", Auth: &config.MCPAuthConfig{Grant: "codex", Header: "Authorization"}},
+	}}
+	grants := AppendMCPGrants(nil, cfg)
+
+	for _, tt := range []struct {
+		name  string
+		store *credential.FileStore
+	}{
+		{"subscription absent", newGrantsTestStore(t)},
+		{"subscription present", storeWithCodexSubscription(t)},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			missing := DetectMissingGrants(grants, cfg, tt.store)
+			if len(missing) != 1 {
+				t.Fatalf("DetectMissingGrants = %+v, want exactly one entry", missing)
+			}
+			if missing[0].Promptable {
+				t.Errorf("entry is promptable, but no grant can satisfy it: %+v", missing[0])
+			}
+			if missing[0].Reason != ReasonUnknownProvider {
+				t.Errorf("Reason = %v, want ReasonUnknownProvider", missing[0].Reason)
+			}
+			if validateMCPGrants(cfg, tt.store) == nil {
+				t.Error("validateMCPGrants accepted a config the detector rejects")
+			}
+		})
+	}
+}
+
+// Extends the detector/validator drift guard to the codex grant, in both
+// directions: credential absent (both must object) and present (both must be
+// satisfied). See CLAUDE.md "Detector ↔ validator parity".
+func TestDetectMissingGrantsMatchesValidators_Codex(t *testing.T) {
+	grants := []string{"codex"}
+
+	empty := newGrantsTestStore(t)
+	detected := len(DetectMissingGrants(grants, nil, empty)) > 0
+	rejected := validateGrants(grants, empty) != nil
+	if !detected || !rejected {
+		t.Fatalf("absent case: detector=%v validator=%v — both must object", detected, rejected)
+	}
+
+	full := storeWithCodexSubscription(t)
+	detected = len(DetectMissingGrants(grants, nil, full)) > 0
+	rejected = validateGrants(grants, full) != nil
+	if detected || rejected {
+		t.Fatalf("present case: detector=%v validator=%v — both must be satisfied", detected, rejected)
+	}
+
+	// The API-key fallback satisfies the logical codex grant too, and both
+	// sides have to agree about that.
+	fallback := newGrantsTestStore(t)
+	if err := fallback.Save(credential.Credential{Provider: credential.ProviderOpenAI, Token: "sk-test"}); err != nil {
+		t.Fatal(err)
+	}
+	detected = len(DetectMissingGrants(grants, nil, fallback)) > 0
+	rejected = validateGrants(grants, fallback) != nil
+	if detected || rejected {
+		t.Fatalf("fallback case: detector=%v validator=%v — both must accept the API key", detected, rejected)
+	}
+}
+
+func storeWithCodexSubscription(t *testing.T) *credential.FileStore {
+	t.Helper()
+	store := newGrantsTestStore(t)
+	if err := store.Save(credential.Credential{
+		Provider: credential.ProviderCodexSubscription,
+		Token:    `{"access_token":"a","refresh_token":"b","account_id":"c"}`,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return store
+}

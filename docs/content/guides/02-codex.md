@@ -39,8 +39,13 @@ moat grant openai
 ```
 
 If both grants are present, Codex uses the ChatGPT subscription. The API-key
-placeholder is exposed to shell workloads without putting it in Codex's own
-environment, avoiding an accidental switch to API billing.
+placeholder is exported to shell commands via `BASH_ENV` rather than into the
+container environment, so scripts and SDKs can reach it while Codex itself does
+not see it and stays on the subscription. This mirrors how a `claude` plus
+`anthropic` pair is handled.
+
+With neither grant, no auth file is staged at all and Codex prompts for login
+as it normally would.
 
 ### How credentials are injected
 

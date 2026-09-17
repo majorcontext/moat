@@ -152,6 +152,16 @@ func (s *Server) handleRegisterRun(w http.ResponseWriter, r *http.Request) {
 
 	rc := req.ToRunContext()
 	if len(req.CredentialRefs) > 0 {
+		// A ref makes the daemon read a secret out of the encrypted store on the
+		// caller's behalf, so it must not be trusted the way a caller-supplied
+		// credential value can be — that one the caller already held. Accept
+		// only refs the run declared as grants, and only for the mechanism refs
+		// exist to serve. Same reasoning as the profile guard above: the daemon
+		// does not trust its socket input.
+		if err := validateCredentialRefs(req.CredentialRefs, req.Grants); err != nil {
+			writeJSON(w, http.StatusBadRequest, RegisterResponse{Error: err.Error()})
+			return
+		}
 		key, err := credential.DefaultEncryptionKey()
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, RegisterResponse{Error: "opening credential store"})

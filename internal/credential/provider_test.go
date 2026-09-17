@@ -206,3 +206,27 @@ func TestGenerateAccessTokenPlaceholderDeterministic(t *testing.T) {
 		t.Fatal("access-token placeholder must be byte-stable across proxy and staging construction")
 	}
 }
+
+// Users grant and revoke "codex"; the credential is stored under a versioned
+// internal key so an older binary cannot mistake a refresh-token bundle for an
+// API key. Both directions of that mapping have to hold, or `moat revoke codex`
+// reports "no credential found" for one `moat grant codex` just created.
+func TestStoreKeyForGrantRoundTrip(t *testing.T) {
+	if got := StoreKeyForGrant("codex"); got != ProviderCodexSubscription {
+		t.Errorf("StoreKeyForGrant(codex) = %q, want %q", got, ProviderCodexSubscription)
+	}
+	if got := GrantNameForStoreKey(ProviderCodexSubscription); got != "codex" {
+		t.Errorf("GrantNameForStoreKey(%q) = %q, want codex", ProviderCodexSubscription, got)
+	}
+
+	// Every other provider is stored under the name it is granted by, and must
+	// pass through both directions untouched.
+	for _, p := range []Provider{ProviderGitHub, ProviderOpenAI, ProviderAnthropic, ProviderClaude, "mcp:context7"} {
+		if got := StoreKeyForGrant(string(p)); got != p {
+			t.Errorf("StoreKeyForGrant(%q) = %q, want it unchanged", p, got)
+		}
+		if got := GrantNameForStoreKey(p); got != string(p) {
+			t.Errorf("GrantNameForStoreKey(%q) = %q, want it unchanged", p, got)
+		}
+	}
+}

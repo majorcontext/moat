@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/majorcontext/moat/internal/credential"
+	"github.com/majorcontext/moat/internal/log"
 	"github.com/majorcontext/moat/internal/provider"
 )
 
@@ -37,10 +38,14 @@ func (p *Provider) Grant(ctx context.Context) (*provider.Credential, error) {
 func (p *Provider) ConfigureProxy(proxyConfig provider.ProxyConfigurer, cred *provider.Credential) {
 	bundles, ok := proxyConfig.(credential.BundleConfigurer)
 	if !ok {
+		// Failing closed is right, but failing closed silently leaves the user
+		// staring at 401s with nothing to explain them.
+		log.Warn("Codex subscription not installed: proxy does not support credential bundles")
 		return
 	}
 	auth, err := decodeSubscriptionAuth(cred)
 	if err != nil {
+		log.Warn("Codex subscription not installed: stored credential is unreadable", "error", err)
 		return
 	}
 	bundles.SetCredentialBundle(subscriptionHost, credential.Bundle{

@@ -688,6 +688,10 @@ moat grant codex
 moat grant codex --device-auth
 ```
 
+Revoke it with `moat revoke codex`. The credential is stored under an internal
+versioned key, but `moat grant list` and `moat revoke` both use the name you
+granted.
+
 ### moat grant openai
 
 Stores an OpenAI API key. Reads from the `OPENAI_API_KEY` environment variable, or prompts interactively.

@@ -9,15 +9,20 @@ import (
 	"github.com/majorcontext/moat/internal/daemon"
 )
 
-func TestBuildRegisterRequest_CodexUsesSecretFreeCredentialRef(t *testing.T) {
-	rc := daemon.NewRunContext("run-codex")
-	rc.SetCredentialBundle("chatgpt.com", credential.Bundle{
-		ID: "codex-subscription-v1",
+func codexBundle() credential.Bundle {
+	return credential.Bundle{
+		ID:    string(credential.ProviderCodexSubscription),
+		Grant: "codex",
 		Replacements: []credential.HeaderReplacement{
 			{Name: "Authorization", Placeholder: "fake", Value: "sentinel-real-access-token"},
 			{Name: "ChatGPT-Account-ID", Placeholder: "fake", Value: "sentinel-real-account-id"},
 		},
-	})
+	}
+}
+
+func TestBuildRegisterRequest_CodexUsesSecretFreeCredentialRef(t *testing.T) {
+	rc := daemon.NewRunContext("run-codex")
+	rc.SetCredentialBundle("chatgpt.com", codexBundle())
 
 	req := buildRegisterRequest(rc, []string{"codex"})
 	if len(req.CredentialRefs) != 1 || req.CredentialRefs[0] != "codex" {
@@ -31,5 +36,22 @@ func TestBuildRegisterRequest_CodexUsesSecretFreeCredentialRef(t *testing.T) {
 		if strings.Contains(string(data), secret) {
 			t.Fatalf("registration payload retained secret %q: %s", secret, data)
 		}
+	}
+}
+
+// Companion to the case above. A codex grant that fell back to an OpenAI API
+// key installs no bundle, so it must not ask the daemon to resolve one: the ref
+// is what forces the new daemon capabilities, and requiring them for an
+// API-key-only user would make them restart their daemon for nothing.
+func TestBuildRegisterRequest_CodexAPIKeyFallbackSendsNoCredentialRef(t *testing.T) {
+	rc := daemon.NewRunContext("run-codex-apikey")
+	rc.SetCredentialWithGrant("api.openai.com", "Authorization", "Bearer sk-real", "openai")
+
+	req := buildRegisterRequest(rc, []string{"codex"})
+	if len(req.CredentialRefs) != 0 {
+		t.Fatalf("CredentialRefs = %v, want none for an API-key fallback run", req.CredentialRefs)
+	}
+	if len(req.Credentials) != 1 {
+		t.Fatalf("Credentials = %v, want the API key to still register normally", req.Credentials)
 	}
 }

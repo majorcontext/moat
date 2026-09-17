@@ -5,6 +5,7 @@ import (
 	"context"
 	"net"
 	"net/http"
+	"sort"
 	"sync"
 	"time"
 
@@ -111,6 +112,31 @@ func (rc *RunContext) SetCredentialBundle(host string, bundle credential.Bundle)
 		}
 	}
 	rc.CredentialBundles[host] = append(rc.CredentialBundles[host], bundle)
+}
+
+// CredentialBundleGrants returns the distinct grants that have a bundle
+// installed, in a stable order.
+//
+// Bundles carry real secrets and are deliberately not serialized, so a run
+// holding one cannot hand its values to the daemon in a registration request.
+// It sends these grant names instead and the daemon resolves the current
+// credential from the encrypted store itself — see RegisterRequest.CredentialRefs.
+func (rc *RunContext) CredentialBundleGrants() []string {
+	rc.mu.RLock()
+	defer rc.mu.RUnlock()
+	seen := make(map[string]bool)
+	var grants []string
+	for _, bundles := range rc.CredentialBundles {
+		for _, bundle := range bundles {
+			if bundle.Grant == "" || seen[bundle.Grant] {
+				continue
+			}
+			seen[bundle.Grant] = true
+			grants = append(grants, bundle.Grant)
+		}
+	}
+	sort.Strings(grants)
+	return grants
 }
 
 // CancelRefresh cancels the token refresh goroutine, if any.
