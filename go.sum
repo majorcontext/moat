@@ -338,8 +338,8 @@ github.com/lucasb-eyer/go-colorful v1.3.0 h1:2/yBRLdWBZKrf7gB40FoiKfAWYQ0lqNcbuQ
 github.com/lucasb-eyer/go-colorful v1.3.0/go.mod h1:R4dSotOR9KMtayYi1e77YzuveK+i7ruzyGqttikkLy0=
 github.com/magiconair/properties v1.8.9 h1:nWcCbLq1N2v/cpNsy5WvQ37Fb+YElfq20WJ/a8RkpQM=
 github.com/magiconair/properties v1.8.9/go.mod h1:Dhd985XPs7jluiymwWYZ0G4Z61jb3vdS329zhj2hYo0=
-github.com/majorcontext/gatekeeper v0.23.0 h1:dPdXzknhVja/C5127sdixtiXKfWm9JPhXj1cPMFCuYE=
-github.com/majorcontext/gatekeeper v0.23.0/go.mod h1:WHNRaRLHx57yBizzvWDnKHOSao+D27DHeFEhewrFqxk=
+github.com/majorcontext/gatekeeper v0.23.2 h1:NHaZK8rqL+aou0AkCjI5UhkzJtPeN+VcvjGt5F9h3VQ=
+github.com/majorcontext/gatekeeper v0.23.2/go.mod h1:WHNRaRLHx57yBizzvWDnKHOSao+D27DHeFEhewrFqxk=
 github.com/majorcontext/keep v0.6.0 h1:cJzs0/xxUUnsIqWQXwkkceXX9C/qfFYryIxTQZ0jXcQ=
 github.com/majorcontext/keep v0.6.0/go.mod h1:UNSZPfJrZ5i8zw5JYnVk92y4G3DI3VwcnDYvz+J8XXE=
 github.com/mattn/go-colorable v0.1.13/go.mod h1:7S9/ev0klgBDR4GtXTXX8a3vIGJpMovkB8vQcUbaXHg=
