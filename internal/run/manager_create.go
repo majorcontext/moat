@@ -790,13 +790,15 @@ func (m *Manager) Create(ctx context.Context, opts Options) (resRun *Run, retErr
 
 		// Serial listener ports become part of the firewall allowlist: the
 		// strict-policy firewall must not silently drop the device's RFC2217
-		// port. Also covers network.host entries and claude.base_url host
-		// ports the RunContext collected before registration.
-		for _, p := range runCtx.AllowedHostPorts {
-			if !slices.Contains(r.AllowedHostPorts, p) {
-				r.AllowedHostPorts = append(r.AllowedHostPorts, p)
-			}
-		}
+		// port, which is raw TCP and never transits the proxy.
+		//
+		// runCtx.AllowedHostPorts is deliberately NOT merged here. Those are
+		// network.host and claude.base_url ports, and they are enforced by the
+		// proxy's own host-port check on the HTTP/CONNECT path. Adding them
+		// would emit a destination-less "-A OUTPUT --dport N -j ACCEPT",
+		// granting the container raw egress to that port on *any* host and
+		// converting a proxy-mediated allowlist into an open one.
+		r.SerialHostAddr = serialBind
 		for _, addr := range regResp.SerialAddrs {
 			_, portStr, perr := splitPort(addr)
 			if perr != nil {

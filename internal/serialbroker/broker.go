@@ -1,11 +1,17 @@
 // Package serialbroker serves host serial devices to containers over RFC2217.
 //
 // Each approved device gets its own listener. That is also the authentication
-// model: RFC2217 carries no credentials, so reachability is the control — only
-// the owning run's container is permitted to reach the port (the run manager
-// adds it to the run's allowed host ports). Other processes on the host can
-// still reach it; the docs state that boundary rather than implying a check
-// that does not exist.
+// model: RFC2217 carries no credentials, so reachability is the only control,
+// and it is a narrowing rather than a boundary.
+//
+// The listener binds one container-facing host address instead of every
+// interface. That is all it does. The run's allowed-host-ports entry is an
+// egress permit applied inside the owning container under a strict network
+// policy — it lets that container out, it does not keep anyone else away. Any
+// process on the host, any other container that can route to the bound
+// address, and on Linux any sender whose packet reaches a local address on any
+// interface can connect. What prevents two clients driving one device is the
+// exclusive claim plus one session at a time, not reachability.
 package serialbroker
 
 import (

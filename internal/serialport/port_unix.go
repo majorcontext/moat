@@ -174,5 +174,11 @@ func (t *tty) currentSettings() (Settings, error) {
 	if err != nil {
 		return Settings{}, err
 	}
-	return Settings{Baud: currentBaud(tio)}, nil
+	return Settings{
+		Baud:        currentBaud(tio),
+		DataBits:    dataBitsOf(tio),
+		StopBits:    stopBitsOf(tio),
+		Parity:      parityOf(tio),
+		FlowControl: flowControlOf(tio),
+	}, nil
 }

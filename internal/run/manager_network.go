@@ -75,10 +75,13 @@ func (m *Manager) resolveNetworkConfig(needsPorts, needsProxy bool, hostAddr str
 //
 //   - Docker on Linux — the default bridge's gateway (docker0, e.g.
 //     172.17.0.1). Measured: reachable from default-bridge containers, from
-//     per-run `services:` networks, from buildkit networks, and from the host;
-//     unreachable from the machine's other interfaces. Loopback would exclude
-//     bridge containers; a routable interface would expose the device to the
-//     LAN.
+//     per-run `services:` networks, from buildkit networks, and from the host.
+//     Loopback would exclude bridge containers; a routable interface would
+//     advertise the device to the LAN. Note this narrows reach, it does not
+//     bound it: 172.17.0.1 is a local address, and Linux's weak host model
+//     accepts packets for any local address on any interface, so a sender that
+//     can route a packet here still reaches the listener. Moat adds no host
+//     INPUT rule; the guide tells operators to add one on untrusted networks.
 //   - Docker on macOS/Windows (Docker Desktop) — "127.0.0.1". Desktop's VM
 //     forwards host loopback to containers via host.docker.internal, and the
 //     VM's bridge gateway is not a host address this CLI can bind.

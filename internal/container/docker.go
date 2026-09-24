@@ -777,13 +777,18 @@ func (r *DockerRuntime) gvisorAvailable() bool {
 // acceptRulesFor renders the IPv4 accept rules for the run's allowed host
 // ports, as a shell snippet indented for the firewall script. Empty input
 // yields a no-op comment so the script stays syntactically valid either way.
-func acceptRulesFor(ports []int) string {
-	if len(ports) == 0 {
+// acceptRulesFor emits one ACCEPT per serial-listener port, scoped to the
+// address that listener binds. The destination is not optional: a bare
+// "--dport N -j ACCEPT" would grant the container egress to that port on every
+// host on the network, which is a wider hole than the device access it exists
+// to permit.
+func acceptRulesFor(ports []int, dest string) string {
+	if len(ports) == 0 || dest == "" {
 		return ":"
 	}
 	var b strings.Builder
 	for _, p := range ports {
-		fmt.Fprintf(&b, "iptables -w -A OUTPUT -p tcp --dport %d -j ACCEPT\n", p)
+		fmt.Fprintf(&b, "iptables -w -A OUTPUT -p tcp -d %s --dport %d -j ACCEPT\n", dest, p)
 	}
 	return b.String()
 }
@@ -796,12 +801,14 @@ func acceptRulesFor(ports []int) string {
 // add complexity. The security model relies on the proxy port being unique (randomly
 // assigned per-run) rather than IP filtering. Combined with the proxy's authentication
 // for Apple containers, this provides sufficient protection.
-// extraPorts are host ports to allow in addition to the proxy port (serial
-// RFC2217 listeners, network.host entries, base_url host ports) — see the
-// Runtime interface doc.
+// extraPorts are the run's serial RFC2217 listener ports, allowed in addition
+// to the proxy port and scoped to extraAddr — the host address those listeners
+// bind. network.host and base_url ports are not in this list: they are enforced
+// on the proxy's own path, and a rule here carries no destination restriction
+// beyond extraAddr.
 // If ip6tables is not available (minimal images), a warning is emitted to stderr
 // but the setup does not fail — the container may not have IPv6 connectivity.
-func (r *DockerRuntime) SetupFirewall(ctx context.Context, containerID string, proxyHost string, proxyPort int, extraPorts []int) error {
+func (r *DockerRuntime) SetupFirewall(ctx context.Context, containerID string, proxyHost string, proxyPort int, extraPorts []int, extraAddr string) error {
 	// Validate port range
 	if proxyPort < 1 || proxyPort > 65535 {
 		return fmt.Errorf("invalid proxy port %d: must be between 1 and 65535", proxyPort)
@@ -846,8 +853,10 @@ func (r *DockerRuntime) SetupFirewall(ctx context.Context, containerID string, p
 		# Allow traffic to proxy port (destination IP not filtered - see function comment)
 		iptables -w -A OUTPUT -p tcp --dport %d -j ACCEPT
 
-		# Allow the run's allowed host ports (serial listeners, network.host,
-		# base_url endpoints). Omitted when empty.
+		# Allow the run's serial-listener ports, scoped to the address those
+		# listeners bind. network.host and base_url stay proxy-mediated and are
+		# deliberately absent: a destination-less rule here would grant egress
+		# to that port on every reachable host. Omitted when empty.
 		%s
 
 		# Drop all other outbound traffic
@@ -885,7 +894,7 @@ func (r *DockerRuntime) SetupFirewall(ctx context.Context, containerID string, p
 				echo "WARN: ip6tables rules failed — IPv6 traffic will not be firewalled" >&2
 			fi
 		fi
-	`, proxyPort, acceptRulesFor(extraPorts), proxyPort, ipv6AcceptRules(extraPorts))
+	`, proxyPort, acceptRulesFor(extraPorts, extraAddr), proxyPort, ipv6AcceptRules(extraPorts, extraAddr))
 
 	execConfig := container.ExecOptions{
 		Cmd:          []string{"sh", "-c", script},

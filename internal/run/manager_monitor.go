@@ -13,6 +13,7 @@ import (
 	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/daemon"
 	"github.com/majorcontext/moat/internal/log"
+	"github.com/majorcontext/moat/internal/ui"
 )
 
 // monitorContainerExit watches for container exit and captures logs.
@@ -134,12 +135,24 @@ func (m *Manager) monitorProxyHealth(ctx context.Context, r *Run) {
 			regReq := *r.ProxyRegReq
 			regReq.AuthToken = r.ProxyAuthToken
 			regCtx, regCancel := context.WithTimeout(ctx, 5*time.Second)
-			_, regErr := dc.RegisterRun(regCtx, regReq)
+			regResp, regErr := dc.RegisterRun(regCtx, regReq)
 			regCancel()
 			if regErr != nil {
 				log.Warn("failed to re-register run with proxy daemon",
 					"run_id", r.ID, "error", regErr)
 				continue
+			}
+			// Create gates on CapSerialDevices, but this path does not: the
+			// daemon we reconnect to may be an older binary that EnsureRunning
+			// deliberately kept. Such a daemon ignores the serial fields it does
+			// not know, answers 201, and leaves the container's frozen
+			// MOAT_SERIAL_*_URL pointing at nothing. Silence is the failure
+			// mode, so say so rather than logging a successful re-register.
+			if len(regReq.SerialDevices) > 0 && (regResp == nil || len(regResp.SerialAddrs) == 0) {
+				ui.Warnf("run %s reconnected to a proxy daemon without serial-device support; "+
+					"its devices are no longer reachable — run 'moat proxy restart', then restart the run", r.ID)
+				log.Warn("re-registered run lost its serial devices",
+					"run_id", r.ID, "devices", len(regReq.SerialDevices))
 			}
 			// Update with container ID after re-registration.
 			if r.ContainerID != "" {

@@ -134,7 +134,7 @@ func (s *poolStubRuntime) NetworkManager() NetworkManager { return nil }
 func (s *poolStubRuntime) SidecarManager() SidecarManager { return nil }
 func (s *poolStubRuntime) BuildManager() BuildManager     { return nil }
 func (s *poolStubRuntime) ServiceManager() ServiceManager { return nil }
-func (s *poolStubRuntime) SetupFirewall(context.Context, string, string, int, []int) error {
+func (s *poolStubRuntime) SetupFirewall(context.Context, string, string, int, []int, string) error {
 	panic("not implemented")
 }
 

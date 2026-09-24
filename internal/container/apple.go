@@ -566,13 +566,15 @@ func (r *AppleRuntime) Close() error {
 // appleAcceptRulesFor renders the IPv4 accept rules for the run's allowed
 // host ports as `$IPT`-prefixed shell lines (the Apple script routes through
 // $IPT to prefer iptables-legacy). Empty input yields a no-op `:`.
-func appleAcceptRulesFor(ports []int) string {
-	if len(ports) == 0 {
+// appleAcceptRulesFor mirrors acceptRulesFor: destination-scoped, and a no-op
+// without a destination.
+func appleAcceptRulesFor(ports []int, dest string) string {
+	if len(ports) == 0 || dest == "" {
 		return ":"
 	}
 	var b strings.Builder
 	for _, p := range ports {
-		fmt.Fprintf(&b, "$IPT -w -A OUTPUT -p tcp --dport %d -j ACCEPT\n", p)
+		fmt.Fprintf(&b, "$IPT -w -A OUTPUT -p tcp -d %s --dport %d -j ACCEPT\n", dest, p)
 	}
 	return b.String()
 }
@@ -584,12 +586,14 @@ func appleAcceptRulesFor(ports []int) string {
 // networks. The security model relies on per-run proxy authentication (cryptographic
 // token in HTTP_PROXY URL) rather than IP filtering. This is more robust than IP-based
 // filtering and prevents unauthorized access even if another service runs on the same port.
-// extraPorts are host ports to allow in addition to the proxy port (serial
-// RFC2217 listeners, network.host entries, base_url host ports) — see the
-// Runtime interface doc.
+// extraPorts are the run's serial RFC2217 listener ports, allowed in addition
+// to the proxy port and scoped to extraAddr — the host address those listeners
+// bind. network.host and base_url ports are not in this list: they are enforced
+// on the proxy's own path, and a rule here carries no destination restriction
+// beyond extraAddr.
 // If ip6tables is not available (minimal images), a warning is emitted to stderr
 // but the setup does not fail — the container may not have IPv6 connectivity.
-func (r *AppleRuntime) SetupFirewall(ctx context.Context, containerID string, proxyHost string, proxyPort int, extraPorts []int) error {
+func (r *AppleRuntime) SetupFirewall(ctx context.Context, containerID string, proxyHost string, proxyPort int, extraPorts []int, extraAddr string) error {
 	// Validate port range
 	if proxyPort < 1 || proxyPort > 65535 {
 		return fmt.Errorf("invalid proxy port %d: must be between 1 and 65535", proxyPort)
@@ -630,8 +634,10 @@ func (r *AppleRuntime) SetupFirewall(ctx context.Context, containerID string, pr
 		# Allow traffic to proxy port (destination IP not filtered - see function comment)
 		$IPT -w -A OUTPUT -p tcp --dport %d -j ACCEPT
 
-		# Allow the run's allowed host ports (serial listeners, network.host,
-		# base_url endpoints). Omitted when empty.
+		# Allow the run's serial-listener ports, scoped to the address those
+		# listeners bind. network.host and base_url stay proxy-mediated and are
+		# deliberately absent: a destination-less rule here would grant egress
+		# to that port on every reachable host. Omitted when empty.
 		%s
 
 		# Drop all other outbound traffic
@@ -668,7 +674,7 @@ func (r *AppleRuntime) SetupFirewall(ctx context.Context, containerID string, pr
 				echo "WARN: ip6tables rules failed — IPv6 traffic will not be firewalled" >&2
 			fi
 		fi
-	`, proxyPort, appleAcceptRulesFor(extraPorts), proxyPort, ipv6AcceptRules(extraPorts))
+	`, proxyPort, appleAcceptRulesFor(extraPorts, extraAddr), proxyPort, ipv6AcceptRules(extraPorts, extraAddr))
 
 	// Run as root since iptables requires root privileges
 	cmd := exec.CommandContext(ctx, r.containerBin, "exec", "--user", "root", containerID, "sh", "-c", script)

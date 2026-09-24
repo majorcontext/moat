@@ -90,10 +90,20 @@ type Run struct {
 	ProxyHost       string // Host address for proxy (for firewall rules)
 	ProxyPort       int    // Port number for proxy (for firewall rules)
 	ProxyAuthToken  string // Auth token for proxy daemon (set when run is registered with daemon)
-	// AllowedHostPorts are host ports the strict-policy firewall must let
-	// through in addition to the proxy port: RFC2217 serial listeners,
-	// network.host entries, and any host-port claude.base_url resolves to.
+	// AllowedHostPorts are the serial-listener host ports the strict-policy
+	// firewall must let the container reach directly. They are scoped to
+	// SerialHostAddr: RFC2217 is raw TCP that never transits the proxy, so it
+	// needs its own rule.
+	//
+	// Only serial ports belong here. network.host and claude.base_url ports
+	// stay proxy-mediated — putting them in this list would emit a raw
+	// destination-less ACCEPT and turn a proxy allowlist into open egress.
 	AllowedHostPorts []int
+
+	// SerialHostAddr is the address AllowedHostPorts are scoped to — the
+	// container-facing host address the serial listeners bind. Empty when the
+	// run has no serial devices.
+	SerialHostAddr string
 
 	// ProxyRegReq is the registration request saved for re-registration
 	// after a proxy daemon restart. The health monitor uses it to restore

@@ -323,6 +323,11 @@ func (s *Server) handleRegisterRun(w http.ResponseWriter, r *http.Request) {
 	// run's devices dead.
 	serialAddrs, err := s.listenSerialAt(rc, req.SerialDevices, req.SerialBindAddr, req.SerialPins)
 	if err != nil {
+		// Close before canceling, matching handleUnregisterRun and
+		// LivenessChecker.removeRun: rc already owns compiled Keep engines by
+		// this point, and CancelRefresh alone leaks them on every rejected
+		// registration.
+		rc.Close()
 		rc.CancelRefresh()
 		writeJSON(w, http.StatusConflict, RegisterResponse{Error: err.Error()})
 		return
@@ -388,12 +393,44 @@ func (s *Server) ListenSerialPinned(rc *RunContext, specs []SerialDeviceSpec, bi
 // failure never leaves a device claimed by a run that did not start — and a
 // re-registration of an already-running run never tears down the devices its
 // container is using.
+// approvedFromSpec converts a wire spec into the broker's approval. Every
+// field of SerialDeviceSpec that reaches the broker passes through here.
+func approvedFromSpec(spec SerialDeviceSpec) serialbroker.Approved {
+	return serialbroker.Approved{
+		Name: spec.Name,
+		Device: serialdev.Device{
+			Path:      spec.Path,
+			VID:       spec.VID,
+			PID:       spec.PID,
+			Serial:    spec.Serial,
+			PortPath:  spec.PortPath,
+			Interface: spec.Interface,
+		},
+		Record: spec.Record,
+		Baud:   spec.Baud,
+	}
+}
+
 func (s *Server) listenSerialAt(rc *RunContext, specs []SerialDeviceSpec, bindAddr string, pins map[string]int) (map[string]string, error) {
 	if len(specs) == 0 {
 		return nil, nil
 	}
 	if s.serial == nil {
 		return nil, fmt.Errorf("this daemon does not support serial devices; restart it with `moat proxy restart`")
+	}
+	// The CLI resolves a container-facing address, but the daemon must not
+	// trust its socket input for it: RFC2217 carries no authentication, so a
+	// wildcard or garbage address here would expose attached hardware to
+	// everything that can route to this host. Same reasoning as the profile
+	// guard in handleRegisterRun — validate at the boundary, not only at the
+	// caller. An empty value is allowed and falls through to the broker's
+	// loopback default.
+	if bindAddr != "" {
+		ip := net.ParseIP(bindAddr)
+		if ip == nil || ip.IsUnspecified() {
+			return nil, fmt.Errorf("refusing to serve serial devices on %q: RFC2217 has no authentication, "+
+				"so the listener must bind a specific container-facing host address", bindAddr)
+		}
 	}
 
 	addrs := make(map[string]string, len(specs))
@@ -407,34 +444,14 @@ func (s *Server) listenSerialAt(rc *RunContext, specs []SerialDeviceSpec, bindAd
 		var ref *serialbroker.ListenerRef
 		var addr string
 		var err error
+		// One literal for both branches: they differed only in the pinned
+		// port, so a field added to SerialDeviceSpec had two places to reach
+		// and nothing to signal when only one was updated.
+		approved := approvedFromSpec(spec)
 		if port, ok := pins[spec.Name]; ok && port > 0 {
-			ref, addr, err = s.serial.ListenAt(rc.RunID, serialbroker.Approved{
-				Name: spec.Name,
-				Device: serialdev.Device{
-					Path:      spec.Path,
-					VID:       spec.VID,
-					PID:       spec.PID,
-					Serial:    spec.Serial,
-					PortPath:  spec.PortPath,
-					Interface: spec.Interface,
-				},
-				Record: spec.Record,
-				Baud:   spec.Baud,
-			}, bindAddr, port)
+			ref, addr, err = s.serial.ListenAt(rc.RunID, approved, bindAddr, port)
 		} else {
-			ref, addr, err = s.serial.Listen(rc.RunID, serialbroker.Approved{
-				Name: spec.Name,
-				Device: serialdev.Device{
-					Path:      spec.Path,
-					VID:       spec.VID,
-					PID:       spec.PID,
-					Serial:    spec.Serial,
-					PortPath:  spec.PortPath,
-					Interface: spec.Interface,
-				},
-				Record: spec.Record,
-				Baud:   spec.Baud,
-			}, bindAddr)
+			ref, addr, err = s.serial.Listen(rc.RunID, approved, bindAddr)
 		}
 		if err != nil {
 			s.serial.CloseListeners(opened)

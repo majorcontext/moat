@@ -742,17 +742,29 @@ func TestAcceptRulesForSerialAndHostPorts(t *testing.T) {
 	// Strict + devices is the point of the plumbing: the serial listener's
 	// OS-assigned port must appear in the allowlist or the firewall silently
 	// drops the device.
-	got := acceptRulesFor([]int{45678, 45679})
-	want := "iptables -w -A OUTPUT -p tcp --dport 45678 -j ACCEPT\n" +
-		"iptables -w -A OUTPUT -p tcp --dport 45679 -j ACCEPT\n"
+	got := acceptRulesFor([]int{45678, 45679}, "172.17.0.1")
+	want := "iptables -w -A OUTPUT -p tcp -d 172.17.0.1 --dport 45678 -j ACCEPT\n" +
+		"iptables -w -A OUTPUT -p tcp -d 172.17.0.1 --dport 45679 -j ACCEPT\n"
 	if got != want {
 		t.Fatalf("acceptRulesFor = %q, want %q", got, want)
+	}
+	// The destination is the point. A rule without -d lets the container reach
+	// that port on every host it can route to, which is a far wider hole than
+	// the one serial listener it exists to permit.
+	if !strings.Contains(got, "-d 172.17.0.1 --dport") {
+		t.Fatalf("acceptRulesFor emitted an unscoped rule: %q", got)
 	}
 	// Companion: no allowed ports must produce a no-op, not an empty command
 	// list (an empty %s would leave two blank lines — valid, but ":" states
 	// the intent and survives any future wrapper).
-	if got := acceptRulesFor(nil); got != ":" {
+	if got := acceptRulesFor(nil, "172.17.0.1"); got != ":" {
 		t.Fatalf("acceptRulesFor(nil) = %q, want \":\"", got)
+	}
+	// Companion: ports with no destination must also be a no-op. Emitting them
+	// unscoped is the failure this parameter exists to prevent, so a missing
+	// address has to fail closed rather than fall back to a bare --dport.
+	if got := acceptRulesFor([]int{45678}, ""); got != ":" {
+		t.Fatalf("acceptRulesFor(ports, \"\") = %q, want \":\" — never an unscoped rule", got)
 	}
 }
 
@@ -765,9 +777,9 @@ func TestIPv6AcceptRules(t *testing.T) {
 	// "$IP6T -w 5"; ip6tables rejects both with a non-zero exit, so the "&&"
 	// chain failed and the else-branch flushed the whole IPv6 policy on every
 	// strict run — serial or not.
-	got := ipv6AcceptRules([]int{45678, 45679})
-	want := "$IP6T -w 5 -A OUTPUT -p tcp --dport 45678 -j ACCEPT &&\n\t\t\t   " +
-		"$IP6T -w 5 -A OUTPUT -p tcp --dport 45679 -j ACCEPT &&\n\t\t\t   "
+	got := ipv6AcceptRules([]int{45678, 45679}, "fd00::1")
+	want := "$IP6T -w 5 -A OUTPUT -p tcp -d fd00::1 --dport 45678 -j ACCEPT &&\n\t\t\t   " +
+		"$IP6T -w 5 -A OUTPUT -p tcp -d fd00::1 --dport 45679 -j ACCEPT &&\n\t\t\t   "
 	if got != want {
 		t.Fatalf("ipv6AcceptRules = %q, want %q", got, want)
 	}
@@ -784,8 +796,16 @@ func TestIPv6AcceptRules(t *testing.T) {
 	// Companion: no allowed ports emits nothing, so the proxy rule's "&&"
 	// flows straight to the final DROP (unlike the standalone IPv4 block,
 	// whose empty case needs a ":" no-op).
-	if got := ipv6AcceptRules(nil); got != "" {
+	if got := ipv6AcceptRules(nil, "fd00::1"); got != "" {
 		t.Fatalf("ipv6AcceptRules(nil) = %q, want empty", got)
+	}
+	// An IPv4-bound listener has nothing to reach over IPv6, so the v6 chain
+	// must stay shut rather than open the port on both stacks.
+	if got := ipv6AcceptRules([]int{45678}, "172.17.0.1"); got != "" {
+		t.Fatalf("ipv6AcceptRules with an IPv4 destination = %q, want empty", got)
+	}
+	if got := ipv6AcceptRules([]int{45678}, ""); got != "" {
+		t.Fatalf("ipv6AcceptRules with no destination = %q, want empty", got)
 	}
 }
 
@@ -794,12 +814,12 @@ func TestSetupFirewallRejectsOutOfRangePorts(t *testing.T) {
 	// rather than emit an iptables command that errors or silently truncates.
 	r := &DockerRuntime{}
 	for _, p := range []int{0, -1, 65536} {
-		if err := r.SetupFirewall(context.Background(), "c", "h", 8080, []int{p}); err == nil {
+		if err := r.SetupFirewall(context.Background(), "c", "h", 8080, []int{p}, "172.17.0.1"); err == nil {
 			t.Fatalf("SetupFirewall with extra port %d must fail", p)
 		}
 	}
 	// Companion: the proxy port keeps its own range check.
-	if err := r.SetupFirewall(context.Background(), "c", "h", 0, nil); err == nil {
+	if err := r.SetupFirewall(context.Background(), "c", "h", 0, nil, ""); err == nil {
 		t.Fatal("SetupFirewall with proxy port 0 must fail")
 	}
 }

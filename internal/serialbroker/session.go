@@ -28,11 +28,32 @@ type listener struct {
 }
 
 func (l *listener) serve() {
+	var backoff time.Duration
 	for {
 		conn, err := l.ln.Accept()
 		if err != nil {
-			return // listener closed
+			l.mu.Lock()
+			closed := l.closed
+			l.mu.Unlock()
+			if closed {
+				return
+			}
+			// Not a close — a transient accept failure, typically EMFILE under
+			// fd pressure. Returning here would kill this device's listener
+			// permanently while the broker still reports the claim held and
+			// hands the run's frozen address back on re-Listen, so the device
+			// looks present and answers nothing. Back off and keep serving.
+			if backoff == 0 {
+				backoff = 5 * time.Millisecond
+			} else if backoff < time.Second {
+				backoff *= 2
+			}
+			log.Warn("serial accept failed; retrying",
+				"device", l.approved.Name, "run", l.runID, "error", err, "backoff", backoff)
+			time.Sleep(backoff)
+			continue
 		}
+		backoff = 0
 		go l.handle(conn)
 	}
 }
@@ -75,6 +96,13 @@ func (l *listener) handle(conn net.Conn) {
 		_ = tc.SetKeepAlive(true)
 		_ = tc.SetKeepAlivePeriod(2 * time.Minute)
 	}
+
+	// A connection that says nothing holds the device: the slot is taken at
+	// accept, keepalives only notice a peer that vanished, and a peer that
+	// stays connected and silent is indistinguishable from a healthy idle
+	// console. Require the first byte promptly, then drop the deadline — a
+	// console legitimately sits quiet for hours once it is actually talking.
+	_ = conn.SetReadDeadline(time.Now().Add(handshakeTimeout))
 
 	defer func() {
 		l.mu.Lock()
@@ -251,6 +279,29 @@ func (s *session) stop() {
 	}
 }
 
+// handshakeTimeout bounds how long a newly accepted connection may stay silent.
+// The device slot is taken at accept, and TCP keepalives only detect a peer
+// that vanished — a peer that stays connected and says nothing looks exactly
+// like a healthy idle console, and holds the device until the daemon restarts.
+const handshakeTimeout = 30 * time.Second
+
+// firstByteReader clears the read deadline once the peer actually says
+// something. The deadline is only there to evict a connection that never
+// speaks; a console that is genuinely in use may then sit quiet for hours,
+// which is the behavior the broker deliberately does not time out.
+type firstByteReader struct {
+	conn net.Conn
+	once sync.Once
+}
+
+func (f *firstByteReader) Read(p []byte) (int, error) {
+	n, err := f.conn.Read(p)
+	if n > 0 {
+		f.once.Do(func() { _ = f.conn.SetReadDeadline(time.Time{}) })
+	}
+	return n, err
+}
+
 func (s *session) run() {
 	port := s.devicePort()
 	var wg sync.WaitGroup
@@ -260,7 +311,7 @@ func (s *session) run() {
 	go func() {
 		defer wg.Done()
 		defer s.stop()
-		r := rfc2217.NewReader(s.conn)
+		r := rfc2217.NewReader(&firstByteReader{conn: s.conn})
 		r.OnCommand = s.handleCommand
 		r.OnNegotiate = s.handleNegotiate
 		// A subnegotiation past the reader's cap is broken or hostile — the

@@ -126,7 +126,7 @@ func (f *flexibleRuntime) SidecarManager() container.SidecarManager { return nil
 func (f *flexibleRuntime) BuildManager() container.BuildManager     { return nil }
 func (f *flexibleRuntime) ServiceManager() container.ServiceManager { return nil }
 func (f *flexibleRuntime) Close() error                             { return nil }
-func (f *flexibleRuntime) SetupFirewall(ctx context.Context, id, host string, port int, extraPorts []int) error {
+func (f *flexibleRuntime) SetupFirewall(ctx context.Context, id, host string, port int, extraPorts []int, extraAddr string) error {
 	if f.setupFirewallFn != nil {
 		return f.setupFirewallFn(ctx, id, host, port, extraPorts)
 	}

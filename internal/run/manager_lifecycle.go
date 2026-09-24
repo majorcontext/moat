@@ -426,7 +426,7 @@ func (m *Manager) setupFirewall(ctx context.Context, r *Run) error {
 	if !r.FirewallEnabled || r.ProxyPort <= 0 {
 		return nil
 	}
-	if err := m.defaultRuntime().SetupFirewall(ctx, r.ContainerID, r.ProxyHost, r.ProxyPort, r.AllowedHostPorts); err != nil {
+	if err := m.defaultRuntime().SetupFirewall(ctx, r.ContainerID, r.ProxyHost, r.ProxyPort, r.AllowedHostPorts, r.SerialHostAddr); err != nil {
 		r.SetStateFailedAt(fmt.Sprintf("firewall setup failed: %v", err), time.Now())
 		if stopErr := m.defaultRuntime().StopContainer(ctx, r.ContainerID); stopErr != nil {
 			ui.Warnf("Failed to stop container after firewall error: %v", stopErr)

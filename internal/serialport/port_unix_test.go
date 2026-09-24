@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"golang.org/x/sys/unix"
+
 	"github.com/creack/pty"
 )
 
@@ -296,4 +298,109 @@ func readBaud(t *testing.T, p Port) uint32 {
 		t.Fatalf("reading settings: %v", err)
 	}
 	return got.Baud
+}
+
+// applyFraming hand-computes PARENB/PARODD/CSTOPB/CS5..CS8/CRTSCTS, and until
+// now nothing read those bits back: currentSettings decoded only Baud, and the
+// broker-level tests use serialtest.FakePort, whose ApplySettings just records
+// the struct. An odd/even transposition or a wrong CSIZE mask would pass the
+// whole suite and surface only as corruption on real hardware.
+//
+// The coverage is split deliberately. A pty cannot model character size or
+// parity — it is 8-bit clean, so CSIZE and PARENB are normalized away and a
+// round-trip through one reports CS8/no-parity no matter what was written.
+// Asserting those against a pty would be a test that passes against a value the
+// system cannot produce, which is the exact failure this branch has shipped
+// twice. So the bits a pty does honor are checked through a real tty, and the
+// bits it erases are checked directly on the termios applyFraming produces.
+func TestApplyFramingSetsTermiosBits(t *testing.T) {
+	bit := func(s Settings) unix.Termios {
+		var tio unix.Termios
+		applyFraming(&tio, s)
+		return tio
+	}
+
+	t.Run("data bits select the CSIZE value", func(t *testing.T) {
+		for bits, want := range map[uint8]uint32{5: unix.CS5, 6: unix.CS6, 7: unix.CS7, 8: unix.CS8} {
+			tio := bit(Settings{DataBits: bits})
+			if got := tio.Cflag & unix.CSIZE; got != want {
+				t.Errorf("DataBits %d -> CSIZE %#x, want %#x", bits, got, want)
+			}
+		}
+	})
+
+	t.Run("odd and even parity are not transposed", func(t *testing.T) {
+		odd := bit(Settings{Parity: ParityOdd})
+		if odd.Cflag&unix.PARENB == 0 || odd.Cflag&unix.PARODD == 0 {
+			t.Errorf("ParityOdd -> Cflag %#x, want PARENB|PARODD set", odd.Cflag)
+		}
+		even := bit(Settings{Parity: ParityEven})
+		if even.Cflag&unix.PARENB == 0 {
+			t.Errorf("ParityEven -> Cflag %#x, want PARENB set", even.Cflag)
+		}
+		if even.Cflag&unix.PARODD != 0 {
+			t.Errorf("ParityEven -> Cflag %#x, want PARODD clear", even.Cflag)
+		}
+		none := bit(Settings{Parity: ParityNone})
+		if none.Cflag&(unix.PARENB|unix.PARODD) != 0 {
+			t.Errorf("ParityNone -> Cflag %#x, want PARENB and PARODD clear", none.Cflag)
+		}
+	})
+
+	t.Run("switching away from a setting clears its bits", func(t *testing.T) {
+		// Cflag is read-modify-write from the live termios, so a stale PARODD
+		// or CSTOPB left behind by a previous session would silently ride along.
+		tio := bit(Settings{Parity: ParityOdd, StopBits: 2, FlowControl: FlowRTSCTS})
+		applyFraming(&tio, Settings{Parity: ParityNone, StopBits: 1, FlowControl: FlowNone})
+		if tio.Cflag&(unix.PARENB|unix.PARODD) != 0 {
+			t.Errorf("parity bits survived a switch to ParityNone: Cflag %#x", tio.Cflag)
+		}
+		if tio.Cflag&unix.CSTOPB != 0 {
+			t.Errorf("CSTOPB survived a switch to one stop bit: Cflag %#x", tio.Cflag)
+		}
+		if tio.Cflag&unix.CRTSCTS != 0 {
+			t.Errorf("CRTSCTS survived a switch to FlowNone: Cflag %#x", tio.Cflag)
+		}
+	})
+}
+
+// The companion to the direct-bit test above: the settings a pty does honor
+// must survive the whole Open -> ApplySettings -> ioctl path, not just the
+// in-memory struct.
+func TestApplySettingsRoundTripsWhatAPtyHonors(t *testing.T) {
+	cases := []struct {
+		name string
+		in   Settings
+	}{
+		{"one stop bit, no flow", Settings{Baud: 115200, DataBits: 8, StopBits: 1, FlowControl: FlowNone}},
+		{"two stop bits", Settings{Baud: 19200, DataBits: 8, StopBits: 2, FlowControl: FlowNone}},
+		{"hardware flow control", Settings{Baud: 115200, DataBits: 8, StopBits: 1, FlowControl: FlowRTSCTS}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path, _ := openPTY(t)
+			p, err := Open(path)
+			if err != nil {
+				t.Fatalf("Open: %v", err)
+			}
+			defer p.Close()
+
+			if err := p.ApplySettings(tc.in); err != nil {
+				t.Fatalf("ApplySettings(%+v): %v", tc.in, err)
+			}
+			got, err := p.(*tty).currentSettings()
+			if err != nil {
+				t.Fatalf("currentSettings: %v", err)
+			}
+			if got.StopBits != tc.in.StopBits {
+				t.Errorf("StopBits on the line = %d, want %d", got.StopBits, tc.in.StopBits)
+			}
+			if got.FlowControl != tc.in.FlowControl {
+				t.Errorf("FlowControl on the line = %d, want %d", got.FlowControl, tc.in.FlowControl)
+			}
+			if got.Baud != tc.in.Baud {
+				t.Errorf("Baud on the line = %d, want %d", got.Baud, tc.in.Baud)
+			}
+		})
+	}
 }

@@ -211,8 +211,17 @@ Two further boundaries are worth stating plainly:
   host address the run's container uses (the default bridge gateway on Docker on Linux,
   host loopback on Docker Desktop for macOS/Windows — where the container's URL names
   `host.docker.internal`, which forwards to that loopback — and the default network
-  gateway on Apple containers), not every interface. A connection from
-  another machine on the network is refused. Processes running on this machine — and any
+  gateway on Apple containers), not every interface.
+
+  Bind address is a narrowing, not an off-host boundary. On Linux the bound address is a
+  local address, and the kernel accepts packets for any local address arriving on any
+  interface, so a sender that can get a packet routed to this host — one on the same
+  network segment, for instance — reaches the listener. Moat installs no host firewall
+  rule. On an untrusted network, add one yourself (for example an `INPUT` rule dropping
+  traffic to the listener's port from anything but the container subnet), or do not attach
+  devices there.
+
+  Processes running on this machine — and any
   container on it, not just the owning run — can still connect to it, and the broker
   serves one connection at a time, so a competing local connection can hold the device but
   cannot interleave bytes with the run's session.
@@ -247,8 +256,10 @@ A device connection is raw TCP to the RFC2217 listener, not HTTP through the pro
 under strict policy the device's port is added to the firewall allowlist automatically
 alongside the proxy port. A strict run with `devices:` works without further
 configuration — the ports are OS-assigned per device, so there is nothing to list in
-`network.host`. Entries you list there yourself (`network.host: [8080]`, say) open the same
-way they always did.
+`network.host`. Entries you list there yourself (`network.host: [8080]`, say) stay
+proxy-mediated exactly as before — they are not added to the firewall's direct-egress
+allowlist, which carries only the device listeners and is scoped to the address those
+listeners bind.
 
 ## Observability
 

@@ -889,7 +889,7 @@ func (s *stubRuntime) SidecarManager() container.SidecarManager { return nil }
 func (s *stubRuntime) BuildManager() container.BuildManager     { return nil }
 func (s *stubRuntime) ServiceManager() container.ServiceManager { return nil }
 func (s *stubRuntime) Close() error                             { return nil }
-func (s *stubRuntime) SetupFirewall(context.Context, string, string, int, []int) error {
+func (s *stubRuntime) SetupFirewall(context.Context, string, string, int, []int, string) error {
 	panic("not implemented")
 }
 
