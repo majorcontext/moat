@@ -508,3 +508,38 @@ func TestRenameToTheSameNameKeepsThePin(t *testing.T) {
 		t.Fatalf("pin lost or altered by a same-name rename: %+v (ok=%v)", p, ok)
 	}
 }
+
+func TestListIsSortedByName(t *testing.T) {
+	s, err := OpenPinStore(filepath.Join(t.TempDir(), "devices.json"))
+	if err != nil {
+		t.Fatalf("OpenPinStore: %v", err)
+	}
+	for _, n := range []string{"zed", "esp32", "probe", "aaa"} {
+		if err := s.Put(PinFor(n, Device{VID: "303a", PID: "1001", Serial: n})); err != nil {
+			t.Fatalf("Put: %v", err)
+		}
+	}
+	// Map order is not a stable order. `moat device list` derives the name it
+	// suggests for moat.yaml from the first pin that verifies, so an unsorted
+	// snapshot makes that suggestion change between invocations; the same
+	// snapshot is also what gets written to disk, reshuffling the file on
+	// every write.
+	all, err := s.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	want := []string{"aaa", "esp32", "probe", "zed"}
+	for i, w := range want {
+		if all[i].Name != w {
+			t.Fatalf("List = %v, want sorted %v", names(all), want)
+		}
+	}
+}
+
+func names(pins []Pin) []string {
+	out := make([]string, len(pins))
+	for i, p := range pins {
+		out[i] = p.Name
+	}
+	return out
+}

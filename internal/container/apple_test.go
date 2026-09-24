@@ -427,3 +427,62 @@ func TestIsKernelNotConfiguredError(t *testing.T) {
 		}
 	}
 }
+
+// The Apple firewall path renders its own IPv4 accept rules, and had no test
+// while its Docker twin was covered. The two properties that matter are the
+// ones a regression would quietly drop: every rule names a destination, and an
+// empty destination produces a no-op rather than an unscoped allow.
+func TestAppleAcceptRulesForSerialPorts(t *testing.T) {
+	got := appleAcceptRulesFor([]int{45678, 45679}, "192.168.64.1")
+	want := "$IPT -w -A OUTPUT -p tcp -d 192.168.64.1 --dport 45678 -j ACCEPT\n" +
+		"$IPT -w -A OUTPUT -p tcp -d 192.168.64.1 --dport 45679 -j ACCEPT\n"
+	if got != want {
+		t.Fatalf("appleAcceptRulesFor = %q, want %q", got, want)
+	}
+	// The destination is the point: without -d, the container reaches that
+	// port on every host it can route to, not just the serial listener.
+	if strings.Contains(got, "--dport") && !strings.Contains(got, "-d 192.168.64.1 --dport") {
+		t.Fatalf("appleAcceptRulesFor emitted an unscoped rule: %q", got)
+	}
+	// Companion: no ports is a no-op.
+	if got := appleAcceptRulesFor(nil, "192.168.64.1"); got != ":" {
+		t.Fatalf("appleAcceptRulesFor(nil) = %q, want \":\"", got)
+	}
+	// Companion, and the one that must fail closed: ports with no destination
+	// must never fall back to a bare --dport.
+	if got := appleAcceptRulesFor([]int{45678}, ""); got != ":" {
+		t.Fatalf("appleAcceptRulesFor(ports, \"\") = %q, want \":\" — never an unscoped rule", got)
+	}
+}
+
+// The port-range validation is duplicated per runtime, and only the Docker
+// copy was covered. An out-of-range port reaching the script would render a
+// rule iptables rejects, and the script's exit status does not surface it.
+func TestAppleSetupFirewallRejectsOutOfRangePorts(t *testing.T) {
+	r := &AppleRuntime{}
+	for _, tc := range []struct {
+		name       string
+		proxyPort  int
+		extraPorts []int
+	}{
+		{"proxy port zero", 0, nil},
+		{"proxy port too high", 70000, nil},
+		{"extra port zero", 8080, []int{0}},
+		{"extra port too high", 8080, []int{70000}},
+		{"extra port negative", 8080, []int{-1}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := r.SetupFirewall(context.Background(), "container", "host", tc.proxyPort, tc.extraPorts, "192.168.64.1")
+			if err == nil {
+				t.Fatal("SetupFirewall accepted an out-of-range port")
+			}
+			// Assert on the reason. Without validation this call still fails —
+			// there is no such container, and on this host no `container` CLI
+			// — so a bare "an error happened" check passes with the guard
+			// deleted.
+			if !strings.Contains(err.Error(), "must be between 1 and 65535") {
+				t.Fatalf("SetupFirewall failed for the wrong reason: %v", err)
+			}
+		})
+	}
+}

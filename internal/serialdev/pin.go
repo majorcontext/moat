@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -327,6 +328,11 @@ func (s *PinStore) snapshotLocked() []Pin {
 	for _, p := range s.pins {
 		out = append(out, p)
 	}
+	// Sorted, because this backs both List and the on-disk file. Map order
+	// would make `moat device list` pick a different pin from one invocation
+	// to the next when two names verify against one device, and would reshuffle
+	// devices.json on every write.
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
 }
 

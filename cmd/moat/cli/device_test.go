@@ -514,3 +514,27 @@ func TestDeviceRenameRejectsANameMoatYAMLCannotUse(t *testing.T) {
 		t.Errorf("rename to a valid name failed: %v", err)
 	}
 }
+
+func TestDeviceRenameToTheSameNameSaysNothingChanged(t *testing.T) {
+	out, err := runRename(t, []serialdev.Pin{serialdev.PinFor("esp32", esp32())}, "esp32", "esp32")
+	if err != nil {
+		t.Fatalf("rename to the same name: %v", err)
+	}
+	if !strings.Contains(out, "nothing changed") {
+		t.Fatalf("output should say nothing moved:\n%s", out)
+	}
+	// The companion that matters: it must NOT claim a rename, because the
+	// follow-up instruction ("update the `name:` in moat.yaml") would send the
+	// user after an edit that is already correct.
+	if strings.Contains(out, "Renamed") || strings.Contains(out, "moat.yaml") {
+		t.Fatalf("a no-op rename reported work and asked for a moat.yaml edit:\n%s", out)
+	}
+}
+
+// And an unknown name is still an error even when both arguments match: there
+// is no pin to leave alone.
+func TestDeviceRenameOfAnUnknownNameToItselfIsAnError(t *testing.T) {
+	if _, err := runRename(t, nil, "esp32", "esp32"); err == nil {
+		t.Fatal("renaming an unpinned name to itself must fail")
+	}
+}

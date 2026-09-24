@@ -230,7 +230,9 @@ func printOrphanPins(w io.Writer, pins []serialdev.Pin, attached []serialdev.Dev
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Pinned but not attached — moat device forget <name> to re-approve")
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "NAME\tUSB ID\tSERIAL NUMBER")
+	// PINNED TO, not SERIAL NUMBER: a serial-less pin holds a physical port,
+	// and "port 1-3" under a serial-number header reads as a malformed serial.
+	fmt.Fprintln(tw, "NAME\tUSB ID\tPINNED TO")
 	for _, p := range orphans {
 		id := p.Serial
 		if id == "" {
@@ -341,6 +343,14 @@ func renameDevice(cmd *cobra.Command, args []string) error {
 
 	switch err := pins.Rename(from, to); {
 	case err == nil:
+		if from == to {
+			// A no-op at the store level. Reporting a rename and telling the
+			// user to go update moat.yaml to match would send them after an
+			// edit that is already correct.
+			fmt.Fprintf(cmd.OutOrStdout(), "%s %s is already the name of that pin; nothing changed.\n",
+				ui.OKTag(), ui.Bold(to))
+			return nil
+		}
 	case errors.Is(err, serialdev.ErrPinNotFound):
 		return fmt.Errorf("no device named %q is pinned\n"+
 			"  Run `moat device list` to see which names are in use", from)

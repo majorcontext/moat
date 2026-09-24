@@ -14,6 +14,7 @@ import (
 
 	keeplib "github.com/majorcontext/keep"
 
+	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/credential"
 	"github.com/majorcontext/moat/internal/log"
 	awsprov "github.com/majorcontext/moat/internal/providers/aws"
@@ -432,6 +433,18 @@ func (s *Server) listenSerialAt(rc *RunContext, specs []SerialDeviceSpec, bindAd
 				"so the listener must bind a specific container-facing host address", bindAddr)
 		}
 	}
+	// Same reasoning, one field over: a device name flows into the capture
+	// file's path (`serial-<name>.capture` under the run directory), so an
+	// unvalidated "../.." escapes the run tree and appends device bytes
+	// wherever it lands. moat.yaml can never produce such a name — config
+	// validation rejects it — but the daemon does not trust its socket input,
+	// and this path serves the persisted-runs file too.
+	for _, spec := range specs {
+		if !config.ValidDeviceName(spec.Name) {
+			return nil, fmt.Errorf("refusing to serve serial device %q: a device name must start with a "+
+				"letter or digit and contain only lowercase letters, digits, - and _", spec.Name)
+		}
+	}
 
 	addrs := make(map[string]string, len(specs))
 	// Only the listeners this call opens are rolled back on failure. The run
@@ -448,9 +461,20 @@ func (s *Server) listenSerialAt(rc *RunContext, specs []SerialDeviceSpec, bindAd
 		// port, so a field added to SerialDeviceSpec had two places to reach
 		// and nothing to signal when only one was updated.
 		approved := approvedFromSpec(spec)
-		if port, ok := pins[spec.Name]; ok && port > 0 {
+		port, pinned := pins[spec.Name]
+		switch {
+		case pinned && port > 0:
 			ref, addr, err = s.serial.ListenAt(rc.RunID, approved, bindAddr, port)
-		} else {
+		case pins != nil:
+			// A pinned registration names the ports the container's frozen
+			// MOAT_SERIAL_*_URL already points at. A device in this set with
+			// no pin would bind somewhere else and answer nothing, while the
+			// daemon reported success — the silent failure ListenAt exists to
+			// avoid. Refuse instead.
+			s.serial.CloseListeners(opened)
+			return nil, fmt.Errorf("serial device %q has no pinned port in this registration; "+
+				"re-binding it elsewhere would leave the container's address pointing at nothing", spec.Name)
+		default:
 			ref, addr, err = s.serial.Listen(rc.RunID, approved, bindAddr)
 		}
 		if err != nil {

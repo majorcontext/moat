@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/majorcontext/moat/internal/serialbroker"
@@ -313,5 +314,124 @@ func TestRegisterRequestSerialPinsSurviveJSON(t *testing.T) {
 	got := roundTripRegisterRequest(t, req)
 	if got.SerialPins["esp32"] != 41234 {
 		t.Fatalf("round trip gave SerialPins %v, want esp32=41234", got.SerialPins)
+	}
+}
+
+// The daemon does not trust its socket input. A device name flows into the
+// capture file's path, so a name with path separators or ".." would append
+// device bytes outside the run directory. moat.yaml can never produce one —
+// config validation rejects it — but a caller on the socket, or a tampered
+// persisted-runs file on the restore path, is not moat.yaml.
+func TestListenSerialRejectsANameThatEscapesTheRunDirectory(t *testing.T) {
+	for _, bad := range []string{
+		"../../../../tmp/pwn",
+		"..",
+		"a/b",
+		"Esp32", // uppercase: rejected by the same rule moat.yaml enforces
+		"",
+	} {
+		t.Run(bad, func(t *testing.T) {
+			s := newServerWithBroker(t)
+			rc := NewRunContext("run-a")
+
+			spec := serialSpec(bad)
+			addrs, err := s.listenSerial(rc, []SerialDeviceSpec{spec}, "127.0.0.1")
+			if err == nil {
+				t.Fatalf("listenSerial accepted the name %q, returning %v", bad, addrs)
+			}
+			// No listener may survive the rejection: a claim taken for a name
+			// the daemon then refuses would block the device until restart.
+			if len(rc.AllowedHostPorts) != 0 {
+				t.Errorf("a rejected device still took a port allowance: %v", rc.AllowedHostPorts)
+			}
+		})
+	}
+}
+
+// Companion: a valid name still gets its listener, so the guard cannot be
+// passing by rejecting everything.
+func TestListenSerialAcceptsAValidName(t *testing.T) {
+	s := newServerWithBroker(t)
+	rc := NewRunContext("run-a")
+
+	addrs, err := s.listenSerial(rc, []SerialDeviceSpec{serialSpec("esp32-2")}, "127.0.0.1")
+	if err != nil {
+		t.Fatalf("listenSerial rejected a valid name: %v", err)
+	}
+	if _, ok := addrs["esp32-2"]; !ok {
+		t.Fatalf("no address for the device: %v", addrs)
+	}
+}
+
+// The bind-address guard has the same standing as the name guard and had no
+// test: a wildcard or garbage address must be refused at the boundary, because
+// binding 0.0.0.0 exposes unauthenticated hardware to everything that can
+// route to this host.
+func TestListenSerialRejectsAWildcardOrGarbageBindAddress(t *testing.T) {
+	for _, bad := range []string{"0.0.0.0", "::", "not-an-ip", "localhost"} {
+		t.Run(bad, func(t *testing.T) {
+			s := newServerWithBroker(t)
+			rc := NewRunContext("run-a")
+			if _, err := s.listenSerial(rc, []SerialDeviceSpec{serialSpec("esp32")}, bad); err == nil {
+				t.Fatalf("listenSerial bound %q", bad)
+			}
+		})
+	}
+	// Companion: a specific address is accepted, and so is an empty one (which
+	// falls through to the broker's loopback default).
+	for _, ok := range []string{"127.0.0.1", ""} {
+		s := newServerWithBroker(t)
+		rc := NewRunContext("run-a")
+		if _, err := s.listenSerial(rc, []SerialDeviceSpec{serialSpec("esp32")}, ok); err != nil {
+			t.Fatalf("listenSerial rejected bind address %q: %v", ok, err)
+		}
+	}
+}
+
+// A pinned registration (re-register after a daemon restart, or a restore from
+// the persisted-runs file) names the exact ports the container's frozen
+// MOAT_SERIAL_*_URL already points at. A device in that set with no pin must
+// be refused: binding it somewhere else returns 201 while the container's
+// address answers nothing, which is the silent failure the pinned path exists
+// to prevent.
+func TestListenSerialPinnedRefusesADeviceWithNoPin(t *testing.T) {
+	s := newServerWithBroker(t)
+	rc := NewRunContext("run-a")
+	orig, err := s.listenSerial(rc, []SerialDeviceSpec{serialSpec("esp32")}, "127.0.0.1")
+	if err != nil {
+		t.Fatalf("listenSerial: %v", err)
+	}
+	s.serial.Close() //nolint:errcheck — Close on an open broker does not fail
+
+	// Restore asks for two devices but carries an address only for the first.
+	s2 := newServerWithBroker(t)
+	rc2 := NewRunContext("run-a")
+	specs := []SerialDeviceSpec{serialSpec("esp32"), serialSpec2("probe")}
+	if _, err := s2.ListenSerialPinned(rc2, specs, "127.0.0.1", orig); err == nil {
+		t.Fatal("ListenSerialPinned accepted a device with no pinned address")
+	} else if !strings.Contains(err.Error(), "probe") {
+		t.Fatalf("the error should name the unpinned device: %v", err)
+	}
+
+	// Rollback: the device that did open a listener must not keep its claim,
+	// or a failed restore blocks that hardware until the daemon restarts.
+	rc3 := NewRunContext("run-b")
+	if _, err := s2.listenSerial(rc3, []SerialDeviceSpec{serialSpec("esp32")}, "127.0.0.1"); err != nil {
+		t.Fatalf("the rejected restore left a claim behind: %v", err)
+	}
+}
+
+// Companion: an unpinned registration (a fresh run) still gets OS-assigned
+// ports, so the guard cannot be rejecting the normal path.
+func TestListenSerialUnpinnedStillAssignsPorts(t *testing.T) {
+	s := newServerWithBroker(t)
+	rc := NewRunContext("run-a")
+
+	addrs, err := s.listenSerial(rc, []SerialDeviceSpec{serialSpec("esp32")}, "127.0.0.1")
+	if err != nil {
+		t.Fatalf("listenSerial with no pins: %v", err)
+	}
+	if _, ok := addrs["esp32"]; !ok {
+		t.Fatalf("no address assigned: %v", addrs)
 	}
 }

@@ -407,3 +407,69 @@ func TestApplySettingsRoundTripsWhatAPtyHonors(t *testing.T) {
 		})
 	}
 }
+
+// Every ioctl reaches the device through f.Fd(), which takes no reference on
+// the descriptor. If Close could run between Fd() returning and the syscall,
+// the number could already belong to something else the daemon opened — and a
+// TIOCMBIS landing there would toggle DTR/RTS on an unrelated port, resetting
+// hardware this session never touched. Close takes the same mutex the ioctls
+// hold, so an ioctl is never in flight across it, and one that arrives after
+// fails instead of using a stale fd.
+func TestIoctlsAfterCloseFailInsteadOfUsingAStaleFd(t *testing.T) {
+	path, _ := openPTY(t)
+	p, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if err := p.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name string
+		call func() error
+	}{
+		{"SetModem", func() error { return p.SetModem(Modem{DTR: true}) }},
+		{"ApplySettings", func() error { return p.ApplySettings(Settings{Baud: 115200}) }},
+		{"SendBreak", p.SendBreak},
+		{"FlushBuffers", p.FlushBuffers},
+		{"ModemStatus", func() error { _, merr := p.ModemStatus(); return merr }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.call()
+			if err == nil {
+				t.Fatal("an ioctl on a closed port must fail")
+			}
+			// Assert on the reason: an ioctl on a recycled fd may well fail
+			// too (ENOTTY), and that failure is the bug, not the fix.
+			if !strings.Contains(err.Error(), "port is closed") {
+				t.Fatalf("failed for the wrong reason: %v", err)
+			}
+		})
+	}
+}
+
+// Companion: the same calls succeed on an open port, so the guard is not
+// simply refusing everything.
+func TestIoctlsOnAnOpenPortSucceed(t *testing.T) {
+	path, _ := openPTY(t)
+	p, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { p.Close() }) //nolint:errcheck // test cleanup
+
+	// Only the ioctls a pty actually implements. TIOCMGET/TIOCMBIS are not
+	// among them — a pty has no modem lines, which is why the broker serves
+	// real hardware over RFC2217 rather than relaying a pty — so SetModem and
+	// ModemStatus cannot be exercised here without a board attached.
+	if err := p.ApplySettings(Settings{Baud: 115200}); err != nil {
+		t.Errorf("ApplySettings: %v", err)
+	}
+	if err := p.FlushBuffers(); err != nil {
+		t.Errorf("FlushBuffers: %v", err)
+	}
+	if err := p.SendBreak(); err != nil {
+		t.Errorf("SendBreak: %v", err)
+	}
+}

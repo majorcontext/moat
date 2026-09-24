@@ -11,6 +11,7 @@ import (
 
 	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/daemon"
+	"github.com/majorcontext/moat/internal/log"
 	"github.com/majorcontext/moat/internal/serialdev"
 )
 
@@ -409,14 +410,25 @@ func SerialEnv(hostAddr string, addrs map[string]string) []string {
 	sort.Strings(names)
 
 	env := make([]string, 0, len(names)+1)
+	usable := make([]string, 0, len(names))
 	for _, name := range names {
 		_, port, err := splitPort(addrs[name])
 		if err != nil {
+			// Drop the name from the list too. Advertising a device in
+			// MOAT_SERIAL_DEVICES with no MOAT_SERIAL_<X>_URL to go with it
+			// reads to the agent as a broken environment, and it has no way to
+			// tell that from a device it should be able to open.
+			log.Warn("serial device has an unusable listener address; omitting it from the run's environment",
+				"device", name, "addr", addrs[name], "error", err)
 			continue
 		}
+		usable = append(usable, name)
 		env = append(env, fmt.Sprintf("%s=rfc2217://%s:%s", SerialEnvVarName(name), hostAddr, port))
 	}
-	env = append(env, "MOAT_SERIAL_DEVICES="+strings.Join(names, ","))
+	if len(usable) == 0 {
+		return nil
+	}
+	env = append(env, "MOAT_SERIAL_DEVICES="+strings.Join(usable, ","))
 	return env
 }
 

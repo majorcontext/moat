@@ -1655,7 +1655,7 @@ moat proxy restart
 ## moat device
 
 Inspect serial devices attached to this machine and manage which ones runs may use. See
-[Serial devices](../guides/18-serial-devices.md).
+[Serial devices](../guides/18-serial-devices.md). With no subcommand, `moat device` lists.
 
 ### moat device list
 

@@ -111,11 +111,19 @@ serial number. Every later run must present the same device:
 
 ```
 $ moat run -- esptool chip-id
-Error: cannot use the serial devices this run requires:
+cannot use the serial devices this run requires:
+  board: serial device does not match its pin: "board" was pinned to serial 0001
+  but the attached device reports 0002
+  If you intended to swap devices, run: moat device forget board
+Error: creating run: cannot use the serial devices this run requires:
   board: serial device does not match its pin: "board" was pinned to serial 0001
   but the attached device reports 0002
   If you intended to swap devices, run: moat device forget board
 ```
+
+The first block is the pre-flight check, which reports every requested device before
+anything is built. The run then fails for the same reason when it reaches container
+creation, which is the gate that actually refuses it.
 
 This is a hard failure, not a warning. Two boards of the same model are indistinguishable
 by USB ID, so without pinning an agent could flash the wrong one.
@@ -216,7 +224,7 @@ Two further boundaries are worth stating plainly:
 - **Only ttys are exposed.** The broker refuses to open anything that is not a tty
   character device, so storage, HID, and smartcard devices cannot be reached through this
   mechanism at all.
-- **The RFC2217 port is reachable only from this machine.** The protocol has no
+- **The RFC2217 port is not exposed on every interface.** The protocol has no
   authentication, so access is scoped by bind address: each device's listener binds the
   host address the run's container uses (the default bridge gateway on Docker on Linux,
   host loopback on Docker Desktop for macOS/Windows — where the container's URL names
@@ -236,13 +244,19 @@ Two further boundaries are worth stating plainly:
   serves one connection at a time, so a competing local connection can hold the device but
   cannot interleave bytes with the run's session.
 
+  A connection that holds the port without doing anything is dropped after 30 seconds. A
+  client that negotiates, sends a com-port command, or writes to the device is exempt from
+  then on and may sit quiet for as long as it likes — but a monitor that only *reads*
+  (`nc host port` watching boot logs) never proves itself and is dropped on that budget.
+  Use an RFC2217 client, which negotiates on connect.
+
 ## One run at a time
 
 A device is claimed exclusively while a run holds it. A second run that wants the same
 device fails rather than interleaving bytes on the same line:
 
 ```
-Error: registering run with proxy daemon: daemon returned 409: serial device "board" (/dev/ttyUSB0) is already in use by run run_015e8e26...
+Error: creating run: registering run with proxy daemon: daemon returned 409: serial device "board" (/dev/ttyUSB0) is already in use by run run_015e8e26...
 ```
 
 The claim is released when the run stops — including when the run dies without

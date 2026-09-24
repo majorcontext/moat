@@ -22,6 +22,13 @@ type listener struct {
 	approved Approved
 	ln       net.Listener
 
+	// wg counts in-flight connection handlers. close() waits on it so a
+	// revoked run's sessions have finished emitting before the caller tears
+	// down the sinks those events are written to — otherwise the detach
+	// record, with its tx/rx counts, races the run's store being closed and
+	// is either lost or re-opens a second handle on the audit chain.
+	wg sync.WaitGroup
+
 	mu     sync.Mutex
 	cur    *session
 	closed bool
@@ -54,7 +61,11 @@ func (l *listener) serve() {
 			continue
 		}
 		backoff = 0
-		go l.handle(conn)
+		l.wg.Add(1)
+		go func() {
+			defer l.wg.Done()
+			l.handle(conn)
+		}()
 	}
 }
 
@@ -203,6 +214,10 @@ func (l *listener) close() {
 	if s != nil {
 		s.stop()
 	}
+	// Both ends of a stopped session are closed, so each pump unblocks and the
+	// handler returns; waiting here is bounded by that, and it is what makes
+	// Revoke a synchronization point for the run's device events.
+	l.wg.Wait()
 }
 
 // session pumps bytes between one container connection and one serial port,
@@ -300,9 +315,10 @@ func (s *session) stop() {
 // slow-loris this exists to stop.
 const handshakeTimeout = 30 * time.Second
 
-// settle clears the handshake deadline. Called once the peer has completed a
-// negotiation, a com-port command, or sent payload for the device — each is
-// proof of a real client. After that the session may sit quiet indefinitely,
+// settle clears the handshake deadline. Called once the peer has sent a
+// negotiation the server answers, a com-port command, or payload for the
+// device — each is proof of a real client. An unanswered WONT/DONT does not
+// count; see handleNegotiate. After that the session may sit quiet indefinitely,
 // which is what a serial console legitimately does.
 func (s *session) settle() {
 	s.settled.Do(func() { _ = s.conn.SetReadDeadline(time.Time{}) })
@@ -402,7 +418,6 @@ func (s *session) logPumpExit(dir string, err error) {
 // A client that offers options and never hears back will stall before it sends
 // any com-port command, so silence here looks like a hung device.
 func (s *session) handleNegotiate(verb, option byte) {
-	s.settle()
 	var reply byte
 	switch verb {
 	case rfc2217.Do:
@@ -420,9 +435,18 @@ func (s *session) handleNegotiate(verb, option byte) {
 			reply = rfc2217.Dont
 		}
 	default:
-		// WONT/DONT need no answer; answering would loop.
+		// WONT/DONT need no answer; answering would loop. They must also not
+		// settle the handshake: they are three bytes the server never replies
+		// to and that leave no state behind, so treating them as proof of a
+		// real client hands a silent peer the device permanently — the exact
+		// denial handshakeTimeout exists to stop.
 		return
 	}
+	// Past this point the peer sent a verb we answer, which is proof of a real
+	// client. Settle before writing the reply, not after: a peer that has
+	// stopped reading would block writeConn, and the deadline must already be
+	// cleared by then.
+	s.settle()
 	var buf bytes.Buffer
 	if err := rfc2217.WriteNegotiate(&buf, reply, option); err != nil {
 		log.Debug("telnet negotiation encode failed", "device", s.listener.approved.Name, "err", err)

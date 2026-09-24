@@ -1,6 +1,9 @@
 package storage
 
 import (
+	"fmt"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -70,5 +73,52 @@ func TestReadDeviceEventsWithNoFileIsEmpty(t *testing.T) {
 	}
 	if len(got) != 0 {
 		t.Fatalf("got %+v, want none", got)
+	}
+}
+
+// Concurrent device sessions append to one devices.jsonl: a run with two
+// approved devices has a session goroutine per device, both emitting into the
+// same file. A record written as two O_APPEND calls (payload, then newline)
+// lets another writer land between them, producing a line that parses as
+// neither event — and ReadDeviceEvents drops unparseable lines silently, so
+// both disappear rather than failing loudly.
+func TestWriteDeviceEventConcurrentWritersStayOnTheirOwnLines(t *testing.T) {
+	store, err := NewRunStore(t.TempDir(), "run-a")
+	if err != nil {
+		t.Fatalf("NewRunStore: %v", err)
+	}
+
+	const writers, each = 8, 25
+	var wg sync.WaitGroup
+	for w := 0; w < writers; w++ {
+		wg.Add(1)
+		go func(w int) {
+			defer wg.Done()
+			for i := 0; i < each; i++ {
+				if err := store.WriteDeviceEvent(DeviceEvent{
+					Device: fmt.Sprintf("dev%d", w),
+					Kind:   "attach",
+					Detail: strings.Repeat("x", 256), // long enough to span a write boundary
+				}); err != nil {
+					t.Errorf("WriteDeviceEvent: %v", err)
+					return
+				}
+			}
+		}(w)
+	}
+	wg.Wait()
+
+	events, readErr := store.ReadDeviceEvents()
+	if readErr != nil {
+		t.Fatalf("ReadDeviceEvents: %v", readErr)
+	}
+	if len(events) != writers*each {
+		t.Fatalf("read %d events, want %d — lines were interleaved and silently dropped",
+			len(events), writers*each)
+	}
+	for _, ev := range events {
+		if len(ev.Detail) != 256 {
+			t.Fatalf("event detail is %d bytes, want 256: a record was spliced", len(ev.Detail))
+		}
 	}
 }

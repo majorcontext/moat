@@ -131,3 +131,75 @@ func TestComPortCommandConstantsHaveStableWireValues(t *testing.T) {
 		}
 	}
 }
+
+func TestSetControlConstantsHaveStableWireValues(t *testing.T) {
+	// Same reasoning as the command-namespace pin above, applied to the values
+	// that carry the feature: DTR and RTS transitions are how an ESP32 is
+	// driven into its bootloader, and every other test compares a wire byte
+	// against the same symbolic constant under test. Swap the DTR and RTS
+	// blocks and the whole suite still passes while real hardware stops
+	// resetting — and the failure looks like a flaky board, not a bug here.
+	for _, tc := range []struct {
+		name string
+		got  byte
+		want byte
+	}{
+		{"ControlQueryFlow", ControlQueryFlow, 0},
+		{"ControlFlowNone", ControlFlowNone, 1},
+		{"ControlFlowXONXOFF", ControlFlowXONXOFF, 2},
+		{"ControlFlowRTSCTS", ControlFlowRTSCTS, 3},
+		{"ControlQueryBreak", ControlQueryBreak, 4},
+		{"ControlBreakOn", ControlBreakOn, 5},
+		{"ControlBreakOff", ControlBreakOff, 6},
+		{"ControlQueryDTR", ControlQueryDTR, 7},
+		{"ControlDTROn", ControlDTROn, 8},
+		{"ControlDTROff", ControlDTROff, 9},
+		{"ControlQueryRTS", ControlQueryRTS, 10},
+		{"ControlRTSOn", ControlRTSOn, 11},
+		{"ControlRTSOff", ControlRTSOff, 12},
+		{"ControlQueryFlowIn", ControlQueryFlowIn, 13},
+		{"ControlFlowNoneIn", ControlFlowNoneIn, 14},
+		{"ControlFlowXONXOFFIn", ControlFlowXONXOFFIn, 15},
+		{"ControlFlowRTSCTSIn", ControlFlowRTSCTSIn, 16},
+		{"ControlFlowDCD", ControlFlowDCD, 17},
+		{"ControlFlowDTRIn", ControlFlowDTRIn, 18},
+		{"ControlFlowDSR", ControlFlowDSR, 19},
+	} {
+		if tc.got != tc.want {
+			t.Errorf("%s = %d, want the RFC 2217 wire value %d", tc.name, tc.got, tc.want)
+		}
+	}
+}
+
+func TestModemStateBitsHaveStableWireValues(t *testing.T) {
+	// NOTIFY-MODEMSTATE is a bitmask: these are the high nibble (RFC 2217
+	// §3.3.2), and the low nibble carries the "delta" bits. Shifting them down
+	// would collide with the deltas, and a client would read a CTS change as
+	// CTS itself. Nothing else in the suite compares these to a literal.
+	for _, tc := range []struct {
+		name string
+		got  byte
+		want byte
+	}{
+		{"ModemCTS", ModemCTS, 0x10},
+		{"ModemDSR", ModemDSR, 0x20},
+		{"ModemRI", ModemRI, 0x40},
+		{"ModemCD", ModemCD, 0x80},
+	} {
+		if tc.got != tc.want {
+			t.Errorf("%s = %#x, want the RFC 2217 wire value %#x", tc.name, tc.got, tc.want)
+		}
+	}
+	// Companion: the four are distinct and occupy the high nibble only, so a
+	// combined mask cannot alias a delta bit.
+	if all := ModemCTS | ModemDSR | ModemRI | ModemCD; all != 0xF0 {
+		t.Fatalf("the modem-state bits cover %#x, want the high nibble 0xF0", all)
+	}
+}
+
+func TestPurgeConstantsHaveStableWireValues(t *testing.T) {
+	if PurgeReceiveBuffer != 1 || PurgeTransmitBuffer != 2 || PurgeBothBuffers != 3 {
+		t.Fatalf("purge values are %d/%d/%d, want the RFC 2217 wire values 1/2/3",
+			PurgeReceiveBuffer, PurgeTransmitBuffer, PurgeBothBuffers)
+	}
+}

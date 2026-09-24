@@ -417,9 +417,11 @@ func setLogContext(r *Run) {
 
 // setupFirewall configures iptables-based network isolation inside the
 // container so that only traffic through the credential-injecting proxy is
-// allowed — plus the run's explicitly allowed host ports (RFC2217 serial
-// listeners, network.host entries, base_url endpoints), which are raw TCP the
-// proxy cannot relay. Returns an error if firewall setup fails, since a strict
+// allowed — plus the run's RFC2217 serial listener ports, which are raw TCP
+// the proxy cannot relay, scoped to the host address those listeners bind.
+// network.host and base_url ports are deliberately NOT in this list: they stay
+// enforced on the proxy's own path, and a rule here would grant raw egress to
+// that port on any reachable host. Returns an error if firewall setup fails, since a strict
 // network policy without a working firewall would leave the container
 // unprotected.
 func (m *Manager) setupFirewall(ctx context.Context, r *Run) error {

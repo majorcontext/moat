@@ -733,7 +733,7 @@ devices:
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `name` | string | yes | Device name. Lowercase letters, digits, `-` and `_`. Becomes `MOAT_SERIAL_<NAME>_URL`. |
+| `name` | string | yes | Device name. Must start with a lowercase letter or digit, then lowercase letters, digits, `-` and `_`. Becomes `MOAT_SERIAL_<NAME>_URL`. |
 | `match.usb` | string | yes | USB ID as `vid:pid`, e.g. `"303a:1001"` — the USB ID column `moat device list` prints. |
 | `match.interface` | string | no | Picks one UART of a multi-interface bridge (FT2232H, CP2105, ESP-Prog) whose ports share a USB ID. The number from the IFACE column of `moat device list`, e.g. `"1"` for the second port. Omit for single-UART devices. |
 | `baud` | int | no | Initial line rate. Tools normally set their own. |

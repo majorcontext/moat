@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/run"
@@ -60,12 +61,7 @@ func preflightDevices(ctx context.Context, devices []config.DeviceEntry, pf devi
 	defer pins.Close() //nolint:errcheck // read-only; an error on close has no consequence
 
 	if missing := run.DetectMissingDevices(ctx, devices, enum, pins); len(missing) > 0 {
-		fmt.Fprintln(out, run.FormatMissingDevices(missing))
-		for _, m := range missing {
-			if m.FixCommand != "" {
-				fmt.Fprintf(out, "  %s: %s\n", m.Name, m.FixCommand)
-			}
-		}
+		printMissingDevices(out, missing)
 		return false
 	}
 
@@ -73,6 +69,22 @@ func preflightDevices(ctx context.Context, devices []config.DeviceEntry, pf devi
 		printConsentNotice(out, newPins)
 	}
 	return true
+}
+
+// printMissingDevices reports every device the run cannot use, with the
+// command that fixes each one.
+func printMissingDevices(out io.Writer, missing []run.MissingDevice) {
+	detail := run.FormatMissingDevices(missing)
+	fmt.Fprintln(out, detail)
+	for _, m := range missing {
+		// A pin mismatch already spells the fix out inside its own detail
+		// ("If you intended to swap devices, run: moat device forget X").
+		// Printing it again one line later reads as two different
+		// instructions for the same problem.
+		if m.FixCommand != "" && !strings.Contains(detail, m.FixCommand) {
+			fmt.Fprintf(out, "  %s: %s\n", m.Name, m.FixCommand)
+		}
+	}
 }
 
 // printConsentNotice states what first use of each device approves. The

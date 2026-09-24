@@ -251,7 +251,15 @@ func (b *Broker) CloseListeners(refs []*ListenerRef) {
 		if cur, ok := b.byDevice[key]; ok && cur == l {
 			delete(b.byDevice, key)
 		}
-		b.byRun[l.runID] = removeString(b.byRun[l.runID], key)
+		if rest := removeString(b.byRun[l.runID], key); len(rest) > 0 {
+			b.byRun[l.runID] = rest
+		} else {
+			// Drop the key rather than leaving an empty slice: a rejected
+			// registration rolls back through here and never reaches Revoke,
+			// so an empty entry would accumulate one per refused claim for the
+			// daemon's whole life.
+			delete(b.byRun, l.runID)
+		}
 	}
 	b.mu.Unlock()
 

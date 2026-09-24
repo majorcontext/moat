@@ -207,3 +207,38 @@ func TestDetectNewPinsMatchesWhatResolveDevicesPins(t *testing.T) {
 		}
 	}
 }
+
+// A pin mismatch spells its own fix out inside the detail line. Printing the
+// FixCommand again one line later reads as two different instructions for one
+// problem.
+func TestPreflightDoesNotRepeatAFixTheDetailAlreadyGives(t *testing.T) {
+	var out bytes.Buffer
+	missing := []run.MissingDevice{{
+		Name:       "board",
+		Reason:     run.ReasonDevicePinMismatch,
+		Detail:     "serial device does not match its pin\n  If you intended to swap devices, run: moat device forget board",
+		FixCommand: "moat device forget board",
+	}}
+	printMissingDevices(&out, missing)
+
+	if got := strings.Count(out.String(), "moat device forget board"); got != 1 {
+		t.Fatalf("the fix command appears %d times, want 1:\n%s", got, out.String())
+	}
+}
+
+// Companion: a detail that does NOT carry its fix still gets the fix line, so
+// the dedup cannot be swallowing guidance the user needs.
+func TestPreflightStillPrintsAFixTheDetailOmits(t *testing.T) {
+	var out bytes.Buffer
+	missing := []run.MissingDevice{{
+		Name:       "board",
+		Reason:     run.ReasonDeviceNotFound,
+		Detail:     "no device matching USB ID 303a:1001 is attached",
+		FixCommand: "moat device forget board",
+	}}
+	printMissingDevices(&out, missing)
+
+	if !strings.Contains(out.String(), "board: moat device forget board") {
+		t.Fatalf("the fix command was dropped:\n%s", out.String())
+	}
+}

@@ -814,12 +814,23 @@ func TestSetupFirewallRejectsOutOfRangePorts(t *testing.T) {
 	// rather than emit an iptables command that errors or silently truncates.
 	r := &DockerRuntime{}
 	for _, p := range []int{0, -1, 65536} {
-		if err := r.SetupFirewall(context.Background(), "c", "h", 8080, []int{p}, "172.17.0.1"); err == nil {
+		err := r.SetupFirewall(context.Background(), "c", "h", 8080, []int{p}, "172.17.0.1")
+		if err == nil {
 			t.Fatalf("SetupFirewall with extra port %d must fail", p)
+		}
+		// Assert on the reason: with the range check deleted this call still
+		// fails (there is no container "c"), so a bare non-nil check passes
+		// while the guard is gone.
+		if !strings.Contains(err.Error(), "must be between 1 and 65535") {
+			t.Fatalf("SetupFirewall with extra port %d failed for the wrong reason: %v", p, err)
 		}
 	}
 	// Companion: the proxy port keeps its own range check.
-	if err := r.SetupFirewall(context.Background(), "c", "h", 0, nil, ""); err == nil {
+	err := r.SetupFirewall(context.Background(), "c", "h", 0, nil, "")
+	if err == nil {
 		t.Fatal("SetupFirewall with proxy port 0 must fail")
+	}
+	if !strings.Contains(err.Error(), "must be between 1 and 65535") {
+		t.Fatalf("SetupFirewall with proxy port 0 failed for the wrong reason: %v", err)
 	}
 }

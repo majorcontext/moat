@@ -164,6 +164,16 @@ export MOAT_SERIAL_TEST_DEVICE=/dev/cu.usbmodem-14201
 go test -tags=e2e ./internal/e2e/ -run TestSerialDeviceEndToEnd
 ```
 
+### MOAT_SERIAL_TEST_ECHO
+
+Test-only: set to `1` when the device named by `MOAT_SERIAL_TEST_DEVICE` echoes what is
+written to it — a loopback jumper, or a board running an echo sketch. The hardware E2E
+test then asserts the data path end to end instead of only opening the port.
+
+```bash
+export MOAT_SERIAL_TEST_ECHO=1
+```
+
 The variable is read by the tests, never by `moat` itself.
 
 ### AWS credentials

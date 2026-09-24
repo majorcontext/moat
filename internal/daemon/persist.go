@@ -45,9 +45,11 @@ type PersistedRun struct {
 	SerialBindAddr string             `json:"serial_bind_addr,omitempty"`
 	SerialAddrs    map[string]string  `json:"serial_addrs,omitempty"`
 
-	// AllowedHostPorts are the host ports (serial listeners, network.host
-	// entries) the run's firewall must let through. Restore re-populates them
-	// so a restarted daemon still enforces the run's network policy.
+	// AllowedHostPorts are the run's serial-listener host ports, the only ones
+	// the firewall lets the container reach directly — network.host and
+	// base_url ports stay proxy-mediated, and a rule here would grant them raw
+	// egress. Restore re-populates them so a restarted daemon still enforces
+	// the run's network policy.
 	AllowedHostPorts []int `json:"allowed_host_ports,omitempty"`
 }
 

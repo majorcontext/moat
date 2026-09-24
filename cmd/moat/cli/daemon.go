@@ -300,9 +300,13 @@ func runDaemon(_ *cobra.Command, _ []string) error {
 	// created them may be gone (kill -9, crash, a machine that rebooted
 	// mid-run); without this, the device stays "in use by run <dead-id>" until
 	// the daemon itself is restarted.
+	// Revoke first: it waits for the run's sessions to finish, and those
+	// sessions emit the detach record with its byte counts. Closing the stores
+	// first loses that record — and worse, the late event re-opens a second
+	// handle on the same audit.db, which collides on the chain's sequence key.
 	lc.SetOnCleanup(func(_, runID string) {
-		cleanupStore(runID)
 		serialBroker.Revoke(runID)
+		cleanupStore(runID)
 	})
 	lc.SetOnEmpty(idleShutdown.Reset)
 

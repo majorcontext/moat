@@ -556,11 +556,15 @@ func (s *RunStore) WriteDeviceEvent(ev DeviceEvent) error {
 	if err != nil {
 		return fmt.Errorf("marshaling device event: %w", err)
 	}
-	if _, writeErr := f.Write(data); writeErr != nil {
+	// One write, newline included. Every approved device in a run emits from
+	// its own session goroutine into this same file, so splitting the record
+	// and its terminator into two O_APPEND writes lets two events interleave
+	// into a line that neither ReadDeviceEvents nor `moat devices` can parse —
+	// and the reader drops unparseable lines silently, so both events vanish.
+	if _, writeErr := f.Write(append(data, '\n')); writeErr != nil {
 		return fmt.Errorf("writing device event: %w", writeErr)
 	}
-	_, err = f.Write([]byte("\n"))
-	return err
+	return nil
 }
 
 // ReadDeviceEvents returns all recorded serial device events.

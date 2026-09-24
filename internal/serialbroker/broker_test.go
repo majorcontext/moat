@@ -2177,6 +2177,92 @@ func TestOneStrayByteDoesNotDisarmTheHandshakeBudget(t *testing.T) {
 	assertServerClosed(t, c, "one incomplete byte then silence")
 }
 
+// The companion the stray-byte test misses: a COMPLETE negotiation the server
+// never answers. WONT/DONT fall into handleNegotiate's default branch, produce
+// no reply and no state, and cost the peer three bytes — so if they settled the
+// session, the eviction guard would be trivially disarmed by a client that then
+// says nothing and holds the device until the daemon restarts.
+func TestUnansweredNegotiationDoesNotDisarmTheHandshakeBudget(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		verb byte
+	}{
+		{"WONT", rfc2217.Wont},
+		{"DONT", rfc2217.Dont},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fp := serialtest.NewFakePort(t)
+			b := serialbroker.New(serialbroker.Options{
+				OpenPort:         func(string) (serialport.Port, error) { return fp, nil },
+				HandshakeTimeout: 150 * time.Millisecond,
+			})
+			t.Cleanup(func() { b.Close() })
+			_, addr, err := b.Listen("run-a", serialbroker.Approved{Name: "esp32", Device: testDevice()}, "")
+			if err != nil {
+				t.Fatalf("Listen: %v", err)
+			}
+
+			c := dial(t, addr)
+			if err := rfc2217.WriteNegotiate(c, tc.verb, rfc2217.OptionComPort); err != nil {
+				t.Fatalf("WriteNegotiate: %v", err)
+			}
+			assertServerClosed(t, c, "a negotiation the server does not answer, then silence")
+		})
+	}
+}
+
+// Companion to the pair above: a negotiation the server DOES answer settles the
+// session, so a real client that negotiates and then waits for the device to
+// say something first is not evicted mid-handshake.
+func TestAnsweredNegotiationSettlesTheSession(t *testing.T) {
+	fp := serialtest.NewFakePort(t)
+	b := serialbroker.New(serialbroker.Options{
+		OpenPort:         func(string) (serialport.Port, error) { return fp, nil },
+		HandshakeTimeout: 150 * time.Millisecond,
+	})
+	t.Cleanup(func() { b.Close() })
+	_, addr, err := b.Listen("run-a", serialbroker.Approved{Name: "esp32", Device: testDevice()}, "")
+	if err != nil {
+		t.Fatalf("Listen: %v", err)
+	}
+
+	c := dial(t, addr)
+	if err := rfc2217.WriteNegotiate(c, rfc2217.Will, rfc2217.OptionComPort); err != nil {
+		t.Fatalf("WriteNegotiate: %v", err)
+	}
+	// Drain the DO reply so the settle has certainly happened, then sit well
+	// past the budget.
+	if err := c.SetReadDeadline(time.Now().Add(3 * time.Second)); err != nil {
+		t.Fatalf("SetReadDeadline: %v", err)
+	}
+	reply := make([]byte, 3)
+	if _, err := io.ReadFull(c, reply); err != nil {
+		t.Fatalf("reading the negotiation reply: %v", err)
+	}
+	time.Sleep(500 * time.Millisecond)
+
+	// Observe the DEVICE side: a client-side Write lands in the local buffer
+	// and succeeds even after the peer closed, so it cannot tell a live
+	// session from an evicted one.
+	if _, err := c.Write([]byte("AT\r\n")); err != nil {
+		t.Fatalf("write after the budget: %v", err)
+	}
+	done := make(chan []byte, 1)
+	go func() {
+		buf := make([]byte, 4)
+		n, _ := io.ReadFull(fp.Peer(), buf)
+		done <- buf[:n]
+	}()
+	select {
+	case got := <-done:
+		if string(got) != "AT\r\n" {
+			t.Fatalf("device saw %q, want %q", got, "AT\r\n")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("nothing reached the device: an answered negotiation did not settle the session")
+	}
+}
+
 // The other companion: a real client must NOT be evicted. Payload reaching the
 // device settles the session, after which a serial console may legitimately sit
 // quiet far longer than the budget.
@@ -2238,5 +2324,58 @@ func assertServerClosed(t *testing.T, c net.Conn, what string) {
 	var ne net.Error
 	if errors.As(err, &ne) && ne.Timeout() {
 		t.Fatalf("%s: connection was never closed (our own read timed out); the budget did not fire", what)
+	}
+}
+
+// Revoke is the synchronization point for a run's device events. The daemon's
+// liveness reaper revokes a dead run and then closes its stores; if Revoke
+// returned while a session was still shutting down, the detach record — the
+// one carrying the session's byte counts — would arrive after the sink it
+// writes to was gone. Worse, that late event re-opens the run's audit store,
+// leaving a second handle on a database whose chain has a sequence primary
+// key.
+func TestRevokeWaitsForTheDetachEvent(t *testing.T) {
+	var mu sync.Mutex
+	var kinds []string
+	fp := serialtest.NewFakePort(t)
+	b := serialbroker.New(serialbroker.Options{
+		OpenPort: func(string) (serialport.Port, error) { return fp, nil },
+		Log: func(e serialbroker.Event) {
+			mu.Lock()
+			defer mu.Unlock()
+			kinds = append(kinds, e.Kind)
+		},
+	})
+	t.Cleanup(func() { b.Close() })
+	_, addr, err := b.Listen("run-a", serialbroker.Approved{Name: "esp32", Device: testDevice()}, "")
+	if err != nil {
+		t.Fatalf("Listen: %v", err)
+	}
+
+	c := dial(t, addr)
+	// Drive real traffic so the session is fully up before the revoke.
+	if _, err := c.Write([]byte("AT\r\n")); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	buf := make([]byte, 4)
+	if _, err := io.ReadFull(fp.Peer(), buf); err != nil {
+		t.Fatalf("device never saw the write: %v", err)
+	}
+
+	b.Revoke("run-a")
+
+	// Read immediately — no sleep. A Revoke that does not wait leaves the
+	// detach to a goroutine that has not run yet.
+	mu.Lock()
+	got := append([]string(nil), kinds...)
+	mu.Unlock()
+	var sawDetach bool
+	for _, k := range got {
+		if k == "detach" {
+			sawDetach = true
+		}
+	}
+	if !sawDetach {
+		t.Fatalf("Revoke returned before the detach event was emitted: %v", got)
 	}
 }

@@ -49,7 +49,7 @@ Verification walks the chain from the first entry to the last, recomputing each 
 
 ### Event types
 
-The audit log records six categories of events: console output (container stdout and stderr), network requests through the proxy (including method, URL, status, duration, and credential usage), credential injection (when credentials are injected and for which hosts), secret resolution from external backends (the secret value itself is never logged), SSH agent operations (key listing, signing approvals, and denials), and container lifecycle transitions (creation, start, stop, and privileged mode usage).
+The audit log records seven categories of events: console output (container stdout and stderr), network requests through the proxy (including method, URL, status, duration, and credential usage), credential injection (when credentials are injected and for which hosts), secret resolution from external backends (the secret value itself is never logged), SSH agent operations (key listing, signing approvals, and denials), serial device sessions (attach, detach, and conflicts, each carrying the USB identity of the device actually reached), and container lifecycle transitions (creation, start, stop, and privileged mode usage).
 
 Events are appended to the chain as they occur. The audit log is stored as a SQLite database within the run's storage directory.
 

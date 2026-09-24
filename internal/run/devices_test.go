@@ -566,3 +566,36 @@ func TestAmbiguousFixEmitsParseableDevicesYAML(t *testing.T) {
 		t.Fatalf("non-bridge ambiguity should suggest unplugging, got: %s", got)
 	}
 }
+
+func TestSerialEnvOmitsADeviceWithAnUnusableAddress(t *testing.T) {
+	env := SerialEnv("172.17.0.1", map[string]string{
+		"esp32":  "172.17.0.1:45678",
+		"broken": "not-an-address",
+	})
+
+	joined := strings.Join(env, "\n")
+	// The usable device is present...
+	if !strings.Contains(joined, "MOAT_SERIAL_ESP32_URL=rfc2217://172.17.0.1:45678") {
+		t.Fatalf("the usable device lost its URL:\n%s", joined)
+	}
+	// ...and the broken one is absent from BOTH halves. Listing a name in
+	// MOAT_SERIAL_DEVICES with no matching URL variable reads to the agent as
+	// a broken environment it cannot diagnose.
+	if strings.Contains(joined, "MOAT_SERIAL_BROKEN_URL") {
+		t.Errorf("an unusable address still produced a URL:\n%s", joined)
+	}
+	if strings.Contains(joined, "broken") {
+		t.Errorf("an unusable device is still advertised in MOAT_SERIAL_DEVICES:\n%s", joined)
+	}
+	if !strings.Contains(joined, "MOAT_SERIAL_DEVICES=esp32") {
+		t.Errorf("the device list should name exactly the usable device:\n%s", joined)
+	}
+}
+
+func TestSerialEnvWithNoUsableAddressesIsEmpty(t *testing.T) {
+	// Companion: an env consisting of nothing but MOAT_SERIAL_DEVICES="" tells
+	// the agent devices exist and none work. Return nothing instead.
+	if env := SerialEnv("172.17.0.1", map[string]string{"broken": "nope"}); len(env) != 0 {
+		t.Fatalf("SerialEnv = %v, want nothing when no address is usable", env)
+	}
+}

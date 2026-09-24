@@ -15,8 +15,23 @@ type tty struct {
 	f    *os.File
 	path string
 
-	mu    sync.Mutex
-	modem Modem
+	mu     sync.Mutex
+	modem  Modem
+	closed bool
+}
+
+// errClosed reports an ioctl attempted after the port was closed.
+//
+// Every ioctl below reaches the device through t.f.Fd(), which takes no
+// reference on the descriptor — once Close has run, that number can be reused
+// by anything the daemon opens next, and an ioctl landing on it would apply to
+// an unrelated file. On a serial port that means a DTR/RTS transition on some
+// other run's board, i.e. a reset of hardware this session never touched. The
+// close flag and the mutex together make that impossible: Close takes the same
+// lock the ioctls hold, so no ioctl is ever in flight across it, and any that
+// arrives afterwards fails here instead of using a stale fd.
+func (t *tty) errClosed(op string) error {
+	return fmt.Errorf("%s on %s: port is closed", op, t.path)
 }
 
 // Open opens a serial device.
@@ -53,8 +68,13 @@ func Open(path string) (Port, error) {
 
 func (t *tty) Read(p []byte) (int, error)  { return t.f.Read(p) }
 func (t *tty) Write(p []byte) (int, error) { return t.f.Write(p) }
-func (t *tty) Close() error                { return t.f.Close() }
-func (t *tty) Name() string                { return t.path }
+func (t *tty) Close() error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.closed = true
+	return t.f.Close()
+}
+func (t *tty) Name() string { return t.path }
 
 // makeRaw puts the line in raw mode: no echo, no canonical processing, no
 // input or output translation. Anything else would mangle firmware payloads.
@@ -74,6 +94,9 @@ func (t *tty) makeRaw() error {
 func (t *tty) ApplySettings(s Settings) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	if t.closed {
+		return t.errClosed("applying line settings")
+	}
 
 	fd := int(t.f.Fd())
 	tio, err := unix.IoctlGetTermios(fd, getTermiosReq)
@@ -96,6 +119,9 @@ func (t *tty) ApplySettings(s Settings) error {
 func (t *tty) SetModem(m Modem) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	if t.closed {
+		return t.errClosed("setting modem lines")
+	}
 
 	fd := int(t.f.Fd())
 	set, clear := 0, 0
@@ -131,6 +157,9 @@ func (t *tty) SetModem(m Modem) error {
 func (t *tty) ModemStatus() (ModemStatus, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	if t.closed {
+		return ModemStatus{}, t.errClosed("reading modem lines")
+	}
 
 	bits, err := unix.IoctlGetInt(int(t.f.Fd()), unix.TIOCMGET)
 	if err != nil {
@@ -148,6 +177,9 @@ func (t *tty) ModemStatus() (ModemStatus, error) {
 func (t *tty) SendBreak() error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	if t.closed {
+		return t.errClosed("sending break")
+	}
 	if err := sendBreak(int(t.f.Fd())); err != nil {
 		return fmt.Errorf("sending break on %s: %w", t.path, err)
 	}
@@ -160,6 +192,9 @@ func (t *tty) SendBreak() error {
 func (t *tty) FlushBuffers() error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	if t.closed {
+		return t.errClosed("flushing")
+	}
 	if err := flushBuffers(int(t.f.Fd())); err != nil {
 		return fmt.Errorf("flushing %s: %w", t.path, err)
 	}
