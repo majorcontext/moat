@@ -563,11 +563,11 @@ func (r *AppleRuntime) Close() error {
 	return nil
 }
 
-// appleAcceptRulesFor renders the IPv4 accept rules for the run's allowed
-// host ports as `$IPT`-prefixed shell lines (the Apple script routes through
-// $IPT to prefer iptables-legacy). Empty input yields a no-op `:`.
-// appleAcceptRulesFor mirrors acceptRulesFor: destination-scoped, and a no-op
-// without a destination.
+// appleAcceptRulesFor renders the IPv4 accept rules for the run's
+// serial-listener ports as `$IPT`-prefixed shell lines (the Apple script routes
+// through $IPT to prefer iptables-legacy). It mirrors acceptRulesFor: every
+// rule is scoped to dest, and empty ports or an empty dest yield a no-op `:`
+// rather than an unscoped allow.
 func appleAcceptRulesFor(ports []int, dest string) string {
 	if len(ports) == 0 || dest == "" {
 		return ":"

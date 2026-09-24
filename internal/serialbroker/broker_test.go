@@ -2124,3 +2124,119 @@ func TestFullRecordModeAnnouncesItselfOnAttach(t *testing.T) {
 		}
 	}
 }
+
+// A connection holds the device from the moment it is accepted, and TCP
+// keepalives only notice a peer that vanished — one that stays connected and
+// says nothing is indistinguishable from a healthy idle console. Without a
+// handshake budget, connecting first and staying silent denies the container
+// its device for the life of the daemon.
+func TestSilentPeerIsEvictedAndReleasesTheDevice(t *testing.T) {
+	fp := serialtest.NewFakePort(t)
+	b := serialbroker.New(serialbroker.Options{
+		OpenPort:         func(string) (serialport.Port, error) { return fp, nil },
+		HandshakeTimeout: 150 * time.Millisecond,
+	})
+	t.Cleanup(func() { b.Close() })
+	_, addr, err := b.Listen("run-a", serialbroker.Approved{Name: "esp32", Device: testDevice()}, "")
+	if err != nil {
+		t.Fatalf("Listen: %v", err)
+	}
+
+	silent := dial(t, addr)
+	// Say nothing at all. The budget must expire and free the slot.
+	assertServerClosed(t, silent, "silent peer")
+
+	// The device must be usable again — that is the point of evicting it.
+	next := dial(t, addr)
+	if _, err := next.Write([]byte("hello")); err != nil {
+		t.Fatalf("second client could not use the released device: %v", err)
+	}
+}
+
+// Companion, and the one that matters: clearing the budget on the first byte
+// would let a peer send a single stray byte and then hold the device forever,
+// which is the same denial with one byte of extra effort. The budget clears
+// only on a completed unit, so one byte then silence is still evicted.
+func TestOneStrayByteDoesNotDisarmTheHandshakeBudget(t *testing.T) {
+	fp := serialtest.NewFakePort(t)
+	b := serialbroker.New(serialbroker.Options{
+		OpenPort:         func(string) (serialport.Port, error) { return fp, nil },
+		HandshakeTimeout: 150 * time.Millisecond,
+	})
+	t.Cleanup(func() { b.Close() })
+	_, addr, err := b.Listen("run-a", serialbroker.Approved{Name: "esp32", Device: testDevice()}, "")
+	if err != nil {
+		t.Fatalf("Listen: %v", err)
+	}
+
+	c := dial(t, addr)
+	// A bare IAC: the start of a command, never completed.
+	if _, err := c.Write([]byte{255}); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	assertServerClosed(t, c, "one incomplete byte then silence")
+}
+
+// The other companion: a real client must NOT be evicted. Payload reaching the
+// device settles the session, after which a serial console may legitimately sit
+// quiet far longer than the budget.
+func TestActiveSessionSurvivesPastTheHandshakeBudget(t *testing.T) {
+	fp := serialtest.NewFakePort(t)
+	b := serialbroker.New(serialbroker.Options{
+		OpenPort:         func(string) (serialport.Port, error) { return fp, nil },
+		HandshakeTimeout: 150 * time.Millisecond,
+	})
+	t.Cleanup(func() { b.Close() })
+	_, addr, err := b.Listen("run-a", serialbroker.Approved{Name: "esp32", Device: testDevice()}, "")
+	if err != nil {
+		t.Fatalf("Listen: %v", err)
+	}
+
+	c := dial(t, addr)
+	// Observe the DEVICE side, not the client's own Write: a TCP write lands in
+	// the local buffer and succeeds even after the peer has closed, so a
+	// client-side error check cannot tell an evicted session from a live one.
+	readFromDevice := func(what string) {
+		t.Helper()
+		if _, err := c.Write([]byte("AT\r\n")); err != nil {
+			t.Fatalf("%s: write: %v", what, err)
+		}
+		done := make(chan []byte, 1)
+		go func() {
+			buf := make([]byte, 4)
+			n, _ := io.ReadFull(fp.Peer(), buf)
+			done <- buf[:n]
+		}()
+		select {
+		case got := <-done:
+			if string(got) != "AT\r\n" {
+				t.Fatalf("%s: device saw %q, want %q", what, got, "AT\r\n")
+			}
+		case <-time.After(3 * time.Second):
+			t.Fatalf("%s: nothing reached the device; the session was evicted", what)
+		}
+	}
+
+	readFromDevice("first write settles the session")
+	// Wait out several budgets, then confirm bytes still reach the device.
+	time.Sleep(500 * time.Millisecond)
+	readFromDevice("after the budget would have expired")
+}
+
+// assertServerClosed fails unless the peer actually closed the connection. A
+// bare "Read returned an error" is not enough: our own read deadline also
+// returns an error, so a test asserting err != nil passes whether the server
+// evicted us or we simply stopped waiting — which silently inverts the thing
+// these tests exist to prove.
+func assertServerClosed(t *testing.T, c net.Conn, what string) {
+	t.Helper()
+	_ = c.SetReadDeadline(time.Now().Add(3 * time.Second))
+	_, err := c.Read(make([]byte, 1))
+	if err == nil {
+		t.Fatalf("%s: connection still open; it holds the device", what)
+	}
+	var ne net.Error
+	if errors.As(err, &ne) && ne.Timeout() {
+		t.Fatalf("%s: connection was never closed (our own read timed out); the budget did not fire", what)
+	}
+}

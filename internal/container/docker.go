@@ -774,14 +774,15 @@ func (r *DockerRuntime) gvisorAvailable() bool {
 	return r.gvisorAvail
 }
 
-// acceptRulesFor renders the IPv4 accept rules for the run's allowed host
+// acceptRulesFor renders the IPv4 accept rules for the run's serial-listener
 // ports, as a shell snippet indented for the firewall script. Empty input
-// yields a no-op comment so the script stays syntactically valid either way.
-// acceptRulesFor emits one ACCEPT per serial-listener port, scoped to the
-// address that listener binds. The destination is not optional: a bare
+// yields a no-op so the script stays syntactically valid either way.
+//
+// dest is the host address the container dials to reach those listeners, and
+// every rule is scoped to it. The destination is not optional: a bare
 // "--dport N -j ACCEPT" would grant the container egress to that port on every
-// host on the network, which is a wider hole than the device access it exists
-// to permit.
+// host it can route to, a far wider hole than the device access it exists to
+// permit. An empty dest therefore emits nothing rather than falling back.
 func acceptRulesFor(ports []int, dest string) string {
 	if len(ports) == 0 || dest == "" {
 		return ":"

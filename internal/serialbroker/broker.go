@@ -20,6 +20,7 @@ import (
 	"net"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/majorcontext/moat/internal/log"
 	"github.com/majorcontext/moat/internal/serialdev"
@@ -79,6 +80,12 @@ type Options struct {
 	// it per device; a broker configured for all interfaces is a deployment
 	// choice that must be made explicitly, not a default.
 	BindAddr string
+
+	// HandshakeTimeout bounds how long an accepted connection may hold the
+	// device without completing a negotiation, a com-port command, or sending
+	// payload. Zero uses the default. See handshakeTimeout in session.go for
+	// why this is an absolute budget rather than an idle timeout.
+	HandshakeTimeout time.Duration
 }
 
 // Broker owns the listeners and device claims for every registered run.
@@ -87,6 +94,7 @@ type Broker struct {
 	logEvent     func(Event)
 	openRecorder func(runID, device string) (io.WriteCloser, error)
 	bindAddr     string
+	handshakeTO  time.Duration
 
 	mu       sync.Mutex
 	closed   bool
@@ -119,6 +127,7 @@ func New(opts Options) *Broker {
 		logEvent:     opts.Log,
 		openRecorder: opts.OpenRecorder,
 		bindAddr:     opts.BindAddr,
+		handshakeTO:  opts.HandshakeTimeout,
 		byDevice:     map[string]*listener{},
 		byRun:        map[string][]string{},
 	}

@@ -100,9 +100,14 @@ type Run struct {
 	// destination-less ACCEPT and turn a proxy allowlist into open egress.
 	AllowedHostPorts []int
 
-	// SerialHostAddr is the address AllowedHostPorts are scoped to — the
-	// container-facing host address the serial listeners bind. Empty when the
-	// run has no serial devices.
+	// SerialHostAddr is the address AllowedHostPorts are scoped to: the host
+	// address the *container* dials to reach its serial listeners.
+	//
+	// This is the advertised host, which is not always the bind address — on
+	// Docker Desktop the listener binds 127.0.0.1 and the container reaches it
+	// through host.docker.internal. The firewall rule has to name what the
+	// container puts in the packet, or it matches nothing. Empty when the run
+	// has no serial devices.
 	SerialHostAddr string
 
 	// ProxyRegReq is the registration request saved for re-registration

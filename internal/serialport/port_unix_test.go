@@ -321,9 +321,12 @@ func TestApplyFramingSetsTermiosBits(t *testing.T) {
 	}
 
 	t.Run("data bits select the CSIZE value", func(t *testing.T) {
-		for bits, want := range map[uint8]uint32{5: unix.CS5, 6: unix.CS6, 7: unix.CS7, 8: unix.CS8} {
+		// uint64 on both sides: Termios.Cflag is uint32 on Linux and uint64 on
+		// Darwin, so a width-specific comparison compiles on one and not the
+		// other — and `go vet` on Linux never sees the Darwin failure.
+		for bits, want := range map[uint8]uint64{5: unix.CS5, 6: unix.CS6, 7: unix.CS7, 8: unix.CS8} {
 			tio := bit(Settings{DataBits: bits})
-			if got := tio.Cflag & unix.CSIZE; got != want {
+			if got := uint64(tio.Cflag & unix.CSIZE); got != want {
 				t.Errorf("DataBits %d -> CSIZE %#x, want %#x", bits, got, want)
 			}
 		}

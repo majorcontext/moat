@@ -102,7 +102,11 @@ func (l *listener) handle(conn net.Conn) {
 	// stays connected and silent is indistinguishable from a healthy idle
 	// console. Require the first byte promptly, then drop the deadline — a
 	// console legitimately sits quiet for hours once it is actually talking.
-	_ = conn.SetReadDeadline(time.Now().Add(handshakeTimeout))
+	budget := l.broker.handshakeTO
+	if budget <= 0 {
+		budget = handshakeTimeout
+	}
+	_ = conn.SetReadDeadline(time.Now().Add(budget))
 
 	defer func() {
 		l.mu.Lock()
@@ -211,6 +215,10 @@ type session struct {
 	tx atomic.Int64 // bytes sent to the container
 	rx atomic.Int64 // bytes received from the container
 
+	// settled fires once the peer proves it is a real client, clearing the
+	// handshake deadline. See handshakeTimeout.
+	settled sync.Once
+
 	mu       sync.Mutex
 	settings serialport.Settings
 	modem    serialport.Modem
@@ -279,27 +287,25 @@ func (s *session) stop() {
 	}
 }
 
-// handshakeTimeout bounds how long a newly accepted connection may stay silent.
-// The device slot is taken at accept, and TCP keepalives only detect a peer
-// that vanished — a peer that stays connected and says nothing looks exactly
-// like a healthy idle console, and holds the device until the daemon restarts.
+// handshakeTimeout bounds how long a newly accepted connection may hold the
+// device without completing anything. The slot is taken at accept, and TCP
+// keepalives only detect a peer that vanished — a peer that stays connected and
+// says nothing looks exactly like a healthy idle console, and holds the device
+// until the daemon restarts.
+//
+// It is an absolute budget, not a rolling one, and it is cleared by a completed
+// protocol unit rather than by any byte arriving. Clearing on the first byte
+// would let a single stray IAC disable the guard permanently, and re-arming per
+// byte would let a peer dribble one byte every 29s forever — both leave the
+// slow-loris this exists to stop.
 const handshakeTimeout = 30 * time.Second
 
-// firstByteReader clears the read deadline once the peer actually says
-// something. The deadline is only there to evict a connection that never
-// speaks; a console that is genuinely in use may then sit quiet for hours,
-// which is the behavior the broker deliberately does not time out.
-type firstByteReader struct {
-	conn net.Conn
-	once sync.Once
-}
-
-func (f *firstByteReader) Read(p []byte) (int, error) {
-	n, err := f.conn.Read(p)
-	if n > 0 {
-		f.once.Do(func() { _ = f.conn.SetReadDeadline(time.Time{}) })
-	}
-	return n, err
+// settle clears the handshake deadline. Called once the peer has completed a
+// negotiation, a com-port command, or sent payload for the device — each is
+// proof of a real client. After that the session may sit quiet indefinitely,
+// which is what a serial console legitimately does.
+func (s *session) settle() {
+	s.settled.Do(func() { _ = s.conn.SetReadDeadline(time.Time{}) })
 }
 
 func (s *session) run() {
@@ -311,7 +317,7 @@ func (s *session) run() {
 	go func() {
 		defer wg.Done()
 		defer s.stop()
-		r := rfc2217.NewReader(&firstByteReader{conn: s.conn})
+		r := rfc2217.NewReader(s.conn)
 		r.OnCommand = s.handleCommand
 		r.OnNegotiate = s.handleNegotiate
 		// A subnegotiation past the reader's cap is broken or hostile — the
@@ -373,6 +379,9 @@ func (rw *recordingWriter) Write(p []byte) (int, error) {
 	// record: full never delays the bytes headed to the device.
 	n, err := rw.w.Write(p)
 	if n > 0 {
+		// Payload reaching the device is as good a sign of a real client as a
+		// completed command: a raw-mode peer may send data without negotiating.
+		rw.s.settle()
 		rw.s.record(rw.dir, p[:n])
 	}
 	return n, err
@@ -393,6 +402,7 @@ func (s *session) logPumpExit(dir string, err error) {
 // A client that offers options and never hears back will stall before it sends
 // any com-port command, so silence here looks like a hung device.
 func (s *session) handleNegotiate(verb, option byte) {
+	s.settle()
 	var reply byte
 	switch verb {
 	case rfc2217.Do:
@@ -435,6 +445,7 @@ func (s *session) handleNegotiate(verb, option byte) {
 // every command handler and, because record() shares the mutex, the rx pump
 // too, losing device bytes.
 func (s *session) handleCommand(cmd byte, payload []byte) {
+	s.settle()
 	s.mu.Lock()
 	s.handleCommandLocked(cmd, payload)
 	pending := s.pendingReplies

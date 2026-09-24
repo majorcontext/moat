@@ -747,6 +747,8 @@ func (m *Manager) Create(ctx context.Context, opts Options) (resRun *Run, retErr
 			// default (loopback, unreachable from a bridge container).
 			serialBind = m.serialBindAddr(ctx, opts.Config)
 			if serialBind == "" {
+				ui.Warn("could not resolve a container-facing host address for serial devices; " +
+					"refusing the device rather than binding every interface")
 				return nil, fmt.Errorf("cannot resolve where to expose serial devices for %s containers — device access requires a host address the container can reach; check that the runtime's default network has a gateway", m.defaultRuntime().Type())
 			}
 			// The address the listener binds and the address the container
@@ -798,7 +800,13 @@ func (m *Manager) Create(ctx context.Context, opts Options) (resRun *Run, retErr
 		// would emit a destination-less "-A OUTPUT --dport N -j ACCEPT",
 		// granting the container raw egress to that port on *any* host and
 		// converting a proxy-mediated allowlist into an open one.
-		r.SerialHostAddr = serialBind
+		// The advertised host, not the bind address. They differ on Docker
+		// Desktop, where the listener binds 127.0.0.1 but the container reaches
+		// it via host.docker.internal: an iptables rule naming 127.0.0.1 would
+		// match only the container's own loopback while the real packet went to
+		// the Desktop gateway and hit the DROP, leaving the device silently
+		// unreachable under a strict policy.
+		r.SerialHostAddr = serialAdvertise
 		for _, addr := range regResp.SerialAddrs {
 			_, portStr, perr := splitPort(addr)
 			if perr != nil {

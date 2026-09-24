@@ -197,6 +197,39 @@ func TestSerialAdvertiseForPerPlatform(t *testing.T) {
 	}
 }
 
+// The firewall's destination and the container's URL must come from the same
+// place. Create populates Run.SerialHostAddr for the firewall rule and the
+// MOAT_SERIAL_*_URL env var from the same advertised host; populating the rule
+// from the bind address instead is invisible on Docker-on-Linux and Apple,
+// where the two coincide, and silently breaks Docker Desktop, where they do
+// not. This pins the one case that distinguishes them, so a "simplification"
+// that collapses the two concepts fails here rather than in the field.
+func TestAdvertisedHostDiffersFromBindOnDockerDesktop(t *testing.T) {
+	const bind = "127.0.0.1"
+	advertise := serialAdvertiseFor(bind, container.RuntimeDocker, "host.docker.internal", false)
+	if advertise == bind {
+		t.Fatalf("advertised host == bind address (%q) on Docker Desktop; a firewall rule "+
+			"scoped to the bind address would match only the container's own loopback", bind)
+	}
+	// And they must coincide where the runtime has no separate gateway name,
+	// or the firewall rule would name something the container never dials.
+	for _, tc := range []struct {
+		name   string
+		bind   string
+		rtType container.RuntimeType
+		linux  bool
+	}{
+		{"docker linux", "172.17.0.1", container.RuntimeDocker, true},
+		{"apple", "192.168.64.1", container.RuntimeApple, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := serialAdvertiseFor(tc.bind, tc.rtType, "host.docker.internal", tc.linux); got != tc.bind {
+				t.Fatalf("serialAdvertiseFor = %q, want the bind address %q", got, tc.bind)
+			}
+		})
+	}
+}
+
 func TestSerialBindAddrAppleIsTheDefaultNetworkGateway(t *testing.T) {
 	// Apple containers: the default network's gateway is the host-facing
 	// address, the same one GetHostAddress returns.
