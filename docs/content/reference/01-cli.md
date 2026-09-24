@@ -1694,6 +1694,21 @@ moat device forget <name>
 
 Use after deliberately swapping hardware.
 
+### moat device rename
+
+Move a pin to a different name, keeping the approved hardware.
+
+```bash
+moat device rename <old> <new>
+```
+
+Use after changing a `name:` under `devices:` in moat.yaml. Without it the new name is
+unpinned — the next run approves the device again under that name, and the old pin stays
+behind for the same hardware.
+
+Renaming onto a name that is already pinned fails; `moat device forget` that name first if
+you mean to replace it.
+
 ---
 
 ## moat deps

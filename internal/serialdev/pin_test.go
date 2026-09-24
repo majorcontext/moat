@@ -409,3 +409,102 @@ func TestPinStoreRecoversFromStaleTempFile(t *testing.T) {
 		t.Fatalf("Forget with a stale temp file present: %v", err)
 	}
 }
+
+func TestRenameMovesThePinWithoutReapproving(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "devices.json")
+	s, err := OpenPinStore(path)
+	if err != nil {
+		t.Fatalf("OpenPinStore: %v", err)
+	}
+	dev := Device{VID: "303a", PID: "1001", Serial: "AAA", PortPath: "1-2"}
+	if err := s.Put(PinFor("esp32", dev)); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+
+	if err := s.Rename("esp32", "board"); err != nil {
+		t.Fatalf("Rename: %v", err)
+	}
+
+	// Reopen: a rename that only moves the in-memory map would leave the old
+	// name on disk for the next command to find.
+	reopened, err := OpenPinStore(path)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	all, err := reopened.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	// Exactly one pin. Two pins for one board is the state this command exists
+	// to avoid: `moat device list` reports the first that verifies, so the
+	// other is invisible.
+	if len(all) != 1 {
+		t.Fatalf("after rename there are %d pins, want 1: %+v", len(all), all)
+	}
+	if all[0].Name != "board" {
+		t.Errorf("pin name = %q, want board", all[0].Name)
+	}
+	// Renaming is not re-approving: the same hardware must still verify.
+	if err := all[0].Verify(dev); err != nil {
+		t.Errorf("renamed pin no longer verifies against the same device: %v", err)
+	}
+	if _, ok, err := reopened.Get("esp32"); err != nil || ok {
+		t.Errorf("the old name is still pinned (ok=%v err=%v)", ok, err)
+	}
+}
+
+func TestRenameRefusesAnOccupiedName(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "devices.json")
+	s, err := OpenPinStore(path)
+	if err != nil {
+		t.Fatalf("OpenPinStore: %v", err)
+	}
+	if err := s.Put(PinFor("esp32", Device{VID: "303a", PID: "1001", Serial: "AAA"})); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+	other := Device{VID: "0403", PID: "6010", Serial: "BBB"}
+	if err := s.Put(PinFor("board", other)); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+
+	if err := s.Rename("esp32", "board"); !errors.Is(err, ErrPinNameTaken) {
+		t.Fatalf("Rename onto an occupied name = %v, want ErrPinNameTaken", err)
+	}
+	// Neither pin may move: silently replacing "board" would un-approve
+	// hardware the user never named.
+	if p, ok, _ := s.Get("board"); !ok || p.Verify(other) != nil {
+		t.Errorf("the occupied name no longer holds its own device: %+v (ok=%v)", p, ok)
+	}
+	if _, ok, _ := s.Get("esp32"); !ok {
+		t.Error("the source pin was removed despite the failure")
+	}
+}
+
+func TestRenameOfAnUnknownNameIsAnError(t *testing.T) {
+	s, err := OpenPinStore(filepath.Join(t.TempDir(), "devices.json"))
+	if err != nil {
+		t.Fatalf("OpenPinStore: %v", err)
+	}
+	if err := s.Rename("nope", "other"); !errors.Is(err, ErrPinNotFound) {
+		t.Fatalf("Rename of an unknown name = %v, want ErrPinNotFound", err)
+	}
+}
+
+func TestRenameToTheSameNameKeepsThePin(t *testing.T) {
+	s, err := OpenPinStore(filepath.Join(t.TempDir(), "devices.json"))
+	if err != nil {
+		t.Fatalf("OpenPinStore: %v", err)
+	}
+	dev := Device{VID: "303a", PID: "1001", Serial: "AAA"}
+	if err := s.Put(PinFor("esp32", dev)); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+	// Same-name rename must not take the ErrPinNameTaken path against itself
+	// and must not delete the pin on the way through.
+	if err := s.Rename("esp32", "esp32"); err != nil {
+		t.Fatalf("renaming to the same name = %v, want nil", err)
+	}
+	if p, ok, _ := s.Get("esp32"); !ok || p.Verify(dev) != nil {
+		t.Fatalf("pin lost or altered by a same-name rename: %+v (ok=%v)", p, ok)
+	}
+}

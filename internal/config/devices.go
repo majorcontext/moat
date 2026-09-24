@@ -23,6 +23,11 @@ const (
 // confuse a shell is rejected.
 var deviceNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
 
+// ValidDeviceName reports whether name is usable as a devices: entry name.
+// Exported so `moat device rename` rejects a name at the point the user types
+// it, rather than writing a pin that moat.yaml validation will later refuse.
+func ValidDeviceName(name string) bool { return deviceNameRe.MatchString(name) }
+
 // usbIDRe matches a "vid:pid" USB ID pair as `moat device list` prints it —
 // 4 hex digits, colon, 4 hex digits, in either case.
 var usbIDRe = regexp.MustCompile(`^[0-9a-fA-F]{4}:[0-9a-fA-F]{4}$`)

@@ -358,8 +358,8 @@ func TestDeviceForgetOfAnUnknownNameIsAnActionableError(t *testing.T) {
 
 // The snippet must not propose a rename. Deriving a name from the USB
 // description for hardware that is already pinned tells the user to write a
-// different name than the one it is approved under — and a rename does not
-// move the pin, it adds a second one for the same hardware.
+// different name than the one it is approved under, which costs them a
+// `moat device rename` to make work — for a name they never asked to change.
 func TestDeviceListSuggestsTheNameTheDeviceIsAlreadyPinnedTo(t *testing.T) {
 	dev := serialdev.Device{
 		Path: "/dev/ttyUSB0", VID: "303a", PID: "1001",
@@ -397,5 +397,120 @@ func TestDeviceListSuggestsADerivedNameWhenUnpinned(t *testing.T) {
 	}
 	if !strings.Contains(out, "first run pins") {
 		t.Fatalf("unpinned device must say that using it pins the hardware:\n%s", out)
+	}
+}
+
+// runRename mirrors runForget for `moat device rename`, relocating the pin
+// store with MOAT_HOME so the command runs against a temp home.
+func runRename(t *testing.T, pins []serialdev.Pin, from, to string) (string, error) {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("MOAT_HOME", home)
+	if len(pins) > 0 {
+		store, err := serialdev.OpenPinStore(filepath.Join(home, "devices.json"))
+		if err != nil {
+			t.Fatalf("OpenPinStore: %v", err)
+		}
+		for _, p := range pins {
+			if err := store.Put(p); err != nil {
+				t.Fatalf("Put: %v", err)
+			}
+		}
+		if err := store.Close(); err != nil {
+			t.Fatalf("Close: %v", err)
+		}
+	}
+
+	var out bytes.Buffer
+	cmd := &cobra.Command{Use: "rename"}
+	cmd.SetOut(&out)
+	err := renameDevice(cmd, []string{from, to})
+	return out.String(), err
+}
+
+func TestDeviceRenameMovesThePin(t *testing.T) {
+	dev := esp32()
+	out, err := runRename(t, []serialdev.Pin{serialdev.PinFor("esp32", dev)}, "esp32", "board")
+	if err != nil {
+		t.Fatalf("rename: %v", err)
+	}
+	if !strings.Contains(out, "Renamed esp32 to board") {
+		t.Fatalf("output should confirm the rename:\n%s", out)
+	}
+	// The env var is what the user has to wire up next, so the confirmation
+	// has to name the one the new name produces, not the old one.
+	if !strings.Contains(out, "MOAT_SERIAL_BOARD_URL") {
+		t.Fatalf("output should name the new env var:\n%s", out)
+	}
+	if !strings.Contains(out, "moat.yaml") {
+		t.Fatalf("output should tell the user to update moat.yaml:\n%s", out)
+	}
+
+	store, err := serialdev.OpenPinStore(filepath.Join(os.Getenv("MOAT_HOME"), "devices.json"))
+	if err != nil {
+		t.Fatalf("reopening the pin store: %v", err)
+	}
+	defer store.Close() //nolint:errcheck // test cleanup
+	// Companion assertions: the new name holds the same hardware and the old
+	// name is gone. Either half alone would pass while the bug ships.
+	p, ok, err := store.Get("board")
+	if err != nil || !ok {
+		t.Fatalf("the new name is not pinned: ok=%v err=%v", ok, err)
+	}
+	if err := p.Verify(dev); err != nil {
+		t.Errorf("the renamed pin no longer matches the device: %v", err)
+	}
+	if _, ok, _ := store.Get("esp32"); ok {
+		t.Error("the old name is still pinned")
+	}
+}
+
+func TestDeviceRenameOntoATakenNameIsAnActionableError(t *testing.T) {
+	pins := []serialdev.Pin{
+		serialdev.PinFor("esp32", esp32()),
+		serialdev.PinFor("board", serialdev.Device{Path: "/dev/ttyUSB9", VID: "0403", PID: "6010", Serial: "BBB"}),
+	}
+	_, err := runRename(t, pins, "esp32", "board")
+	if err == nil {
+		t.Fatal("renaming onto an occupied name must fail")
+	}
+	if !strings.Contains(err.Error(), `already pinned as "board"`) {
+		t.Fatalf("error %q should name the occupied pin", err)
+	}
+	if !strings.Contains(err.Error(), "moat device forget board") {
+		t.Fatalf("error %q should say how to replace it", err)
+	}
+}
+
+func TestDeviceRenameOfAnUnknownNameIsAnActionableError(t *testing.T) {
+	_, err := runRename(t, nil, "esp32", "board")
+	if err == nil {
+		t.Fatal("renaming an unpinned name must fail")
+	}
+	if !strings.Contains(err.Error(), `no device named "esp32" is pinned`) {
+		t.Fatalf("error %q should name the missing pin", err)
+	}
+	if !strings.Contains(err.Error(), "moat device list") {
+		t.Fatalf("error %q should point at `moat device list`", err)
+	}
+}
+
+func TestDeviceRenameRejectsANameMoatYAMLCannotUse(t *testing.T) {
+	pins := []serialdev.Pin{serialdev.PinFor("esp32", esp32())}
+	// Uppercase and a dot both fail the devices: name rule. Rejecting here
+	// beats writing a pin that no moat.yaml entry can ever name.
+	for _, bad := range []string{"Board", "my.board", "-board", ""} {
+		out, err := runRename(t, pins, "esp32", bad)
+		if err == nil {
+			t.Fatalf("rename to %q must fail, got output %q", bad, out)
+		}
+		if !strings.Contains(err.Error(), "not a usable device name") {
+			t.Errorf("error for %q = %q, want it to explain the name rule", bad, err)
+		}
+	}
+	// The companion case: a name that does satisfy the rule is accepted, so
+	// the check cannot be passing by rejecting everything.
+	if _, err := runRename(t, pins, "esp32", "board-2"); err != nil {
+		t.Errorf("rename to a valid name failed: %v", err)
 	}
 }

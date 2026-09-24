@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"sort"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/run"
 	"github.com/majorcontext/moat/internal/serialdev"
 	"github.com/majorcontext/moat/internal/ui"
@@ -51,9 +53,25 @@ approves whatever device is attached then, and pins it.`,
 	RunE: forgetDevice,
 }
 
+var deviceRenameCmd = &cobra.Command{
+	Use:   "rename <old> <new>",
+	Short: "Rename a device pin, keeping the approved hardware",
+	Long: `Move a device pin to a different name.
+
+The approval stays with the same hardware — this renames the pin, it does not
+re-approve anything. Use it when you change a ` + "`name:`" + ` in moat.yaml: without it
+the new name is unpinned, the next run approves the device again under that
+name, and the old pin stays behind for the same hardware.
+
+To approve different hardware for a name, use ` + "`moat device forget`" + ` instead.`,
+	Args: cobra.ExactArgs(2),
+	RunE: renameDevice,
+}
+
 func init() {
 	deviceCmd.AddCommand(deviceListCmd)
 	deviceCmd.AddCommand(deviceForgetCmd)
+	deviceCmd.AddCommand(deviceRenameCmd)
 	rootCmd.AddCommand(deviceCmd)
 }
 
@@ -302,6 +320,40 @@ func suggestedName(d serialdev.Device) string {
 		return "mydevice"
 	}
 	return trimmed
+}
+
+func renameDevice(cmd *cobra.Command, args []string) error {
+	from, to := args[0], args[1]
+	// Validate before touching the store: a name that moat.yaml will reject is
+	// a pin nothing can ever use, and the error belongs here rather than at the
+	// next run.
+	if !config.ValidDeviceName(to) {
+		return fmt.Errorf("%q is not a usable device name\n"+
+			"  Names must start with a letter or digit and contain only lowercase letters, digits, - and _\n"+
+			"  The name becomes %s inside the run", to, run.SerialEnvVarName("<name>"))
+	}
+
+	pins, err := serialdev.OpenPinStore(serialdev.DefaultPinPath())
+	if err != nil {
+		return err
+	}
+	defer pins.Close() //nolint:errcheck // the process exits with the command
+
+	switch err := pins.Rename(from, to); {
+	case err == nil:
+	case errors.Is(err, serialdev.ErrPinNotFound):
+		return fmt.Errorf("no device named %q is pinned\n"+
+			"  Run `moat device list` to see which names are in use", from)
+	case errors.Is(err, serialdev.ErrPinNameTaken):
+		return fmt.Errorf("a device is already pinned as %q\n"+
+			"  Run `moat device forget %s` first if you mean to replace it", to, to)
+	default:
+		return err
+	}
+
+	fmt.Fprintf(cmd.OutOrStdout(), "%s Renamed %s to %s. Update the `name:` in moat.yaml to match; the run will get %s.\n",
+		ui.OKTag(), ui.Bold(from), ui.Bold(to), run.SerialEnvVarName(to))
+	return nil
 }
 
 func forgetDevice(cmd *cobra.Command, args []string) error {

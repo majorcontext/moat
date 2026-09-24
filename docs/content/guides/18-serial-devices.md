@@ -144,6 +144,13 @@ After deliberately swapping hardware:
 $ moat device forget board
 ```
 
+If you change a device's `name:` in moat.yaml instead, move the pin with it — otherwise the
+new name is unpinned and the next run re-approves the same board under it:
+
+```bash
+$ moat device rename board esp32
+```
+
 ### Devices without a serial number
 
 Cheap CH340 and CP2102 clones often ship without a serial number. Those are pinned to the

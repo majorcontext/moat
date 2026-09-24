@@ -272,6 +272,44 @@ func (s *PinStore) Put(p Pin) error {
 	return s.flushLocked()
 }
 
+// ErrPinNameTaken is returned by Rename when the new name already holds a pin.
+var ErrPinNameTaken = errors.New("a device is already pinned under that name")
+
+// ErrPinNotFound is returned when an operation names a pin that does not exist.
+var ErrPinNotFound = errors.New("no device is pinned under that name")
+
+// Rename moves a pin from one name to another under a single lock.
+//
+// Doing this as Put+Forget from the caller would leave a window where the
+// hardware is pinned twice, and a crash inside it would make that permanent —
+// the state this exists to avoid, since a device pinned under two names is
+// invisible in `moat device list` (it reports the first pin that verifies).
+// Renaming onto an existing name fails rather than overwriting: that pin
+// belongs to some other hardware, and silently replacing it would un-approve a
+// device the user never mentioned.
+func (s *PinStore) Rename(from, to string) error {
+	unlock, err := s.lock()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
+	p, ok := s.pins[from]
+	if !ok {
+		return fmt.Errorf("%w: %s", ErrPinNotFound, from)
+	}
+	if from == to {
+		return nil
+	}
+	if _, exists := s.pins[to]; exists {
+		return fmt.Errorf("%w: %s", ErrPinNameTaken, to)
+	}
+	p.Name = to
+	delete(s.pins, from)
+	s.pins[to] = p
+	return s.flushLocked()
+}
+
 // Forget removes a pin so the next run re-approves the device. Forgetting an
 // unknown name is not an error.
 func (s *PinStore) Forget(name string) error {
