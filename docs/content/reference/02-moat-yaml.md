@@ -714,6 +714,66 @@ Endpoints are accessible at `https://<endpoint>.<name>.localhost:<proxy-port>` w
 
 ---
 
+## Devices
+
+### devices
+
+Host serial devices the run may use. Nothing is exposed unless listed here.
+
+```yaml
+devices:
+  - name: esp32
+    match: {usb: "303a:1001"}
+    baud: 115200
+    record: full
+```
+
+- Type: `list`
+- Default: `[]`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | Device name. Must start with a lowercase letter or digit, then lowercase letters, digits, `-` and `_`. Becomes `MOAT_SERIAL_<NAME>_URL`. |
+| `match.usb` | string | yes | USB ID as `vid:pid`, e.g. `"303a:1001"` — the USB ID column `moat device list` prints. |
+| `match.interface` | string | no | Picks one UART of a multi-interface bridge (FT2232H, CP2105, ESP-Prog) whose ports share a USB ID. The number from the IFACE column of `moat device list`, e.g. `"1"` for the second port. Omit for single-UART devices. |
+| `baud` | int | no | Initial line rate. Tools normally set their own. |
+| `record` | string | no | `events` (default) or `full`. |
+
+Run `moat device list` to see the USB IDs of attached devices.
+
+Each device is exposed to the container as an RFC2217 URL, because control lines
+(DTR/RTS) cannot be carried by a pseudo-terminal:
+
+```bash
+esptool --port "$MOAT_SERIAL_BOARD_URL" chip-id
+```
+
+`MOAT_SERIAL_DEVICES` lists the names of all devices available to the run.
+
+`match` identifies a device *model*. The first run to use a name pins that specific unit by
+serial number, and later runs must present the same device or fail. Use
+`moat device forget <name>` after deliberately swapping hardware. See
+[Serial devices](../guides/18-serial-devices.md).
+
+A bridge that exposes several UARTs over one USB device (FT2232H, CP2105,
+ESP-Prog) presents one port per interface with identical USB IDs. Declare each
+port as its own device with an interface selector:
+
+```yaml
+devices:
+  - name: esp32-a
+    match: {usb: "0403:6010", interface: "0"}
+  - name: esp32-b
+    match: {usb: "0403:6010", interface: "1"}
+```
+
+The numbers come from the IFACE column of `moat device list`.
+
+Only tty character devices can be exposed; storage, HID, and smartcard devices cannot.
+General USB passthrough is not supported.
+
+---
+
 ## Network
 
 ### network.policy

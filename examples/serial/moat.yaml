@@ -1,0 +1,32 @@
+name: board-dev
+
+dependencies:
+  - python
+  - pip:esptool
+
+# Hardware example: give an agent access to one approved USB serial board
+# through the host-side RFC2217 broker — no device node enters the container.
+#
+# Works for any board esptool supports — the whole ESP32 family and the
+# ESP8266 — because esptool autodetects the chip over the line. Both ways a
+# board reaches USB work the same here: through an external bridge chip
+# (CP2102, CH340, CH9102F) or through the chip's own USB-Serial-JTAG
+# peripheral (ESP32-S3/C3/C6 dev boards, including the LilyGO T-Display S3
+# this example was verified on).
+#
+# The one board-specific value is match.usb — run `moat device list` on the
+# host and copy the USB ID it prints for your board. Common IDs:
+#   303a:1001  ESP32-S3/C3/C6 native USB-Serial-JTAG  (T-Display S3)
+#   303a:1002  ESP32-S3 ROM download mode
+#   10c4:ea60  CP2102 bridge                          (plain ESP32 dev kits)
+#   1a86:55d4  CH9102F bridge                         (newer LilyGO revisions)
+#   1a86:7523  CH340 bridge                           (cheap clones, ESP8266)
+devices:
+  - name: board
+    match: {usb: "303a:1001"}
+
+# The command runs inside the container with the device already attached.
+# It is an argv list, not a shell string — $MOAT_SERIAL_BOARD_URL does not
+# expand here, so the script does the expanding. verify.sh uses bash for
+# `set -o pipefail` (sh on Debian is dash, which has no equivalent).
+command: ["bash", "/workspace/verify.sh"]

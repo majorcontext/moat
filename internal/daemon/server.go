@@ -7,15 +7,20 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
 
 	keeplib "github.com/majorcontext/keep"
 
+	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/credential"
 	"github.com/majorcontext/moat/internal/log"
 	awsprov "github.com/majorcontext/moat/internal/providers/aws"
 	"github.com/majorcontext/moat/internal/routing"
+	"github.com/majorcontext/moat/internal/serialbroker"
+	"github.com/majorcontext/moat/internal/serialdev"
 )
 
 // BuildCommit is the git commit hash of the running binary. Set by the CLI
@@ -37,6 +42,7 @@ type Server struct {
 	onEmpty      func()             // called when last run is unregistered
 	onUnregister func(runID string) // called when a run is unregistered (for resource cleanup)
 	onShutdown   func()             // called when shutdown is requested via API
+	serial       *serialbroker.Broker
 }
 
 // NewServer creates a daemon API server that will listen on the given Unix socket path.
@@ -90,6 +96,10 @@ func (s *Server) SetOnEmpty(fn func()) { s.onEmpty = fn }
 // The callback receives the run ID for per-run resource cleanup.
 func (s *Server) SetOnUnregister(fn func(runID string)) { s.onUnregister = fn }
 
+// SetSerialBroker attaches the serial device broker. Without one, a run that
+// requests devices is rejected rather than silently starting with no access.
+func (s *Server) SetSerialBroker(b *serialbroker.Broker) { s.serial = b }
+
 // SetOnShutdown sets a callback that is invoked when shutdown is requested via the API.
 // This should signal the main daemon loop to exit (e.g., by sending SIGTERM to self).
 func (s *Server) SetOnShutdown(fn func()) { s.onShutdown = fn }
@@ -127,9 +137,23 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 		RunCount:     s.registry.Count(),
 		StartedAt:    s.startedAt.Format(time.RFC3339),
 		Commit:       BuildCommit,
-		Capabilities: []string{CapKeepPolicy, CapKeepBodyPolicy, CapHostGatewayV2, CapCredentialRefs, CapCredentialBundles},
+		Capabilities: s.capabilities(),
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// capabilities lists what this daemon supports. The CLI checks these before
+// registering, so a newer CLI against an older daemon fails with an explanation
+// rather than a run that silently lacks a feature.
+func (s *Server) capabilities() []string {
+	// Credential refs and bundles are unconditional: they are properties of
+	// this binary, not of runtime wiring. Serial is conditional because the
+	// broker may not be running.
+	caps := []string{CapKeepPolicy, CapKeepBodyPolicy, CapHostGatewayV2, CapCredentialRefs, CapCredentialBundles}
+	if s.serial != nil {
+		caps = append(caps, CapSerialDevices)
+	}
+	return caps
 }
 
 // handleRegisterRun registers a new run and returns the auth token.
@@ -289,8 +313,32 @@ func (s *Server) handleRegisterRun(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Open a listener per approved serial device. This happens before registry
+	// insertion so a device that cannot be claimed fails the registration
+	// outright rather than leaving a half-configured run.
+	//
+	// A request carrying SerialPins is a re-registration or restore: the
+	// container's MOAT_SERIAL_*_URL froze those ports at create, so the
+	// listeners must come back on the same numbers. listenSerialAt fails
+	// loudly if one is taken rather than re-binding elsewhere and leaving the
+	// run's devices dead.
+	serialAddrs, err := s.listenSerialAt(rc, req.SerialDevices, req.SerialBindAddr, req.SerialPins)
+	if err != nil {
+		// Close before canceling, matching handleUnregisterRun and
+		// LivenessChecker.removeRun: rc already owns compiled Keep engines by
+		// this point, and CancelRefresh alone leaks them on every rejected
+		// registration.
+		rc.Close()
+		rc.CancelRefresh()
+		writeJSON(w, http.StatusConflict, RegisterResponse{Error: err.Error()})
+		return
+	}
+
 	// Register the fully-initialized RunContext so the proxy never sees
 	// an incomplete run.
+	rc.SerialDevices = req.SerialDevices
+	rc.SerialBindAddr = req.SerialBindAddr
+	rc.SerialAddrs = serialAddrs
 	s.registry.RegisterWithToken(rc, token)
 
 	if s.persister != nil {
@@ -302,10 +350,161 @@ func (s *Server) handleRegisterRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := RegisterResponse{
-		AuthToken: token,
-		ProxyPort: s.proxyPort,
+		AuthToken:   token,
+		ProxyPort:   s.proxyPort,
+		SerialAddrs: serialAddrs,
 	}
 	writeJSON(w, http.StatusCreated, resp)
+}
+
+// listenSerial opens one RFC2217 listener per approved device on an
+// OS-assigned port and allows the container to reach each one.
+func (s *Server) listenSerial(rc *RunContext, specs []SerialDeviceSpec, bindAddr string) (map[string]string, error) {
+	return s.listenSerialAt(rc, specs, bindAddr, nil)
+}
+
+// ListenSerialPinned re-opens a restored run's serial listeners on the exact
+// ports the container's frozen MOAT_SERIAL_*_URLs point at. A daemon restart
+// must not move a device, because the container cannot learn the new address.
+// A port that cannot be re-bound fails with an error naming the device, rather
+// than silently leaving the device dead or rebinding it elsewhere.
+func (s *Server) ListenSerialPinned(rc *RunContext, specs []SerialDeviceSpec, bindAddr string, pinned map[string]string) (map[string]string, error) {
+	pins := make(map[string]int, len(pinned))
+	for name, addr := range pinned {
+		port, err := portOf(addr)
+		if err != nil {
+			return nil, fmt.Errorf("restored address for device %q is unusable: %q: %w", name, addr, err)
+		}
+		pins[name] = port
+	}
+	return s.listenSerialAt(rc, specs, bindAddr, pins)
+}
+
+// listenSerialAt opens one RFC2217 listener per approved device and allows the
+// container to reach each port. pins, when non-nil, names the exact port each
+// device must bind; a pinned port that cannot be bound fails the registration
+// with a named error instead of moving the device.
+//
+// bindAddr scopes where those listeners are reachable from. RFC2217 has no
+// authentication, so the bind address is the reachability control: the caller
+// passes the container-facing address of the run's network, and an empty value
+// falls back to the broker's configured default.
+//
+// Any failure rolls back only the listeners this call opened, so a partial
+// failure never leaves a device claimed by a run that did not start — and a
+// re-registration of an already-running run never tears down the devices its
+// container is using.
+// approvedFromSpec converts a wire spec into the broker's approval. Every
+// field of SerialDeviceSpec that reaches the broker passes through here.
+func approvedFromSpec(spec SerialDeviceSpec) serialbroker.Approved {
+	return serialbroker.Approved{
+		Name: spec.Name,
+		Device: serialdev.Device{
+			Path:      spec.Path,
+			VID:       spec.VID,
+			PID:       spec.PID,
+			Serial:    spec.Serial,
+			PortPath:  spec.PortPath,
+			Interface: spec.Interface,
+		},
+		Record: spec.Record,
+		Baud:   spec.Baud,
+	}
+}
+
+func (s *Server) listenSerialAt(rc *RunContext, specs []SerialDeviceSpec, bindAddr string, pins map[string]int) (map[string]string, error) {
+	if len(specs) == 0 {
+		return nil, nil
+	}
+	if s.serial == nil {
+		return nil, fmt.Errorf("this daemon does not support serial devices; restart it with `moat proxy restart`")
+	}
+	// The CLI resolves a container-facing address, but the daemon must not
+	// trust its socket input for it: RFC2217 carries no authentication, so a
+	// wildcard or garbage address here would expose attached hardware to
+	// everything that can route to this host. Same reasoning as the profile
+	// guard in handleRegisterRun — validate at the boundary, not only at the
+	// caller. An empty value is allowed and falls through to the broker's
+	// loopback default.
+	if bindAddr != "" {
+		ip := net.ParseIP(bindAddr)
+		if ip == nil || ip.IsUnspecified() {
+			return nil, fmt.Errorf("refusing to serve serial devices on %q: RFC2217 has no authentication, "+
+				"so the listener must bind a specific container-facing host address", bindAddr)
+		}
+	}
+	// Same reasoning, one field over: a device name flows into the capture
+	// file's path (`serial-<name>.capture` under the run directory), so an
+	// unvalidated "../.." escapes the run tree and appends device bytes
+	// wherever it lands. moat.yaml can never produce such a name — config
+	// validation rejects it — but the daemon does not trust its socket input,
+	// and this path serves the persisted-runs file too.
+	for _, spec := range specs {
+		if !config.ValidDeviceName(spec.Name) {
+			return nil, fmt.Errorf("refusing to serve serial device %q: a device name must start with a "+
+				"letter or digit and contain only lowercase letters, digits, - and _", spec.Name)
+		}
+	}
+
+	addrs := make(map[string]string, len(specs))
+	// Only the listeners this call opens are rolled back on failure. The run
+	// manager re-registers an existing run after a transient daemon failure,
+	// so a registration that arrives while the run's earlier listeners are
+	// live must not tear those down — the container's frozen MOAT_SERIAL_*_URL
+	// would go dead for the rest of the run.
+	var opened []*serialbroker.ListenerRef
+	for _, spec := range specs {
+		var ref *serialbroker.ListenerRef
+		var addr string
+		var err error
+		// One literal for both branches: they differed only in the pinned
+		// port, so a field added to SerialDeviceSpec had two places to reach
+		// and nothing to signal when only one was updated.
+		approved := approvedFromSpec(spec)
+		port, pinned := pins[spec.Name]
+		switch {
+		case pinned && port > 0:
+			ref, addr, err = s.serial.ListenAt(rc.RunID, approved, bindAddr, port)
+		case pins != nil:
+			// A pinned registration names the ports the container's frozen
+			// MOAT_SERIAL_*_URL already points at. A device in this set with
+			// no pin would bind somewhere else and answer nothing, while the
+			// daemon reported success — the silent failure ListenAt exists to
+			// avoid. Refuse instead.
+			s.serial.CloseListeners(opened)
+			return nil, fmt.Errorf("serial device %q has no pinned port in this registration; "+
+				"re-binding it elsewhere would leave the container's address pointing at nothing", spec.Name)
+		default:
+			ref, addr, err = s.serial.Listen(rc.RunID, approved, bindAddr)
+		}
+		if err != nil {
+			s.serial.CloseListeners(opened)
+			return nil, err
+		}
+		opened = append(opened, ref)
+		addrs[spec.Name] = addr
+
+		port, perr := portOf(addr)
+		if perr != nil {
+			s.serial.CloseListeners(opened)
+			return nil, fmt.Errorf("serial listener for %q returned an unusable address %q: %w", spec.Name, addr, perr)
+		}
+		// A restored run arrives with its persisted AllowedHostPorts already
+		// set; dedup so re-registration does not grow the list every cycle.
+		if !slices.Contains(rc.AllowedHostPorts, port) {
+			rc.AllowedHostPorts = append(rc.AllowedHostPorts, port)
+		}
+	}
+	return addrs, nil
+}
+
+// portOf extracts the numeric port from a host:port address.
+func portOf(addr string) (int, error) {
+	_, portStr, err := net.SplitHostPort(addr)
+	if err != nil {
+		return 0, err
+	}
+	return strconv.Atoi(portStr)
 }
 
 // handleListRuns returns all registered runs.
@@ -365,6 +564,11 @@ func (s *Server) handleUnregisterRun(w http.ResponseWriter, r *http.Request) {
 	// Close Keep engines and cancel token refresh after unregistering.
 	rc.Close()
 	rc.CancelRefresh()
+
+	// Release any serial devices so the next run can claim them.
+	if s.serial != nil {
+		s.serial.Revoke(rc.RunID)
+	}
 
 	if s.persister != nil {
 		s.persister.SaveDebounced()

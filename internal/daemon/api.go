@@ -90,6 +90,46 @@ type RegisterRequest struct {
 	HostGateway      string              `json:"host_gateway,omitempty"`
 	HostGatewayIP    string              `json:"host_gateway_ip,omitempty"`
 	AllowedHostPorts []int               `json:"allowed_host_ports,omitempty"`
+
+	// SerialDevices are host serial devices this run may use. The daemon opens
+	// one RFC2217 listener per device and returns their addresses.
+	SerialDevices []SerialDeviceSpec `json:"serial_devices,omitempty"`
+
+	// SerialBindAddr is the address serial listeners bind to — the
+	// container-facing address of this run's network (loopback for host-net,
+	// the network gateway for bridge and Apple containers). RFC2217 has no
+	// authentication, so scoping the bind is the reachability control: a
+	// listener bound here is reachable from the container and from this
+	// machine, not from the network at large. Additive/optional: an older CLI
+	// omits it and the daemon falls back to the broker's configured BindAddr.
+	SerialBindAddr string `json:"serial_bind_addr,omitempty"`
+
+	// SerialPins names the exact port each device must come back on, keyed by
+	// device name. Sent on re-registration and restore: the container's
+	// MOAT_SERIAL_*_URL froze these ports at create, so the listeners must
+	// re-bind the same numbers — a fresh ephemeral port would be unreachable
+	// and the run's devices would silently die. A pinned port that is taken
+	// fails the registration rather than moving the device. Additive/optional.
+	SerialPins map[string]int `json:"serial_pins,omitempty"`
+}
+
+// SerialDeviceSpec is one approved serial device, already resolved and pinned
+// by the CLI. The daemon does not re-resolve it: enumeration and pin checking
+// happen in pre-flight so a mismatch fails before the container is created.
+type SerialDeviceSpec struct {
+	Name      string `json:"name"`                // config name, e.g. "esp32"
+	Path      string `json:"path"`                // host device node
+	VID       string `json:"vid,omitempty"`       // for audit entries
+	PID       string `json:"pid,omitempty"`       // for audit entries
+	Serial    string `json:"serial,omitempty"`    // for audit entries
+	PortPath  string `json:"port_path,omitempty"` // for audit entries
+	Interface string `json:"interface,omitempty"` // for audit entries
+	Record    string `json:"record,omitempty"`    // "events" (default) or "full"
+	// Baud is the initial line rate from moat.yaml's `baud:`. Zero means the
+	// port opens at whatever rate the driver default is and the client's
+	// SET-BAUDRATE governs. Applied at session open; an RFC2217 client that
+	// sends its own SET-BAUDRATE overrides it.
+	Baud int `json:"baud,omitempty"`
 }
 
 // PolicyRuleSetSpec describes a programmatic policy using Keep's RuleSet builder.
@@ -106,6 +146,10 @@ type RegisterResponse struct {
 	AuthToken string `json:"auth_token"`
 	ProxyPort int    `json:"proxy_port"`
 	Error     string `json:"error,omitempty"`
+
+	// SerialAddrs maps each approved device name to the host:port of its
+	// RFC2217 listener. Empty when the run requested no devices.
+	SerialAddrs map[string]string `json:"serial_addrs,omitempty"`
 }
 
 // UpdateRunRequest is sent to PATCH /v1/runs/{token}.
@@ -125,6 +169,7 @@ const (
 	CapHostGatewayV2     = "host-gateway-v2"
 	CapCredentialRefs    = "credential-refs-v1"
 	CapCredentialBundles = "credential-bundles-v1"
+	CapSerialDevices     = "serial-devices"
 )
 
 // HealthResponse is returned from GET /v1/health.

@@ -180,6 +180,8 @@ All observability data is stored per-run under `~/.moat/runs/<run-id>/`:
 | `network.jsonl` | HTTP requests through proxy |
 | `traces.jsonl` | Execution spans |
 | `audit.db` | Tamper-proof audit log (SQLite) |
+| `devices.jsonl` | Serial device events (attach, detach, line settings, DTR/RTS) |
+| `serial-<name>.capture` | Serial payload bytes (plain text, not JSONL), when the device is configured `record: full` |
 
 When a container exits, Moat removes the container but retains these artifacts.
 
@@ -245,6 +247,31 @@ $ jq 'select(.status_code == 401)' ~/.moat/runs/run_*/network.jsonl
 ```
 
 > **Note:** Request and response bodies in `network.jsonl` are captured up to 8 KB. Larger bodies are truncated.
+
+### Serial device queries
+
+Each entry in `devices.jsonl` has `ts`, `device`, `kind`, `detail`, and byte
+counters. `kind` is one of `attach`, `detach`, `settings`, `modem`, `control`,
+`break`, `purge`, `error`, `conflict`.
+
+```bash
+# Every line-setting change on the device named "board"
+$ jq -r 'select(.device == "board" and .kind == "settings") | .detail' \
+    ~/.moat/runs/run_a1b2c3d4e5f6/devices.jsonl
+
+# Byte totals at detach
+$ jq 'select(.kind == "detach") | {device, tx_bytes, rx_bytes}' \
+    ~/.moat/runs/run_a1b2c3d4e5f6/devices.jsonl
+```
+
+`moat audit <run-id>` shows the audited subset — attach, detach, errors, and
+conflicts, with the device's USB identity — in the tamper-evident chain.
+`devices.jsonl` is a plain append-only log, not part of the chain.
+
+`serial-<name>.capture` (written when the device is configured `record: full`)
+is plain text, not JSONL — one line per chunk: an RFC3339 timestamp, the
+direction (`tx` toward the device, `rx` from it), and the bytes in hex. `jq`
+does not apply to it.
 
 ## Troubleshooting
 

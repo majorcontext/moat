@@ -320,6 +320,16 @@ func ExecuteRun(ctx context.Context, opts intcli.ExecOptions) (*run.Run, error) 
 		}
 	}
 
+	// Device pre-flight runs regardless of interactivity: a missing or
+	// mismatched device fails the run a moment later inside manager.Create,
+	// and reporting every finding up front — with the fix commands, before
+	// anything is built — beats failing one device at a time from the middle
+	// of create. First-use approval also prints a consent notice, because
+	// approving a device hands the run full control of that hardware.
+	if opts.Config != nil && len(opts.Config.Devices) > 0 {
+		preflightDevices(ctx, opts.Config.Devices, devicePreflight{out: os.Stderr})
+	}
+
 	// Create run
 	r, err := manager.Create(ctx, runOpts)
 	if err != nil {

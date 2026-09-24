@@ -726,10 +726,45 @@ func (m *Manager) Create(ctx context.Context, opts Options) (resRun *Run, retErr
 			return nil, fmt.Errorf("claude.base_url: %w", baseURLErr)
 		}
 
+		// Resolve serial devices before registering. Resolution enforces the
+		// device pins, so a swapped device fails here — before the container is
+		// created — rather than part-way through a flash.
+		var serialSpecs []daemon.SerialDeviceSpec
+		serialBind := ""
+		serialAdvertise := ""
+		if opts.Config != nil && len(opts.Config.Devices) > 0 {
+			if !slices.Contains(daemonCapabilities, daemon.CapSerialDevices) {
+				return nil, fmt.Errorf("proxy daemon is too old for serial devices (missing %q capability); run 'moat proxy restart' to upgrade", daemon.CapSerialDevices)
+			}
+			specs, devErr := m.resolveDevicesForCreate(ctx, opts.Config.Devices)
+			if devErr != nil {
+				return nil, devErr
+			}
+			serialSpecs = specs
+			// RFC2217 has no authentication, so where the listener binds is
+			// the reachability control. The gateway must resolve now — an
+			// empty address would make the daemon fall back to its broker
+			// default (loopback, unreachable from a bridge container).
+			serialBind = m.serialBindAddr(ctx, opts.Config)
+			if serialBind == "" {
+				// The returned error is what the user sees; a ui.Warn here
+				// would print the same failure twice in different words.
+				log.Warn("no container-facing host address for serial devices; refusing the device",
+					"runtime", m.defaultRuntime().Type())
+				return nil, fmt.Errorf("cannot resolve where to expose serial devices for %s containers — device access requires a host address the container can reach; check that the runtime's default network has a gateway", m.defaultRuntime().Type())
+			}
+			// The address the listener binds and the address the container
+			// dials differ on Docker Desktop (bind loopback, dial
+			// host.docker.internal); see serialAdvertiseHost.
+			serialAdvertise = m.serialAdvertiseHost(serialBind)
+		}
+
 		// Build RegisterRequest from the RunContext
 		regReq := buildRegisterRequest(runCtx, opts.Grants)
 		regReq.PolicyYAML = policyYAML
 		regReq.PolicyRuleSets = policyRuleSets
+		regReq.SerialDevices = serialSpecs
+		regReq.SerialBindAddr = serialBind
 
 		// Save registration request for re-registration after proxy restart
 		r.ProxyRegReq = &regReq
@@ -739,14 +774,55 @@ func (m *Manager) Create(ctx context.Context, opts Options) (resRun *Run, retErr
 		if regErr != nil {
 			return nil, fmt.Errorf("registering run with proxy daemon: %w", regErr)
 		}
-		if regResp.Error != "" {
-			return nil, fmt.Errorf("policy compilation failed: %s", regResp.Error)
-		}
+		// The daemon reports refusals (policy compilation, a serial device
+		// already claimed) as a non-2xx status with the reason in the body;
+		// the client surfaces that text in regErr above. A 2xx response never
+		// carries an Error field.
 
 		// Store proxy details from daemon response
 		r.ProxyAuthToken = regResp.AuthToken
 		r.ProxyPort = regResp.ProxyPort
 		r.ProxyHost = hostAddr
+
+		// Pin the serial ports into the re-registration request. The
+		// container's MOAT_SERIAL_*_URL froze these numbers at create; if the
+		// daemon restarts, re-registration must re-bind them exactly — a
+		// fresh ephemeral port would be unreachable from the container.
+		if len(regResp.SerialAddrs) > 0 && regReq.SerialDevices != nil {
+			r.ProxyRegReq.SerialPins = serialPinsFromAddrs(regResp.SerialAddrs)
+		}
+
+		// Serial listener ports become part of the firewall allowlist: the
+		// strict-policy firewall must not silently drop the device's RFC2217
+		// port, which is raw TCP and never transits the proxy.
+		//
+		// runCtx.AllowedHostPorts is deliberately NOT merged here. Those are
+		// network.host and claude.base_url ports, and they are enforced by the
+		// proxy's own host-port check on the HTTP/CONNECT path. Adding them
+		// would emit a destination-less "-A OUTPUT --dport N -j ACCEPT",
+		// granting the container raw egress to that port on *any* host and
+		// converting a proxy-mediated allowlist into an open one.
+		//
+		// The address below is the advertised host, not the bind address. They differ on Docker
+		// Desktop, where the listener binds 127.0.0.1 but the container reaches
+		// it via host.docker.internal: an iptables rule naming 127.0.0.1 would
+		// match only the container's own loopback while the real packet went to
+		// the Desktop gateway and hit the DROP, leaving the device silently
+		// unreachable under a strict policy.
+		r.SerialHostAddr = serialAdvertise
+		for _, addr := range regResp.SerialAddrs {
+			_, portStr, perr := splitPort(addr)
+			if perr != nil {
+				continue
+			}
+			port, perr := strconv.Atoi(portStr)
+			if perr != nil {
+				continue
+			}
+			if !slices.Contains(r.AllowedHostPorts, port) {
+				r.AllowedHostPorts = append(r.AllowedHostPorts, port)
+			}
+		}
 
 		// Store proxy details for firewall setup (applied after container starts)
 		if needsProxyForFirewall {
@@ -759,6 +835,19 @@ func (m *Manager) Create(ctx context.Context, opts Options) (resRun *Run, retErr
 		// must NOT be in NO_PROXY (otherwise it bypasses network.host enforcement).
 		isHostNet := m.defaultRuntime().SupportsHostNetwork() && (opts.Config == nil || len(opts.Config.Ports) == 0)
 		proxyEnv = buildProxyEnv(regResp.AuthToken, regResp.ProxyPort, isHostNet)
+
+		// Advertise each serial device as an rfc2217:// URL. Control lines have
+		// no pty representation, so the URL — not a device path — is what tools
+		// that need DTR/RTS must use.
+		//
+		// The URL carries the container-facing host, not moat-host: a run with
+		// `services:` rewrites moat-host to the per-run network's gateway after
+		// this point, which is not where the listener is. On Docker Linux and
+		// Apple that host is the bound address (the gateway is reachable from
+		// every network mode); on Docker Desktop the listener binds host
+		// loopback but the container reaches it via host.docker.internal, so
+		// bind and advertised host differ — see serialAdvertiseHost.
+		proxyEnv = append(proxyEnv, SerialEnv(serialAdvertise, regResp.SerialAddrs)...)
 		proxyHost := syntheticProxyHost + ":" + strconv.Itoa(regResp.ProxyPort)
 
 		// Docker-on-Linux resolves the synthetic hostnames via --add-host (set
@@ -1241,11 +1330,19 @@ region = %s
 			"Add pi-cli to dependencies, or run with `moat pi`.")
 	}
 	imageSpec := &deps.ImageSpec{
-		BaseImage:          baseImage,
-		NeedsSSH:           hasSSHGrants,
-		SSHHosts:           sshGrants,
-		InitProviders:      imgNeeds.initProviders,
-		NeedsFirewall:      needsProxyForFirewall,
+		BaseImage:        baseImage,
+		NeedsSSH:         hasSSHGrants,
+		SSHHosts:         sshGrants,
+		InitProviders:    imgNeeds.initProviders,
+		NeedsFirewall:    needsProxyForFirewall,
+		HasSerialDevices: opts.Config != nil && len(opts.Config.Devices) > 0,
+		// Any daemon-registered run hands the container a proxy URL built on
+		// the synthetic hostname moat-proxy. On Apple containers and Docker
+		// Desktop that name only resolves via moat-init's MOAT_EXTRA_HOSTS
+		// write, so the entrypoint must be baked even for a grant-less run
+		// registered for network.host / rules / MCP / keep_policy / base_url.
+		// Same bug class as HasSerialDevices (see 8b2daed).
+		NeedsProxy:         needsProxyForGrants || needsProxyForFirewall || needsProxyForConfig,
 		NeedsGitIdentity:   hasGit,
 		NeedsInitFiles:     imgNeeds.initFiles,
 		NeedsClipboard:     needsClipboard,
@@ -3083,13 +3180,16 @@ func checkKeepPolicyCapabilities(daemonCapabilities []string, requiresBody bool)
 //
 // claude.base_url is in this set because the proxy block is what puts
 // ANTHROPIC_BASE_URL on the container, and a host-local endpoint is only
-// reachable through the proxy at all.
+// reachable through the proxy at all. devices is in this set because the serial
+// broker runs inside the proxy daemon: without it, a devices-only run would
+// resolve its pins, then get no listeners at all.
 func proxyRequiredForConfig(cfg *config.Config) bool {
 	if cfg == nil {
 		return false
 	}
 	return len(cfg.Network.Host) > 0 ||
 		len(cfg.Network.Rules) > 0 ||
+		len(cfg.Devices) > 0 ||
 		len(cfg.MCP) > 0 ||
 		cfg.Network.KeepPolicy != nil ||
 		cfg.Claude.BaseURL != "" ||

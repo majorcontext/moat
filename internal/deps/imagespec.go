@@ -32,6 +32,27 @@ type ImageSpec struct {
 	// policy enforcement.
 	NeedsFirewall bool
 
+	// HasSerialDevices indicates the run attaches USB serial devices via the
+	// proxy daemon's RFC2217 broker. The broker URL handed to the container
+	// uses the synthetic hostname moat-host, which only resolves on runtimes
+	// where moat-init.sh writes it to /etc/hosts from MOAT_EXTRA_HOSTS (Apple
+	// containers, Docker Desktop). On Docker Linux the entries come from
+	// --add-host instead, but the entrypoint is forced unconditionally so the
+	// image does not silently vary by host platform.
+	HasSerialDevices bool
+
+	// NeedsProxy indicates the run registers with the proxy daemon for a
+	// reason other than serial devices — network.host, network.rules, MCP
+	// servers, Keep policies, or claude.base_url. The container's HTTP_PROXY
+	// points at the synthetic hostname moat-proxy, which only resolves on
+	// runtimes where moat-init.sh writes it to /etc/hosts from
+	// MOAT_EXTRA_HOSTS. Grant-backed runs already have the entrypoint via
+	// other gates, so this flag only changes anything for a grant-less run
+	// whose proxy features are the sole trigger. Like HasSerialDevices, the
+	// entrypoint is forced unconditionally rather than platform-switched so
+	// the image does not silently vary by host platform.
+	NeedsProxy bool
+
 	// NeedsGitIdentity indicates the host's git identity should be injected
 	// into the container. Used only by Dockerfile generation.
 	NeedsGitIdentity bool
@@ -90,6 +111,7 @@ func (s *ImageSpec) NeedsCustomImage(hasDeps bool) bool {
 	hasHooks := s.Hooks != nil && (s.Hooks.PostBuild != "" || s.Hooks.PostBuildRoot != "" || s.Hooks.PreRun != "")
 	return hasDeps || s.BaseImage != "" || s.NeedsSSH || len(s.InitProviders) > 0 ||
 		s.NeedsFirewall || s.NeedsInitFiles || s.NeedsClipboard ||
+		s.HasSerialDevices || s.NeedsProxy ||
 		len(s.ClaudePlugins) > 0 || hasHooks || s.NeedsWorkspaceVolume || s.PiBakeSettings
 }
 
@@ -113,7 +135,7 @@ func (s *ImageSpec) needsInit(dockerMode DockerMode) bool {
 	hasPreRun := s.Hooks != nil && s.Hooks.PreRun != ""
 	return s.NeedsSSH || len(s.InitProviders) > 0 || s.NeedsClipboard ||
 		dockerMode != "" || hasPreRun || s.NeedsGitIdentity || s.NeedsInitFiles ||
-		s.NeedsFirewall || s.HasNamedVolumes || s.NeedsWorkspaceVolume
+		s.NeedsFirewall || s.HasNamedVolumes || s.NeedsWorkspaceVolume || s.HasSerialDevices || s.NeedsProxy
 }
 
 // initProviderHashComponents returns sorted hash strings for InitProviders.

@@ -1960,6 +1960,15 @@ func TestImageSpecNeedsInit(t *testing.T) {
 		// NeedsFirewall requires moat-init.sh because strict-policy Apple runs
 		// rely on MOAT_EXTRA_HOSTS to write synthetic hostnames to /etc/hosts.
 		{"firewall only", &ImageSpec{NeedsFirewall: true}, "", true},
+		// Same class: the serial broker URL uses moat-host, which Apple/Docker
+		// Desktop runs only resolve via MOAT_EXTRA_HOSTS in moat-init.sh.
+		{"serial devices only", &ImageSpec{HasSerialDevices: true}, "", true},
+		{"serial devices absent", &ImageSpec{}, "", false},
+		// Same class again: a proxy-registered run's HTTP_PROXY uses
+		// moat-proxy, which Apple/Docker Desktop runs only resolve via
+		// MOAT_EXTRA_HOSTS in moat-init.sh.
+		{"proxy only", &ImageSpec{NeedsProxy: true}, "", true},
+		{"proxy absent", &ImageSpec{}, "", false},
 		{"clipboard", &ImageSpec{NeedsClipboard: true}, "", true},
 		// Named volumes require moat-init: it chowns the root-owned volume root to
 		// the run user on root-entrypoint runtimes; without it the run hits EACCES.

@@ -6,8 +6,33 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
+	"strings"
 	"time"
 )
+
+// ipv6AcceptRules renders the IPv6 accept rules for a run's allowed host ports
+// as complete "$IP6T -w 5 -A OUTPUT ..." commands, each terminated with "&&"
+// and the firewall script's continuation indent so it slots into the
+// all-or-nothing IPv6 block ahead of the final DROP. Empty input yields the
+// empty string: the preceding rule's "&&" then flows straight to the DROP.
+// Shared by the Docker and Apple SetupFirewall scripts, which build an
+// identical IPv6 chain (only the IPv4 $IPT binary differs between them). A
+// prior version emitted bare argument fragments that concatenated into
+// "$IP6T -w 5-A OUTPUT" (no space) and broke the &&-chain, flushing the policy.
+func ipv6AcceptRules(ports []int, dest string) string {
+	// These ports belong to a serial listener bound to one host address. When
+	// that address is IPv4 there is nothing to reach over IPv6, so emitting no
+	// rule is both correct and tighter than opening the port on both stacks.
+	if dest == "" || net.ParseIP(dest) == nil || net.ParseIP(dest).To4() != nil {
+		return ""
+	}
+	var b strings.Builder
+	for _, p := range ports {
+		fmt.Fprintf(&b, "$IP6T -w 5 -A OUTPUT -p tcp -d %s --dport %d -j ACCEPT &&\n\t\t\t   ", dest, p)
+	}
+	return b.String()
+}
 
 // DefaultDNS returns the default DNS servers if the provided list is empty.
 // Uses Google DNS (8.8.8.8, 8.8.4.4) as a reliable fallback since container
@@ -127,8 +152,19 @@ type Runtime interface {
 	// SetupFirewall configures iptables and ip6tables to only allow traffic to the proxy.
 	// proxyHost is the address the container uses to reach the proxy (e.g., "host.docker.internal").
 	// proxyPort is the proxy's port number.
+	// extraPorts are the run's RFC2217 serial listener ports, and extraAddr is
+	// the host address those listeners bind. Without them a strict run's own
+	// devices would be unreachable: the ports are OS-assigned, so no static
+	// rule can cover them, and RFC2217 is raw TCP that never transits the
+	// proxy. Every rule is scoped to extraAddr; an empty extraAddr emits none,
+	// because a destination-less allow would grant the container that port on
+	// every host it can route to.
+	//
+	// network.host and claude.base_url ports are deliberately NOT passed here.
+	// Those are proxy-mediated and enforced on the proxy's own path; adding
+	// them would convert an allowlist into open egress on those ports.
 	// This blocks all other outbound IPv4 and IPv6 traffic, forcing everything through the proxy.
-	SetupFirewall(ctx context.Context, id string, proxyHost string, proxyPort int) error
+	SetupFirewall(ctx context.Context, id string, proxyHost string, proxyPort int, extraPorts []int, extraAddr string) error
 
 	// ListImages returns all moat-managed images.
 	ListImages(ctx context.Context) ([]ImageInfo, error)

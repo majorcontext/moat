@@ -134,12 +134,27 @@ func (m *Manager) monitorProxyHealth(ctx context.Context, r *Run) {
 			regReq := *r.ProxyRegReq
 			regReq.AuthToken = r.ProxyAuthToken
 			regCtx, regCancel := context.WithTimeout(ctx, 5*time.Second)
-			_, regErr := dc.RegisterRun(regCtx, regReq)
+			regResp, regErr := dc.RegisterRun(regCtx, regReq)
 			regCancel()
 			if regErr != nil {
 				log.Warn("failed to re-register run with proxy daemon",
 					"run_id", r.ID, "error", regErr)
 				continue
+			}
+			// Create gates on CapSerialDevices, but this path does not: the
+			// daemon we reconnect to may be an older binary that EnsureRunning
+			// deliberately kept. Such a daemon ignores the serial fields it does
+			// not know, answers 201, and leaves the container's frozen
+			// MOAT_SERIAL_*_URL pointing at nothing. Silence is the failure
+			// mode, so say so rather than logging a successful re-register.
+			if len(regReq.SerialDevices) > 0 && (regResp == nil || len(regResp.SerialAddrs) == 0) {
+				// log.Warn, not ui.Warn: this fires from the background
+				// health-check goroutine, and an attached agent owns the
+				// terminal — an unsolicited line lands mid-frame and corrupts
+				// the display. Every other message in this loop logs too.
+				log.Warn("re-registered run lost its serial devices; the daemon does not support them — "+
+					"run 'moat proxy restart', then restart the run",
+					"run_id", r.ID, "devices", len(regReq.SerialDevices))
 			}
 			// Update with container ID after re-registration.
 			if r.ContainerID != "" {

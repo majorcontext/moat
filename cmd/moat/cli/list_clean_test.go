@@ -100,7 +100,7 @@ func (s *listCleanStubRuntime) ServiceManager() container.ServiceManager {
 	panic("unexpected call to ServiceManager")
 }
 func (s *listCleanStubRuntime) Close() error { panic("unexpected call to Close") }
-func (s *listCleanStubRuntime) SetupFirewall(ctx context.Context, id string, proxyHost string, proxyPort int) error {
+func (s *listCleanStubRuntime) SetupFirewall(ctx context.Context, id string, proxyHost string, proxyPort int, extraPorts []int, extraAddr string) error {
 	panic("unexpected call to SetupFirewall")
 }
 

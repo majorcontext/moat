@@ -1652,6 +1652,65 @@ moat proxy restart
 
 ---
 
+## moat device
+
+Inspect serial devices attached to this machine and manage which ones runs may use. See
+[Serial devices](../guides/18-serial-devices.md). With no subcommand, `moat device` lists.
+
+### moat device list
+
+List attached serial devices with their USB IDs and pin state.
+
+```bash
+moat device list
+```
+
+```
+DEVICE                   USB ID     IFACE  SERIAL NUMBER  PIN    DESCRIPTION
+/dev/cu.usbserial-14220  10c4:ea60  -      0001           esp32  CP2102 USB to UART Bridge
+```
+
+The `IFACE` column shows the USB interface number for a port of a multi-UART bridge —
+the value for `match.interface` in moat.yaml — and `-` for single-UART devices.
+
+The `PIN` column shows the device name a device is approved under, `-` if it is not
+pinned, or `MISMATCH (<name>)` when a device of the same model as a pin is attached but is
+not the pinned unit — the case a run rejects.
+
+Pins whose device is not attached are listed separately.
+
+USB devices with no serial interface (SDR dongles, keyboards, storage) are listed in a
+separate section — they cannot go through `devices:`, which only brokers serial hardware.
+The section exists so a plugged-in device is visibly detected rather than appearing to be
+missed; it does not imply an alternative route into the container.
+
+### moat device forget
+
+Forget a device pin so the next run approves whatever is attached.
+
+```bash
+moat device forget <name>
+```
+
+Use after deliberately swapping hardware.
+
+### moat device rename
+
+Move a pin to a different name, keeping the approved hardware.
+
+```bash
+moat device rename <old> <new>
+```
+
+Use after changing a `name:` under `devices:` in moat.yaml. Without it the new name is
+unpinned — the next run approves the device again under that name, and the old pin stays
+behind for the same hardware.
+
+Renaming onto a name that is already pinned fails; `moat device forget` that name first if
+you mean to replace it.
+
+---
+
 ## moat deps
 
 Manage dependencies. See [Dependencies](./06-dependencies.md) for details on the dependency system.

@@ -529,3 +529,63 @@ func (s *RunStore) ReadDockerfile() (string, error) {
 	}
 	return string(data), nil
 }
+
+// DeviceEvent records something that happened on a serial device session.
+type DeviceEvent struct {
+	Timestamp time.Time `json:"ts"`
+	Device    string    `json:"device"`           // config name, e.g. "esp32"
+	Kind      string    `json:"kind"`             // attach, detach, settings, modem, control, break, purge, error, conflict
+	Detail    string    `json:"detail,omitempty"` // e.g. "dtr-on", "921600 8N1", the device path
+	TxBytes   int64     `json:"tx_bytes,omitempty"`
+	RxBytes   int64     `json:"rx_bytes,omitempty"`
+}
+
+// WriteDeviceEvent appends a serial device event to the log.
+func (s *RunStore) WriteDeviceEvent(ev DeviceEvent) error {
+	f, err := os.OpenFile(
+		filepath.Join(s.dir, "devices.jsonl"),
+		os.O_CREATE|os.O_WRONLY|os.O_APPEND,
+		0o600,
+	)
+	if err != nil {
+		return fmt.Errorf("opening devices file: %w", err)
+	}
+	defer f.Close()
+
+	data, err := json.Marshal(ev)
+	if err != nil {
+		return fmt.Errorf("marshaling device event: %w", err)
+	}
+	// One write, newline included. Every approved device in a run emits from
+	// its own session goroutine into this same file, so splitting the record
+	// and its terminator into two O_APPEND writes lets two events interleave
+	// into a line that neither ReadDeviceEvents nor `moat devices` can parse —
+	// and the reader drops unparseable lines silently, so both events vanish.
+	if _, writeErr := f.Write(append(data, '\n')); writeErr != nil {
+		return fmt.Errorf("writing device event: %w", writeErr)
+	}
+	return nil
+}
+
+// ReadDeviceEvents returns all recorded serial device events.
+func (s *RunStore) ReadDeviceEvents() ([]DeviceEvent, error) {
+	data, err := os.ReadFile(filepath.Join(s.dir, "devices.jsonl"))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("reading devices file: %w", err)
+	}
+	var events []DeviceEvent
+	for _, line := range strings.Split(string(data), "\n") {
+		if line == "" {
+			continue
+		}
+		var ev DeviceEvent
+		if err := json.Unmarshal([]byte(line), &ev); err != nil {
+			continue // skip malformed lines rather than losing the whole log
+		}
+		events = append(events, ev)
+	}
+	return events, nil
+}

@@ -60,3 +60,7 @@ internal/run/helpers/aws-credential-helper-*
 
 # Terminal I/O traces (--tty-trace / MOAT_TTY_TRACE)
 *.tty
+
+# Python bytecode (examples)
+__pycache__/
+*.pyc

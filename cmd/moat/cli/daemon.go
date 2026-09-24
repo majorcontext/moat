@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"io"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -16,6 +17,7 @@ import (
 	"github.com/majorcontext/moat/internal/daemon"
 	"github.com/majorcontext/moat/internal/log"
 	"github.com/majorcontext/moat/internal/routing"
+	"github.com/majorcontext/moat/internal/serialbroker"
 	"github.com/majorcontext/moat/internal/storage"
 	"github.com/spf13/cobra"
 )
@@ -86,32 +88,58 @@ func runDaemon(_ *cobra.Command, _ []string) error {
 		return rc.ToProxyContextData(), true
 	})
 
-	// Wire network request logging. The proxy is shared across runs, so
-	// the logger routes to per-run storage using the RunID from request context.
+	// Per-run stores are shared across every sink that writes for a run: the
+	// network logger, the policy logger, and the serial event fanout. Sharing
+	// the *audit.Store is a correctness requirement, not just an economy —
+	// audit.Store caches the chain's last sequence in memory, so two handles on
+	// one audit.db collide on the seq primary key and silently drop entries.
 	var storeMu sync.Mutex
 	stores := make(map[string]*storage.RunStore)
 	baseDir := storage.DefaultBaseDir()
+	getRunStore := func(runID string) *storage.RunStore {
+		storeMu.Lock()
+		defer storeMu.Unlock()
+		store, ok := stores[runID]
+		if !ok {
+			var storeErr error
+			store, storeErr = storage.NewRunStore(baseDir, runID)
+			if storeErr != nil {
+				log.Warn("failed to open run store", "run_id", runID, "error", storeErr)
+				return nil
+			}
+			stores[runID] = store
+		}
+		return store
+	}
 
+	var auditMu sync.Mutex
+	auditStores := make(map[string]*audit.Store)
+	getAuditStore := func(runID string) *audit.Store {
+		auditMu.Lock()
+		defer auditMu.Unlock()
+		as, ok := auditStores[runID]
+		if !ok {
+			var openErr error
+			as, openErr = audit.OpenStore(filepath.Join(baseDir, runID, "audit.db"))
+			if openErr != nil {
+				log.Warn("failed to open audit store", "run_id", runID, "error", openErr)
+				return nil
+			}
+			auditStores[runID] = as
+		}
+		return as
+	}
+
+	// Wire network request logging. The proxy is shared across runs, so the
+	// logger routes to per-run storage using the RunID from request context.
 	p.SetLogger(func(data proxy.RequestLogData) {
 		if data.RunID == "" {
 			return
 		}
-
-		storeMu.Lock()
-		store, ok := stores[data.RunID]
-		if !ok {
-			var storeErr error
-			store, storeErr = storage.NewRunStore(baseDir, data.RunID)
-			if storeErr != nil {
-				storeMu.Unlock()
-				log.Warn("failed to open run store for network log",
-					"run_id", data.RunID, "error", storeErr)
-				return
-			}
-			stores[data.RunID] = store
+		store := getRunStore(data.RunID)
+		if store == nil {
+			return
 		}
-		storeMu.Unlock()
-
 		var errStr string
 		if data.Err != nil {
 			errStr = data.Err.Error()
@@ -131,32 +159,39 @@ func runDaemon(_ *cobra.Command, _ []string) error {
 		})
 	})
 
-	// Wire policy decision logging. Routes to per-run audit stores.
-	var auditMu sync.Mutex
-	auditStores := make(map[string]*audit.Store)
+	// Wire policy decision logging. Routes to the same per-run audit stores.
 	p.SetPolicyLogger(func(data proxy.PolicyLogData) {
 		if data.RunID == "" {
 			return
 		}
-
-		auditMu.Lock()
-		as, ok := auditStores[data.RunID]
-		if !ok {
-			runDir := filepath.Join(baseDir, data.RunID)
-			var openErr error
-			as, openErr = audit.OpenStore(filepath.Join(runDir, "audit.db"))
-			if openErr != nil {
-				auditMu.Unlock()
-				log.Warn("failed to open audit store for policy log",
-					"run_id", data.RunID, "error", openErr)
-				return
-			}
-			auditStores[data.RunID] = as
+		if as := getAuditStore(data.RunID); as != nil {
+			_ = as.AppendPolicyEntry(data.Scope, data.Operation, "deny", data.Rule, data.Message)
 		}
-		auditMu.Unlock()
-
-		_ = as.AppendPolicyEntry(data.Scope, data.Operation, "deny", data.Rule, data.Message)
 	})
+
+	// Serial device broker. Listeners are opened per run when a run registers
+	// devices, and closed when it unregisters. Event routing lives in
+	// serialEventFanout (serial_events.go): every event goes to the run's
+	// devices.jsonl; session boundaries also go to the audit chain.
+	serialFanout := newSerialEventFanout(getRunStore, getAuditStore)
+	serialBroker := serialbroker.New(serialbroker.Options{
+		// Payload capture (record: full) writes to the run's directory beside
+		// its other artifacts. 0600 because the capture may contain firmware
+		// images and device credentials.
+		OpenRecorder: func(runID, device string) (io.WriteCloser, error) {
+			runDir := filepath.Join(baseDir, runID)
+			if mkErr := os.MkdirAll(runDir, 0o700); mkErr != nil {
+				return nil, mkErr
+			}
+			return os.OpenFile(
+				filepath.Join(runDir, "serial-"+device+".capture"),
+				os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600,
+			)
+		},
+		Log: serialFanout.handle,
+	})
+	defer serialBroker.Close()
+	apiServer.SetSerialBroker(serialBroker)
 
 	// Start credential proxy.
 	proxyServer := proxy.NewServer(p)
@@ -261,7 +296,18 @@ func runDaemon(_ *cobra.Command, _ []string) error {
 		}
 		auditMu.Unlock()
 	}
-	lc.SetOnCleanup(func(_, runID string) { cleanupStore(runID) })
+	// A reaped run must also release its serial device claims. The CLI that
+	// created them may be gone (kill -9, crash, a machine that rebooted
+	// mid-run); without this, the device stays "in use by run <dead-id>" until
+	// the daemon itself is restarted.
+	// Revoke first: it waits for the run's sessions to finish, and those
+	// sessions emit the detach record with its byte counts. Closing the stores
+	// first loses that record — and worse, the late event re-opens a second
+	// handle on the same audit.db, which collides on the chain's sequence key.
+	lc.SetOnCleanup(func(_, runID string) {
+		serialBroker.Revoke(runID)
+		cleanupStore(runID)
+	})
 	lc.SetOnEmpty(idleShutdown.Reset)
 
 	// Set up run persistence so the registry survives daemon restarts.
@@ -274,7 +320,14 @@ func runDaemon(_ *cobra.Command, _ []string) error {
 	if persisted, loadErr := persister.Load(); loadErr != nil {
 		log.Warn("failed to load persisted runs", "error", loadErr)
 	} else if len(persisted) > 0 {
-		restored := daemon.RestoreRuns(livenessCtx, apiServer.Registry(), persisted)
+		// Serial listeners are re-opened on the ports the containers' frozen
+		// MOAT_SERIAL_*_URLs point at. listenSerialAt fails a run whose port is
+		// taken; such a run is skipped rather than rebound out of reach.
+		restoreListen := func(rc *daemon.RunContext, specs []daemon.SerialDeviceSpec, bindAddr string, addrs map[string]string) error {
+			_, err := apiServer.ListenSerialPinned(rc, specs, bindAddr, addrs)
+			return err
+		}
+		restored := daemon.RestoreRunsWithSerial(livenessCtx, apiServer.Registry(), persisted, restoreListen)
 		log.Info("restored runs from disk", "loaded", len(persisted), "restored", restored)
 		// Save immediately to reconcile (remove runs that failed to restore).
 		if err := persister.Save(); err != nil {

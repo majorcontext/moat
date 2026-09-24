@@ -417,13 +417,18 @@ func setLogContext(r *Run) {
 
 // setupFirewall configures iptables-based network isolation inside the
 // container so that only traffic through the credential-injecting proxy is
-// allowed. Returns an error if firewall setup fails, since a strict network
-// policy without a working firewall would leave the container unprotected.
+// allowed — plus the run's RFC2217 serial listener ports, which are raw TCP
+// the proxy cannot relay, scoped to the host address those listeners bind.
+// network.host and base_url ports are deliberately NOT in this list: they stay
+// enforced on the proxy's own path, and a rule here would grant raw egress to
+// that port on any reachable host. Returns an error if firewall setup fails, since a strict
+// network policy without a working firewall would leave the container
+// unprotected.
 func (m *Manager) setupFirewall(ctx context.Context, r *Run) error {
 	if !r.FirewallEnabled || r.ProxyPort <= 0 {
 		return nil
 	}
-	if err := m.defaultRuntime().SetupFirewall(ctx, r.ContainerID, r.ProxyHost, r.ProxyPort); err != nil {
+	if err := m.defaultRuntime().SetupFirewall(ctx, r.ContainerID, r.ProxyHost, r.ProxyPort, r.AllowedHostPorts, r.SerialHostAddr); err != nil {
 		r.SetStateFailedAt(fmt.Sprintf("firewall setup failed: %v", err), time.Now())
 		if stopErr := m.defaultRuntime().StopContainer(ctx, r.ContainerID); stopErr != nil {
 			ui.Warnf("Failed to stop container after firewall error: %v", stopErr)

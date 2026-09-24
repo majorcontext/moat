@@ -22,6 +22,7 @@ const (
 	EntrySSH        EntryType = "ssh"
 	EntryContainer  EntryType = "container"
 	EntryExec       EntryType = "exec"
+	EntryDevice     EntryType = "device"
 )
 
 // FirstSequence is the sequence number of the first entry in a log.
@@ -82,6 +83,23 @@ type ExecData struct {
 	Command  []string `json:"command"`
 	HasStdin bool     `json:"has_stdin"`
 	ExitCode int      `json:"exit_code"`
+}
+
+// DeviceData describes a serial device event.
+//
+// The device's USB identity is recorded on every entry so an audit trail shows
+// which physical device was reached, not just the name the config gave it.
+type DeviceData struct {
+	Name       string `json:"name"`
+	Path       string `json:"path,omitempty"`
+	VID        string `json:"vid,omitempty"`
+	PID        string `json:"pid,omitempty"`
+	Serial     string `json:"serial,omitempty"`
+	Action     string `json:"action"` // attach, detach, error, conflict
+	Detail     string `json:"detail,omitempty"`
+	TxBytes    int64  `json:"tx_bytes,omitempty"`
+	RxBytes    int64  `json:"rx_bytes,omitempty"`
+	RecordMode string `json:"record_mode,omitempty"` // "full" when payloads were captured
 }
 
 // Entry represents a single hash-chained log entry.
