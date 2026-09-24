@@ -12,36 +12,58 @@ This guide covers running OpenAI Codex CLI in a Moat container.
 ## Prerequisites
 
 - Moat installed
-- An OpenAI API key from [platform.openai.com](https://platform.openai.com/api-keys)
+- A ChatGPT plan with Codex access, or an OpenAI API key
+- Codex CLI 0.146.x–0.154.x on the host for the one-time subscription login
 
-## Granting OpenAI credentials
+## Granting a Codex subscription
 
-Run `moat grant openai` to configure authentication:
+Run `moat grant codex`. Moat launches a fresh Codex login in a private,
+temporary `CODEX_HOME`; it never reads or changes your normal
+`~/.codex/auth.json`.
 
 ```bash
-$ moat grant openai
-
-Enter your OpenAI API key.
-You can find or create one at: https://platform.openai.com/api-keys
-
-API Key: sk-...
-
-Validating API key...
-API key is valid.
-
-OpenAI API key saved to ~/.moat/credentials/openai.enc
+moat grant codex
 ```
 
-You can also set `OPENAI_API_KEY` in your environment before running the command:
+The login uses Codex's device-code flow: it prints a link and a one-time code,
+and you sign in from a browser anywhere — the same command works on your laptop,
+over SSH, and on a headless host. Do not run `codex login` yourself to complete
+it; that writes to your ordinary `CODEX_HOME` instead of Moat's temporary one.
+
+Device-code login is in beta and a workspace administrator can disable it. If
+it is unavailable for your account, `moat grant openai` with an API key is the
+supported alternative.
+
+Moat stores its separately issued refresh credential encrypted as
+`codex-subscription-v1`. The temporary plaintext login directory is deleted.
+
+For API-key billing or general OpenAI SDK use, grant the independent `openai`
+credential instead:
 
 ```bash
 export OPENAI_API_KEY="sk-..."
 moat grant openai
 ```
 
+If both grants are present, Codex uses the ChatGPT subscription. The API-key
+placeholder is exported to shell commands via `BASH_ENV` rather than into the
+container environment, so scripts and SDKs can reach it while Codex itself does
+not see it and stays on the subscription. This mirrors how a `claude` plus
+`anthropic` pair is handled.
+
+With neither grant, no auth file is staged at all and Codex prompts for login
+as it normally would.
+
 ### How credentials are injected
 
-The actual credential is never in the container environment. Moat's proxy intercepts requests to OpenAI's API and injects the real token at the network layer. See [Credential management](../concepts/02-credentials.md) for details.
+The container gets a wholly synthetic `~/.codex/auth.json`. Moat's daemon loads
+the real encrypted credential and atomically replaces the synthetic bearer and
+account headers only for TLS requests to `https://chatgpt.com/backend-api/codex/**`.
+The real access token, refresh token, and account ID are never mounted or sent
+in the container environment. Subscription auth currently supports only the
+default ChatGPT origin and Codex CLI 0.146.x–0.154.x.
+
+OpenAI API keys remain scoped to `api.openai.com`.
 
 ## Generating moat.yaml
 
@@ -159,7 +181,7 @@ Configure in `moat.yaml` for repeated use:
 name: my-codex-project
 
 grants:
-  - openai
+  - codex
   - github
 ```
 
@@ -199,7 +221,7 @@ network:
 
 ## Session transcripts
 
-When the `openai` grant is configured, Codex session transcripts written inside the container appear on the host at:
+When the `codex` or `openai` grant is configured, Codex session transcripts written inside the container appear on the host at:
 
 ```
 ~/.moat/codex/sessions/<workspace>-<id>/YYYY/MM/DD/rollout-<timestamp>-<uuid>.jsonl

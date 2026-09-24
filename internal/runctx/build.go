@@ -13,6 +13,7 @@ import (
 var grantDescriptions = map[string]string{
 	"github":    "GitHub access via `gh` CLI. Credentials are auto-injected at the network layer.",
 	"anthropic": "Anthropic API access via proxy.",
+	"codex":     "ChatGPT subscription for Codex CLI. Injected at the network layer; the container's auth file is synthetic.",
 	"openai":    "OpenAI API access via proxy.",
 	"gemini":    "Google Gemini API access via proxy.",
 	"aws":       "AWS credentials via IAM role assumption.",
@@ -35,6 +36,11 @@ type BuildOptions struct {
 	// than container-wide (both "claude" and "anthropic" grants active). Empty
 	// means there is nothing special to explain.
 	AnthropicKeyEnv string
+	// OpenAIKeyEnv is the environment variable holding the shell-scoped OpenAI
+	// API key. Set only when the key is exported via BASH_ENV rather than
+	// container-wide (both "codex" and "openai" grants active). Empty means
+	// there is nothing special to explain.
+	OpenAIKeyEnv string
 }
 
 // BuildFromConfig constructs a RuntimeContext from a moat config, run ID, and
@@ -62,6 +68,9 @@ func BuildFromConfig(cfg *config.Config, runID string, opts BuildOptions) *Runti
 		rc.Docker = &Docker{Mode: string(opts.DockerMode)}
 	}
 
+	if opts.OpenAIKeyEnv != "" {
+		rc.OpenAIAPI = &OpenAIAPI{KeyEnv: opts.OpenAIKeyEnv}
+	}
 	if opts.AnthropicKeyEnv != "" {
 		rc.AnthropicAPI = &AnthropicAPI{KeyEnv: opts.AnthropicKeyEnv}
 	}

@@ -32,8 +32,8 @@ A **grant** is a credential made available to a run. Each grant type targets spe
 | `github` | `api.github.com`, `github.com` | `Authorization: Bearer` header |
 | `claude` | `api.anthropic.com` | `Authorization: Bearer` header (OAuth token) |
 | `anthropic` | `api.anthropic.com` | `x-api-key` header (API key) |
-| `codex` | `api.openai.com` | `Authorization: Bearer` header |
-| `openai` | `api.openai.com` | Alias for `codex` |
+| `codex` | `chatgpt.com/backend-api/codex` | Atomic subscription bearer and account headers |
+| `openai` | `api.openai.com` | `Authorization: Bearer` header |
 | `gemini` | `cloudcode-pa.googleapis.com` (OAuth) or `generativelanguage.googleapis.com` (API key) | `Bearer` token or `x-goog-api-key` header |
 | `graphite` | `api.graphite.com`, `*.graphite.com` | `Authorization: token` header |
 | `meta` | `graph.facebook.com`, `graph.instagram.com` | `Authorization: Bearer` header |

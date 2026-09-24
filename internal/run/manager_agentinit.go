@@ -62,7 +62,7 @@ func buildLocalMCPConfig(agentName string, specs map[string]config.MCPServerSpec
 	return out, nil
 }
 
-// setupCodexStaging builds the Codex container config (OpenAI auth + remote and
+// setupCodexStaging builds the Codex container config (auth + remote and
 // local MCP servers) via the provider interface. openCredStore must be non-nil
 // when needsCodexInit is true (Create always passes a real closure).
 func (m *Manager) setupCodexStaging(ctx context.Context, codexProvider provider.AgentProvider, opts Options, r *Run, needsCodexInit bool, containerHome, renderedContext string, openCredStore func() (*credential.FileStore, error)) (*provider.ContainerConfig, error) {
@@ -70,8 +70,16 @@ func (m *Manager) setupCodexStaging(ctx context.Context, codexProvider provider.
 	var codexCred *provider.Credential
 	if needsCodexInit {
 		if store, storeErr := openCredStore(); storeErr == nil {
-			if cred, err := store.Get(credential.ProviderOpenAI); err == nil {
-				codexCred = provider.FromLegacy(cred)
+			if hasGrant(opts.Grants, "codex") {
+				if cred, err := store.Get(credential.ProviderCodexSubscription); err == nil {
+					codexCred = provider.FromLegacy(cred)
+				} else if cred, err := store.Get(credential.ProviderOpenAI); err == nil {
+					codexCred = provider.FromLegacy(cred)
+				}
+			} else if hasGrant(opts.Grants, "openai") {
+				if cred, err := store.Get(credential.ProviderOpenAI); err == nil {
+					codexCred = provider.FromLegacy(cred)
+				}
 			}
 		}
 	}
@@ -97,12 +105,13 @@ func (m *Manager) setupCodexStaging(ctx context.Context, codexProvider provider.
 	mcpServers := buildMCPRelayServers(codexMCPs, r.ProxyPort, r.ProxyAuthToken)
 
 	codexConfig, prepErr := codexProvider.PrepareContainer(ctx, provider.PrepareOpts{
-		Credential:           codexCred,
-		ContainerHome:        containerHome,
-		MCPServers:           mcpServers,
-		RuntimeContext:       renderedContext,
-		LocalMCPServers:      codexLocalMCP,
-		CodexRequireApproval: requireApproval,
+		Credential:            codexCred,
+		ContainerHome:         containerHome,
+		MCPServers:            mcpServers,
+		RuntimeContext:        renderedContext,
+		LocalMCPServers:       codexLocalMCP,
+		CodexRequireApproval:  requireApproval,
+		ScopeOpenAIKeyToShell: hasGrant(opts.Grants, "codex") && hasGrant(opts.Grants, "openai"),
 	})
 	if prepErr != nil {
 		return nil, fmt.Errorf("preparing Codex container config: %w", prepErr)

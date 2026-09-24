@@ -232,7 +232,33 @@ $ moat claude ./my-project
 $ moat run --grant claude --grant anthropic ./my-project
 ```
 
-## OpenAI
+## Codex subscription
+
+```bash
+moat grant codex
+```
+
+This launches an isolated ChatGPT login and stores a separately issued refresh
+credential encrypted under a versioned internal key. The container sees only a
+synthetic Codex auth file. The daemon replaces its bearer and account headers
+as one TLS-only bundle on the default ChatGPT Codex backend path.
+
+Subscription auth supports Codex CLI 0.146.x–0.154.x, checked both against the
+`codex-cli` version the image installs and against the executable actually
+present in the container. Pin a supported version with `codex-cli@<version>` in
+`dependencies` if your project overrides it.
+
+Re-run `moat grant codex` if refresh is revoked. Custom or managed ChatGPT base
+URLs are not supported.
+
+The subscription cannot be used as an MCP server credential — it is scoped to
+ChatGPT's Codex backend and nothing else. An `mcp` entry declaring
+`auth.grant: codex` is rejected; use `openai` for MCP servers that need an
+OpenAI key.
+
+Revoke with `moat revoke codex`.
+
+## OpenAI API key
 
 ### CLI command
 
@@ -249,7 +275,7 @@ No flags.
 
 ### What it injects
 
-The proxy injects an `Authorization: Bearer <token>` header for requests to `api.openai.com`, `chatgpt.com`, and `*.openai.com`.
+The proxy injects an `Authorization: Bearer <token>` header for requests to `api.openai.com`.
 
 The container receives `OPENAI_API_KEY` set to a format-valid placeholder so OpenAI SDKs work without prompting.
 
@@ -279,7 +305,7 @@ API key is valid.
 
 OpenAI API key saved to ~/.moat/credentials/openai.enc
 
-$ moat codex ./my-project
+$ moat codex --grant openai ./my-project
 ```
 
 ## Gemini

@@ -28,9 +28,9 @@ func TestApplyAgentDefaultsDefaultsGrantsAndCommand(t *testing.T) {
 		t.Fatalf("ApplyAgentDefaults: %v", err)
 	}
 
-	// codex's derived grant is openai; it must join the explicit "github"
+	// Codex's derived grant must join the explicit "github"
 	// grant in the defaulted flags list.
-	for _, want := range []string{"github", "openai"} {
+	for _, want := range []string{"github", "codex"} {
 		if !slices.Contains(flagsGrants, want) {
 			t.Errorf("expected flagsGrants to contain %q; got %v", want, flagsGrants)
 		}
@@ -38,8 +38,8 @@ func TestApplyAgentDefaultsDefaultsGrantsAndCommand(t *testing.T) {
 	// AppendDerivedGrants must have written the derived grant back into
 	// cfg.Grants too, since it has its own downstream readers
 	// (ShouldSyncCodexLogs etc.) that never see flagsGrants.
-	if !slices.Contains(cfg.Grants, "openai") {
-		t.Errorf("expected cfg.Grants to contain derived grant openai; got %v", cfg.Grants)
+	if !slices.Contains(cfg.Grants, "codex") {
+		t.Errorf("expected cfg.Grants to contain derived grant codex; got %v", cfg.Grants)
 	}
 	if got := []string{"npm", "test"}; !slices.Equal(command, got) {
 		t.Errorf("expected command defaulted to %v; got %v", got, command)
@@ -70,7 +70,7 @@ func TestApplyAgentDefaultsCompanionExplicitOverridesLeftAlone(t *testing.T) {
 	if got := []string{"bash"}; !slices.Equal(command, got) {
 		t.Errorf("explicit command must not be overwritten by config; got %v, want %v", command, got)
 	}
-	if !slices.Contains(cfg.Grants, "openai") {
+	if !slices.Contains(cfg.Grants, "codex") {
 		t.Errorf("derived grant must still be written back into cfg.Grants even when flags override; got %v", cfg.Grants)
 	}
 }

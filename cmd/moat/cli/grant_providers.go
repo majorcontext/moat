@@ -35,7 +35,8 @@ var goProviderDescriptions = map[string]string{
 	"github":    "GitHub token",
 	"claude":    "Claude Pro/Max OAuth token (for moat claude)",
 	"anthropic": "Anthropic API key from console.anthropic.com",
-	"codex":     "OpenAI API key or OAuth credentials",
+	"codex":     "ChatGPT subscription login for Codex CLI",
+	"openai":    "OpenAI API key",
 	"gemini":    "Gemini API key or OAuth credentials",
 	"aws":       "AWS IAM role assumption",
 	"npm":       "npm registry credentials",
@@ -44,14 +45,9 @@ var goProviderDescriptions = map[string]string{
 	"oauth":     "OAuth for a catalog service ('moat grant oauth <name>')",
 }
 
-// goProviderCLINames maps internal provider names to their CLI-facing names.
-// Only for providers whose canonical name is not what users type: `codex` is
-// granted as `openai` via a registry alias. `claude` is NOT aliased here — it
-// and `anthropic` are two separate grants (OAuth vs API key), so renaming one
-// to the other collapses them into a duplicate row.
-var goProviderCLINames = map[string]string{
-	"codex": "openai",
-}
+// goProviderCLINames maps internal provider names to their CLI-facing names
+// when they intentionally differ.
+var goProviderCLINames = map[string]string{}
 
 // isAgentOnly reports whether a provider has no credential of its own — it
 // runs on another provider's grant and its Grant() always errors. Listing one

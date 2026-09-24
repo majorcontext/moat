@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -227,7 +228,12 @@ func RestoreRuns(ctx context.Context, registry *Registry, runs []PersistedRun) i
 			continue
 		}
 
-		if err := resolveCredentials(rc, pr.Grants, pr.MCPServers, store); err != nil {
+		// syncRefresh=false: these containers are already running, and
+		// StartTokenRefresh below performs an initial refresh of its own.
+		// A blocking exchange here is serialized across every restored run by
+		// codexRefreshMu, so one unreachable token endpoint would stall daemon
+		// startup by its full timeout for each run in turn.
+		if err := resolveCredentials(rc, pr.Grants, pr.MCPServers, store, false); err != nil {
 			log.Warn("restore: failed to resolve credentials, skipping run",
 				"run_id", pr.RunID, "error", err)
 			continue
@@ -285,25 +291,55 @@ func RestoreRuns(ctx context.Context, registry *Registry, runs []PersistedRun) i
 // Create() (around the "Configure proxy with credentials" section). If you add
 // a new provider setup step there, add the corresponding logic here too.
 // A future refactor should extract a shared ConfigureRunFromGrants helper.
-func resolveCredentials(rc *RunContext, grants []string, mcpServers []config.MCPServerConfig, store credential.Store) error {
+// syncRefresh controls whether a near-expiry Codex subscription is exchanged
+// before this function returns.
+//
+// A newly registering run needs it: its container is about to make its first
+// request and must not race an asynchronous refresh. A restored run does not —
+// its container is already running, StartTokenRefresh performs an initial
+// refresh in the background moments later, and blocking here would hold up
+// daemon startup for every run queued behind it.
+func resolveCredentials(rc *RunContext, grants []string, mcpServers []config.MCPServerConfig, store credential.Store, syncRefresh bool) error {
 	for _, grant := range grants {
 		grantName := strings.Split(grant, ":")[0]
 		if grantName == "ssh" {
 			continue
 		}
 
-		credName := resolveCredName(grantName, grant)
-		cred, err := store.Get(credName)
+		cred, credName, err := loadCredentialForGrant(store, grantName, grant)
 		if err != nil {
 			return fmt.Errorf("grant %q: credential not found: %w", grantName, err)
 		}
 		provCred := provider.FromLegacy(cred)
+		if credName == credential.ProviderCodexSubscription && syncRefresh {
+			// Refresh before the bundle is installed so the container does not
+			// race an asynchronous startup refresh with its first request.
+			updated, _, refreshErr := refreshCodexSubscription(context.Background(), store, provCred)
+			switch {
+			case refreshErr == nil:
+				provCred = updated
+			case errors.Is(refreshErr, provider.ErrTokenRevoked):
+				// Permanent: no amount of retrying helps and the run would only
+				// produce 401s, so fail with the regrant instruction.
+				return fmt.Errorf("grant %q: %w", grantName, refreshErr)
+			default:
+				// Transient (network, timeout, a busy store). The stored token
+				// is refreshed ahead of expiry, so it is usually still valid —
+				// registering with it beats failing the run outright, and the
+				// background refresh loop will retry.
+				log.Warn("Codex subscription refresh failed; using stored credential",
+					"run_id", rc.RunID, "error", refreshErr)
+			}
+		}
 
 		// Store MCP credential on RunContext (runs for all grants, not just
 		// provider-less ones, because oauth: grants have a registered provider
 		// but still need their credential stored for the MCP relay).
 		for _, mcp := range mcpServers {
 			if mcp.Auth != nil && mcp.Auth.Grant == grant {
+				if credName == credential.ProviderCodexSubscription {
+					return fmt.Errorf("MCP server %q cannot use the Codex subscription grant", mcp.Name)
+				}
 				serverHost := mcp.URL
 				if u, parseErr := url.Parse(mcp.URL); parseErr == nil {
 					serverHost = u.Host
@@ -312,7 +348,11 @@ func resolveCredentials(rc *RunContext, grants []string, mcpServers []config.MCP
 			}
 		}
 
-		prov := provider.Get(grantName)
+		providerName := grantName
+		if credName == credential.ProviderOpenAI && provider.ResolveName(grantName) == "codex" {
+			providerName = "openai"
+		}
+		prov := provider.Get(providerName)
 		if prov == nil {
 			continue
 		}

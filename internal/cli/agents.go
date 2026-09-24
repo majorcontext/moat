@@ -19,11 +19,12 @@ import (
 // documents it as the example agent value.
 var agentVariants = map[string]string{
 	"claude-code": "claude",
+	"openai":      "codex",
 }
 
 // CanonicalAgent resolves an agent name to its registered provider name,
-// accepting registry aliases (openai -> codex) and documented variants
-// (claude-code -> claude). Returns "" when name is not a known agent.
+// accepting agent variants (openai -> codex, claude-code -> claude) and any
+// registry aliases. Returns "" when name is not a known agent.
 //
 // provider.ResolveName alone cannot validate: it returns unknown input
 // unchanged. provider.GetAgent is the membership test, and it also excludes
@@ -127,8 +128,7 @@ func ResolveAgentField(cfg *config.Config, verb string) {
 }
 
 // canonicalizeAgentField rewrites cfg.Agent to its registered provider name, so
-// registry aliases (openai -> codex, google -> gemini) and documented variants
-// (claude-code -> claude) all collapse to one spelling.
+// aliases and documented variants collapse to one spelling.
 //
 // Every downstream consumer of cfg.Agent matches it with
 // strings.HasPrefix(cfg.Agent, "<canonical>"): isAIAgent's container-memory
@@ -150,8 +150,8 @@ func canonicalizeAgentField(cfg *config.Config) {
 }
 
 // agentsListContains reports whether agents contains agent, comparing by
-// canonical name so documented variants (claude-code) and registry aliases
-// (openai) match their canonical entry.
+// canonical name so documented variants and registry aliases match their
+// canonical entry.
 func agentsListContains(agents []string, agent string) bool {
 	want := CanonicalAgent(agent)
 	for _, a := range agents {
@@ -244,10 +244,11 @@ func ExpandAgents(cfg *config.Config) ([]string, error) {
 // resolution — Config.ShouldSyncCodexLogs/ShouldSyncGeminiLogs and
 // buildLocalMCPConfig's grant validation (internal/run/manager_agentinit.go)
 // — that read cfg.Grants directly rather than the resolved grants list.
-// Without this write-back, an agents:-derived grant (e.g. "openai" from
-// `agents: [codex]`) is invisible to them: log sync silently stays off, and a
-// local MCP server's `grant: openai` is rejected as "not declared in
-// top-level grants list" even though the credential is provisioned.
+// Without this write-back, an agents:-derived grant (e.g. "codex" from
+// `agents: [codex]`, or from its `agents: [openai]` alias) is invisible to
+// them: log sync silently stays off, and a local MCP server whose `grant:`
+// names that credential is rejected as "not declared in top-level grants list"
+// even though the credential is provisioned.
 func AppendDerivedGrants(cfg *config.Config, derivedGrants []string) {
 	if cfg == nil {
 		return

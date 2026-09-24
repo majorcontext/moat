@@ -297,7 +297,20 @@ func (r *Run) SetStateFailedAt(errMsg string, timestamp time.Time) {
 //
 // For all other grants, we check that (1) the provider is registered and
 // (2) the credential exists and can be decrypted from the store.
-func validateGrants(grants []string, store *credential.FileStore) error {
+// mcpReferencesGrant reports whether any MCP server declares this grant.
+func mcpReferencesGrant(cfg *config.Config, grant string) bool {
+	if cfg == nil {
+		return false
+	}
+	for _, mcp := range cfg.MCP {
+		if mcp.Auth != nil && mcp.Auth.Grant == grant {
+			return true
+		}
+	}
+	return false
+}
+
+func validateGrants(grants []string, cfg *config.Config, store *credential.FileStore) error {
 	var errs []string
 	for _, grant := range grants {
 		grantName := strings.Split(grant, ":")[0]
@@ -315,12 +328,20 @@ func validateGrants(grants []string, store *credential.FileStore) error {
 			continue
 		}
 
-		// Map grant name to credential store key (handles aliases like
-		// "openai" → codex provider but credential stored under "openai").
-		credName := credentialStoreKey(grantName, grant)
+		// An MCP server's codex grant is rejected outright by validateMCPGrants,
+		// whatever is stored. Skip it here so the user is told that, instead of
+		// being told to run a grant command that cannot fix it — validateGrants
+		// runs first, and appendMCPGrants has already copied the name into this
+		// list. Mirrors the same special case in DetectMissingGrants.
+		if provider.ResolveName(grantName) == providerCodex && mcpReferencesGrant(cfg, grant) {
+			continue
+		}
 
-		// Check credential exists and can be decrypted
-		_, err := store.Get(credName)
+		// Map the grant name to its credential store key.
+		// Check credential exists and can be decrypted. A logical Codex grant
+		// prefers subscription auth and accepts a separate OpenAI API key only
+		// as a compatibility fallback.
+		_, _, err := loadCredentialForGrant(store, grantName, grant)
 		if err != nil {
 			grantCmd := grantToCommand(grant)
 			switch {
@@ -380,6 +401,9 @@ func validateMCPGrants(cfg *config.Config, store *credential.FileStore) error {
 	for _, mcp := range cfg.MCP {
 		if mcp.Auth == nil || mcp.Auth.Grant == "" {
 			continue // No auth required (or no grant named)
+		}
+		if provider.ResolveName(strings.Split(mcp.Auth.Grant, ":")[0]) == providerCodex {
+			return fmt.Errorf("MCP server %q cannot use the Codex subscription grant; use an openai API-key grant", mcp.Name)
 		}
 
 		_, err := store.Get(credential.Provider(mcp.Auth.Grant))

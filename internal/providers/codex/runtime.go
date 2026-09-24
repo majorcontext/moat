@@ -5,8 +5,6 @@ package codex
 func (p *Provider) DefaultDependencies() []string { return DefaultDependencies() }
 func (p *Provider) NetworkHosts() []string        { return NetworkHosts() }
 
-// CredentialGrant is "openai", not "codex": the provider registry name is
-// codex, but the credential is stored under openai (credential.ProviderOpenAI).
-// GetCredentialName returns whichever key happens to exist, which is the wrong
-// question here.
-func (p *Provider) CredentialGrant() string { return "openai" }
+// CredentialGrant returns the logical Codex grant. The run resolver prefers
+// subscription auth and falls back to an independently stored OpenAI API key.
+func (p *Provider) CredentialGrant() string { return "codex" }

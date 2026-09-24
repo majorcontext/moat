@@ -90,14 +90,11 @@ func runGrant(cmd *cobra.Command, args []string) error {
 	providerName := args[0]
 
 	// Map CLI names to provider names
-	// "openai" is the CLI name, but the provider is registered as "codex"
 	// "google" is an alias for "gemini"
 	// "anthropic" and "claude" are separate registered providers; no remapping needed
 	switch providerName {
 	case "copilot":
 		return fmt.Errorf("GitHub Copilot CLI uses GitHub credentials.\n\nRun: moat grant github")
-	case "openai":
-		providerName = "codex"
 	case "google":
 		providerName = "gemini"
 	}
