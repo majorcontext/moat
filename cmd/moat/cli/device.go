@@ -84,26 +84,37 @@ func listDevices(cmd *cobra.Command, _ []string) error {
 	return printDevices(cmd.OutOrStdout(), devices, usbDevices, allPins)
 }
 
+// serialGuideURL is where the long-form explanation lives. Command output
+// points at it rather than reprinting it: the terminal is for what is
+// attached right now, not for teaching the model.
+const serialGuideURL = "https://majorcontext.com/moat/guides/serial-devices"
+
 // printDevices renders the device table. Splitting it out keeps the formatting
 // testable without hardware.
 func printDevices(w io.Writer, devices []serialdev.Device, usbDevices []serialdev.Device, pins []serialdev.Pin) error {
 	if len(devices) == 0 {
-		fmt.Fprintln(w, "No serial devices attached.")
-		fmt.Fprintln(w)
+		// Say whether anything is plugged in at all: with a USB table below,
+		// a bare "none attached" reads as the device not being detected.
 		if len(usbDevices) == 0 {
-			fmt.Fprintln(w, "Plug in a device and run this again. USB-serial adapters and dev boards")
-			fmt.Fprintln(w, "(ESP32, Arduino, RP2040) appear here once connected.")
+			fmt.Fprintln(w, "No serial devices attached.")
 		} else {
-			// Something IS plugged in — say that, or the list above reads as
-			// the device not being detected.
-			fmt.Fprintln(w, "USB devices are attached, but none has a serial interface — they are")
-			fmt.Fprintln(w, "listed below. USB-serial adapters and dev boards (ESP32, Arduino,")
-			fmt.Fprintln(w, "RP2040) appear here once connected.")
+			fmt.Fprintln(w, "No serial devices attached — no USB device below has a serial interface.")
+			// Directly under the status it explains, not stranded at the end.
+			fmt.Fprintln(w, "USB-serial adapters and dev boards (ESP32, Arduino, RP2040) appear here once attached.")
 		}
 		if err := printUSBDevices(w, usbDevices); err != nil {
 			return err
 		}
-		return printOrphanPins(w, pins, devices)
+		if err := printOrphanPins(w, pins, devices); err != nil {
+			return err
+		}
+		if len(usbDevices) == 0 {
+			// Only say "plug one in" when nothing is attached; saying it to
+			// someone holding a plugged-in device is the original complaint.
+			fmt.Fprintln(w)
+			fmt.Fprintln(w, "Plug in a USB-serial adapter or dev board (ESP32, Arduino, RP2040) and run this again.")
+		}
+		return nil
 	}
 
 	sort.Slice(devices, func(i, j int) bool { return devices[i].Path < devices[j].Path })
@@ -124,19 +135,20 @@ func printDevices(w io.Writer, devices []serialdev.Device, usbDevices []serialde
 	}
 
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Pick a name for the device and add it to moat.yaml. The name is")
-	fmt.Fprintln(w, "yours to choose — it becomes MOAT_SERIAL_<NAME>_URL inside the run:")
+	fmt.Fprintln(w, "Add to moat.yaml — the name is yours, and becomes MOAT_SERIAL_<NAME>_URL in the run:")
 	fmt.Fprintln(w)
 	fmt.Fprintf(w, "  devices:\n    - name: %s\n      match: {usb: %q}\n",
 		suggestedName(devices[0]), devices[0].VID+":"+devices[0].PID)
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "The first run that uses the device pins it to this hardware; the PIN column")
-	fmt.Fprintln(w, "shows the name it is pinned under.")
 
 	if err := printUSBDevices(w, usbDevices); err != nil {
 		return err
 	}
-	return printOrphanPins(w, pins, devices)
+	if err := printOrphanPins(w, pins, devices); err != nil {
+		return err
+	}
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "PIN is the name a device is approved under; the first run using it pins that hardware.")
+	return nil
 }
 
 // printUSBDevices renders the non-serial USB section. These devices cannot go
@@ -148,7 +160,7 @@ func printUSBDevices(w io.Writer, usbDevices []serialdev.Device) error {
 		return nil
 	}
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Other USB devices attached (no serial interface — cannot use devices:):")
+	fmt.Fprintln(w, "Other USB devices (no serial interface, not usable with devices:)")
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "USB ID\tSERIAL NUMBER\tDESCRIPTION")
 	for _, d := range usbDevices {
@@ -157,11 +169,11 @@ func printUSBDevices(w io.Writer, usbDevices []serialdev.Device) error {
 	if err := tw.Flush(); err != nil {
 		return err
 	}
+	// One line, next to the table it explains. Bulk-transfer hardware is the
+	// common reason a device shows up here, and "it stays on the host" is the
+	// whole answer; the guide carries the rest.
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Serial-only tools cannot reach these. A dongle that streams over USB bulk")
-	fmt.Fprintln(w, "transfers (SDRs like the RTL2832U) belongs on the host, with the container")
-	fmt.Fprintln(w, "connecting over the network — run a sample server on the host and allow")
-	fmt.Fprintln(w, "its port with network: host:.")
+	fmt.Fprintln(w, "These stay on the host, reached over network: host: — "+serialGuideURL)
 	return nil
 }
 
@@ -194,17 +206,17 @@ func printOrphanPins(w io.Writer, pins []serialdev.Pin, attached []serialdev.Dev
 	sort.Slice(orphans, func(i, j int) bool { return orphans[i].Name < orphans[j].Name })
 
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Pinned devices that are not attached:")
+	fmt.Fprintln(w, "Pinned but not attached — moat device forget <name> to re-approve")
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "NAME\tUSB ID\tSERIAL NUMBER")
 	for _, p := range orphans {
 		id := p.Serial
 		if id == "" {
 			id = "port " + p.PortPath
 		}
-		fmt.Fprintf(w, "  %s (%s:%s, %s)\n", p.Name, p.VID, p.PID, id)
+		fmt.Fprintf(tw, "%s\t%s:%s\t%s\n", p.Name, p.VID, p.PID, id)
 	}
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Run `moat device forget <name>` to approve different hardware for one.")
-	return nil
+	return tw.Flush()
 }
 
 // pinState describes a device's approval status.

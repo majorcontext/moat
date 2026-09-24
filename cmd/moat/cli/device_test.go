@@ -246,7 +246,7 @@ func TestDeviceListShowsNonSerialUSBDevices(t *testing.T) {
 		t.Fatalf("the section must name how to allow a host-side server:\n%s", out)
 	}
 	// The USB device must not be presented as usable by the serial broker.
-	if !strings.Contains(out, "cannot use devices:") {
+	if !strings.Contains(out, "not usable with devices:") {
 		t.Fatalf("the section must say devices: does not apply:\n%s", out)
 	}
 }
@@ -259,7 +259,7 @@ func TestDeviceListUSBOnlyDoesNotClaimNothingIsAttached(t *testing.T) {
 	if !strings.Contains(out, "No serial devices attached") {
 		t.Fatalf("serial section must still say there are none:\n%s", out)
 	}
-	if !strings.Contains(out, "none has a serial interface") {
+	if !strings.Contains(out, "no USB device below has a serial interface") {
 		t.Fatalf("empty state must acknowledge the attached USB device:\n%s", out)
 	}
 	if !strings.Contains(out, "0bda:2838") {
@@ -268,9 +268,9 @@ func TestDeviceListUSBOnlyDoesNotClaimNothingIsAttached(t *testing.T) {
 	if !strings.Contains(out, "network: host:") {
 		t.Fatalf("the section must name how to allow a host-side server:\n%s", out)
 	}
-	// "Plug in a device and run this again" would be wrong here — the user
-	// already plugged something in.
-	if strings.Contains(out, "Plug in a device") {
+	// Telling someone to plug hardware in when they already have is the
+	// original complaint; with a USB device present the copy must not do it.
+	if strings.Contains(out, "Plug in a") {
 		t.Fatalf("empty state must not tell a user with a USB device attached to plug one in:\n%s", out)
 	}
 }
