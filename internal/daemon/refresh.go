@@ -226,6 +226,14 @@ func refreshTokenForGrant(ctx context.Context, rc *RunContext, grant string, sto
 			log.Warn("Codex subscription refresh failed", "error", refreshErr)
 			return
 		}
+		if updated.Token != provCred.Token {
+			// The one positive signal that refresh is working. Without it a
+			// successful rotation is indistinguishable from one that never
+			// ran, since only failures were recorded. Never log token values;
+			// the new expiry is what makes the event checkable.
+			log.Info("Codex subscription refreshed",
+				"run_id", rc.RunID, "expires_at", updated.ExpiresAt.Format(time.RFC3339))
+		}
 		// Publish unconditionally: this run may be newly registered, or another
 		// run may have rotated the token while this one waited.
 		prov.ConfigureProxy(rc, updated)
