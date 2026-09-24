@@ -355,3 +355,47 @@ func TestDeviceForgetOfAnUnknownNameIsAnActionableError(t *testing.T) {
 		t.Fatalf("error %q should point at `moat device list`", err)
 	}
 }
+
+// The snippet must not propose a rename. Deriving a name from the USB
+// description for hardware that is already pinned tells the user to write a
+// different name than the one it is approved under — and a rename does not
+// move the pin, it adds a second one for the same hardware.
+func TestDeviceListSuggestsTheNameTheDeviceIsAlreadyPinnedTo(t *testing.T) {
+	dev := serialdev.Device{
+		Path: "/dev/ttyUSB0", VID: "303a", PID: "1001",
+		Serial: "AAA", Description: "USB JTAG/serial debug unit",
+	}
+	pins := []serialdev.Pin{{Name: "esp32", VID: "303a", PID: "1001", Serial: "AAA"}}
+	out := render(t, []serialdev.Device{dev}, pins)
+
+	if !strings.Contains(out, "- name: esp32") {
+		t.Fatalf("snippet must reuse the existing pin name:\n%s", out)
+	}
+	if strings.Contains(out, "usb-jtag-serial-debug-unit") {
+		t.Fatalf("snippet proposed a rename for already-pinned hardware:\n%s", out)
+	}
+	if !strings.Contains(out, "MOAT_SERIAL_ESP32_URL") {
+		t.Fatalf("the env var must follow the suggested name:\n%s", out)
+	}
+	// Already pinned — do not narrate the pinning that already happened.
+	if strings.Contains(out, "first run pins") {
+		t.Fatalf("pinned device still told the user the first run will pin it:\n%s", out)
+	}
+}
+
+// Companion: unpinned hardware still gets a derived name and the note that
+// using it will pin it.
+func TestDeviceListSuggestsADerivedNameWhenUnpinned(t *testing.T) {
+	dev := serialdev.Device{
+		Path: "/dev/ttyUSB0", VID: "303a", PID: "1001",
+		Serial: "AAA", Description: "USB JTAG/serial debug unit",
+	}
+	out := render(t, []serialdev.Device{dev}, nil)
+
+	if !strings.Contains(out, "- name: usb-jtag-serial-debug-unit") {
+		t.Fatalf("unpinned device must get a name derived from its description:\n%s", out)
+	}
+	if !strings.Contains(out, "first run pins") {
+		t.Fatalf("unpinned device must say that using it pins the hardware:\n%s", out)
+	}
+}

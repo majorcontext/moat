@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/majorcontext/moat/internal/run"
 	"github.com/majorcontext/moat/internal/serialdev"
 	"github.com/majorcontext/moat/internal/ui"
 )
@@ -129,21 +130,32 @@ func printDevices(w io.Writer, devices []serialdev.Device, usbDevices []serialde
 		return err
 	}
 
+	// Suggest the name the device is already pinned to, if any. Deriving a
+	// fresh name from the USB description would propose a rename to a user who
+	// has already approved this hardware — and a rename silently creates a
+	// second pin for it rather than moving the first.
+	name := pinnedName(devices[0], pins)
+	if name == "" {
+		name = suggestedName(devices[0])
+	}
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Add to moat.yaml — the name is yours, and becomes MOAT_SERIAL_<NAME>_URL in the run:")
+	fmt.Fprintln(w, "Add to moat.yaml:")
 	fmt.Fprintln(w)
 	fmt.Fprintf(w, "  devices:\n    - name: %s\n      match: {usb: %q}\n",
-		suggestedName(devices[0]), devices[0].VID+":"+devices[0].PID)
+		name, devices[0].VID+":"+devices[0].PID)
+	fmt.Fprintln(w)
+	fmt.Fprintf(w, "The run gets %s.\n", run.SerialEnvVarName(name))
+	if pinnedName(devices[0], pins) == "" {
+		// Only worth saying while it is still true. Once the hardware is
+		// pinned, the PIN column says so and repeating it at the bottom of the
+		// output describes something that already happened.
+		fmt.Fprintln(w, "The first run pins this hardware to that name, shown in PIN.")
+	}
 
 	if err := printUSBDevices(w, usbDevices); err != nil {
 		return err
 	}
-	if err := printOrphanPins(w, pins, devices); err != nil {
-		return err
-	}
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "PIN is the name a device is approved under; the first run using it pins that hardware.")
-	return nil
+	return printOrphanPins(w, pins, devices)
 }
 
 // printUSBDevices renders the non-serial USB section. These devices cannot go
@@ -209,6 +221,16 @@ func printOrphanPins(w io.Writer, pins []serialdev.Pin, attached []serialdev.Dev
 		fmt.Fprintf(tw, "%s\t%s:%s\t%s\n", p.Name, p.VID, p.PID, id)
 	}
 	return tw.Flush()
+}
+
+// pinnedName returns the name this device is already pinned to, or "".
+func pinnedName(d serialdev.Device, pins []serialdev.Pin) string {
+	for _, p := range pins {
+		if p.Verify(d) == nil {
+			return p.Name
+		}
+	}
+	return ""
 }
 
 // pinState describes a device's approval status.

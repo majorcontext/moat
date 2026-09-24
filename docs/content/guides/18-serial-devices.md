@@ -27,14 +27,19 @@ $ moat device list
 DEVICE                   USB ID     IFACE  SERIAL NUMBER      PIN  DESCRIPTION
 /dev/cu.usbserial-14220  10c4:ea60  -      0001              -    CP2102 USB to UART Bridge
 
-Add to moat.yaml — the name is yours, and becomes MOAT_SERIAL_<NAME>_URL in the run:
+Add to moat.yaml:
 
   devices:
     - name: cp2102-usb-to-uart-bridge
       match: {usb: "10c4:ea60"}
 
-PIN is the name a device is approved under; the first run using it pins that hardware.
+The run gets MOAT_SERIAL_CP2102_USB_TO_UART_BRIDGE_URL.
+The first run pins this hardware to that name, shown in PIN.
 ```
+
+Pick whatever name you want — it is the `name:` key, and it determines the
+environment variable. The suggestion is derived from the USB description, and for a
+device that is already pinned it is the name that pin uses.
 
 ## 2. Declare it in moat.yaml
 
