@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/majorcontext/moat/internal/provider"
 	"net"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -422,7 +424,7 @@ func TestResolveCredentials_SSHSkipped(t *testing.T) {
 	store := &mockStore{creds: map[credential.Provider]*credential.Credential{}}
 
 	// SSH grants should be silently skipped.
-	if err := resolveCredentials(rc, []string{"ssh"}, nil, store); err != nil {
+	if err := resolveCredentials(rc, []string{"ssh"}, nil, store, true); err != nil {
 		t.Fatalf("resolveCredentials(ssh) = %v, want nil", err)
 	}
 	if len(rc.Credentials) != 0 {
@@ -434,7 +436,7 @@ func TestResolveCredentials_MissingCredential(t *testing.T) {
 	rc := NewRunContext("run-1")
 	store := &mockStore{creds: map[credential.Provider]*credential.Credential{}}
 
-	err := resolveCredentials(rc, []string{"nonexistent"}, nil, store)
+	err := resolveCredentials(rc, []string{"nonexistent"}, nil, store, true)
 	if err == nil {
 		t.Fatal("resolveCredentials(nonexistent) = nil, want error")
 	}
@@ -458,7 +460,7 @@ func TestResolveCredentials_MCPGrant(t *testing.T) {
 		},
 	}
 
-	if err := resolveCredentials(rc, []string{"mcp-test"}, mcpServers, store); err != nil {
+	if err := resolveCredentials(rc, []string{"mcp-test"}, mcpServers, store, true); err != nil {
 		t.Fatalf("resolveCredentials(mcp-test) = %v", err)
 	}
 
@@ -483,7 +485,7 @@ func TestResolveCredentials_OpenAI(t *testing.T) {
 	}
 	// "openai" resolves to "codex" via provider alias, but credentials
 	// are stored under credential.ProviderOpenAI ("openai").
-	if err := resolveCredentials(rc, []string{"openai"}, nil, store); err != nil {
+	if err := resolveCredentials(rc, []string{"openai"}, nil, store, true); err != nil {
 		t.Fatalf("resolveCredentials(openai) = %v, want nil", err)
 	}
 }
@@ -492,10 +494,10 @@ func TestResolveCredentials_EmptyGrants(t *testing.T) {
 	rc := NewRunContext("run-1")
 	store := &mockStore{creds: map[credential.Provider]*credential.Credential{}}
 
-	if err := resolveCredentials(rc, nil, nil, store); err != nil {
+	if err := resolveCredentials(rc, nil, nil, store, true); err != nil {
 		t.Fatalf("resolveCredentials(nil) = %v, want nil", err)
 	}
-	if err := resolveCredentials(rc, []string{}, nil, store); err != nil {
+	if err := resolveCredentials(rc, []string{}, nil, store, true); err != nil {
 		t.Fatalf("resolveCredentials([]) = %v, want nil", err)
 	}
 }
@@ -632,5 +634,106 @@ func TestRestoreRunsWithSerial_NoBrokerSkipsRunsWithDevices(t *testing.T) {
 	}
 	if _, ok := reg.Lookup("tok1"); ok {
 		t.Fatal("a device run must not be restored without a broker")
+	}
+}
+
+// codexRefreshSpy stands in for the real Codex provider and records whether a
+// token exchange was attempted.
+type codexRefreshSpy struct {
+	refreshed atomic.Bool
+}
+
+func (s *codexRefreshSpy) Name() string                                                  { return "codex" }
+func (s *codexRefreshSpy) Grant(context.Context) (*provider.Credential, error)           { return nil, nil }
+func (s *codexRefreshSpy) ConfigureProxy(provider.ProxyConfigurer, *provider.Credential) {}
+func (s *codexRefreshSpy) ContainerEnv(*provider.Credential) []string                    { return nil }
+func (s *codexRefreshSpy) ContainerMounts(*provider.Credential, string) ([]provider.MountConfig, string, error) {
+	return nil, "", nil
+}
+func (s *codexRefreshSpy) Cleanup(string)                       {}
+func (s *codexRefreshSpy) ImpliedDependencies() []string        { return nil }
+func (s *codexRefreshSpy) CanRefresh(*provider.Credential) bool { return true }
+func (s *codexRefreshSpy) RefreshInterval() time.Duration       { return time.Minute }
+func (s *codexRefreshSpy) Refresh(_ context.Context, _ provider.ProxyConfigurer, cred *provider.Credential) (*provider.Credential, error) {
+	s.refreshed.Store(true)
+	updated := *cred
+	updated.Token = `{"access_token":"fresh","refresh_token":"r2","account_id":"acct"}`
+	updated.ExpiresAt = time.Now().Add(time.Hour)
+	return &updated, nil
+}
+
+// A restored run must not exchange a token inline. The containers are already
+// running, StartTokenRefresh does an initial refresh moments later, and the
+// exchange is serialized across every restored run by codexRefreshMu — so a
+// blocking call here stalls daemon startup by the token endpoint's full
+// timeout for each run in turn. This was flagged in two review rounds; without
+// a test, flipping the flag back would go unnoticed.
+func TestResolveCredentials_RestoreDoesNotRefreshInline(t *testing.T) {
+	spy := &codexRefreshSpy{}
+	provider.Register(spy)
+	t.Cleanup(func() { provider.Unregister("codex") })
+
+	store := &mockStore{creds: map[credential.Provider]*credential.Credential{
+		credential.ProviderCodexSubscription: {
+			Provider:  credential.ProviderCodexSubscription,
+			Token:     `{"access_token":"stale","refresh_token":"r1","account_id":"acct"}`,
+			ExpiresAt: time.Now().Add(time.Minute), // well inside the refresh skew
+		},
+	}}
+
+	rc := NewRunContext("restored")
+	if err := resolveCredentials(rc, []string{"codex"}, nil, store, false); err != nil {
+		t.Fatalf("resolveCredentials(syncRefresh=false) = %v", err)
+	}
+	if spy.refreshed.Load() {
+		t.Error("restore performed an inline token exchange; daemon startup would block on the network")
+	}
+}
+
+// Companion: a registering run must still exchange before returning, or its
+// container races the async refresh on its very first request.
+func TestResolveCredentials_RegistrationRefreshesInline(t *testing.T) {
+	spy := &codexRefreshSpy{}
+	provider.Register(spy)
+	t.Cleanup(func() { provider.Unregister("codex") })
+
+	store := &mockStore{creds: map[credential.Provider]*credential.Credential{
+		credential.ProviderCodexSubscription: {
+			Provider:  credential.ProviderCodexSubscription,
+			Token:     `{"access_token":"stale","refresh_token":"r1","account_id":"acct"}`,
+			ExpiresAt: time.Now().Add(time.Minute),
+		},
+	}}
+
+	rc := NewRunContext("registering")
+	if err := resolveCredentials(rc, []string{"codex"}, nil, store, true); err != nil {
+		t.Fatalf("resolveCredentials(syncRefresh=true) = %v", err)
+	}
+	if !spy.refreshed.Load() {
+		t.Error("registration did not exchange a near-expiry token; the container would race the async refresh")
+	}
+}
+
+// A token comfortably inside its lifetime is not exchanged even on the
+// registering path, so the skew is what decides, not the flag alone.
+func TestResolveCredentials_FreshTokenIsNotExchanged(t *testing.T) {
+	spy := &codexRefreshSpy{}
+	provider.Register(spy)
+	t.Cleanup(func() { provider.Unregister("codex") })
+
+	store := &mockStore{creds: map[credential.Provider]*credential.Credential{
+		credential.ProviderCodexSubscription: {
+			Provider:  credential.ProviderCodexSubscription,
+			Token:     `{"access_token":"fresh","refresh_token":"r1","account_id":"acct"}`,
+			ExpiresAt: time.Now().Add(2 * time.Hour),
+		},
+	}}
+
+	rc := NewRunContext("fresh")
+	if err := resolveCredentials(rc, []string{"codex"}, nil, store, true); err != nil {
+		t.Fatal(err)
+	}
+	if spy.refreshed.Load() {
+		t.Error("a token far from expiry was exchanged anyway")
 	}
 }

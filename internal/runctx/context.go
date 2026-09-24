@@ -26,12 +26,24 @@ type RuntimeContext struct {
 	// AnthropicAPI is non-nil when an Anthropic API key is available to shell
 	// commands but deliberately absent from the container environment.
 	AnthropicAPI *AnthropicAPI
+
+	// OpenAIAPI is non-nil when an OpenAI API key is available to shell
+	// commands but deliberately absent from the container environment.
+	OpenAIAPI *OpenAIAPI
 }
 
 // AnthropicAPI describes shell-scoped Anthropic API access. It is only set
 // when a run holds both the "claude" and "anthropic" grants, where the key is
 // exported via BASH_ENV so Claude Code's own OAuth login is not overridden.
 type AnthropicAPI struct {
+	// KeyEnv is the environment variable holding the (placeholder) API key.
+	KeyEnv string
+}
+
+// OpenAIAPI describes shell-scoped OpenAI API access. It is only set when a run
+// holds both the "codex" and "openai" grants, where the key is exported via
+// BASH_ENV so Codex's own subscription login is not switched to API billing.
+type OpenAIAPI struct {
 	// KeyEnv is the environment variable holding the (placeholder) API key.
 	KeyEnv string
 }
@@ -136,6 +148,18 @@ func Render(rc *RuntimeContext) string {
 		b.WriteString("  authenticates separately and must not see this variable.\n\n")
 		b.WriteString("A 429 from api.anthropic.com means the request used the wrong credential —\n")
 		b.WriteString("send the `x-api-key` header as above.\n")
+	}
+
+	// OpenAI API access (shell-scoped key).
+	if rc.OpenAIAPI != nil {
+		b.WriteString("\n## Calling the OpenAI API\n\n")
+		b.WriteString("An OpenAI API key is available for programmatic calls (scripts, SDKs). It is\n")
+		b.WriteString("exported to shell commands via BASH_ENV, not to the global environment.\n\n")
+		fmt.Fprintf(&b, "- `%s` holds a placeholder. The real key is injected by the proxy at\n", rc.OpenAIAPI.KeyEnv)
+		b.WriteString("  the network layer — this is normal, don't try to \"fix\" it.\n")
+		b.WriteString("- Do not export it globally or write it into a shell profile. Codex\n")
+		b.WriteString("  authenticates with a ChatGPT subscription and must not see this variable,\n")
+		b.WriteString("  or its usage moves onto API billing.\n")
 	}
 
 	// Services.

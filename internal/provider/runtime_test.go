@@ -16,7 +16,7 @@ func TestAgentRuntimeCredentialGrantIsStatic(t *testing.T) {
 		want  string
 	}{
 		{"claude", "claude"},
-		{"codex", "openai"}, // NOT "codex" — the credential lives under openai
+		{"codex", "codex"},
 		{"copilot", "github"},
 		{"gemini", "gemini"},
 	}

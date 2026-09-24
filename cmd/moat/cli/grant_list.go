@@ -89,7 +89,9 @@ func runGrantList(cmd *cobra.Command, args []string) error {
 		out := make([]jsonCred, 0, len(creds)+len(sshMappings))
 		for _, c := range creds {
 			out = append(out, jsonCred{
-				Provider:  string(c.Provider),
+				// Name it the way it is granted and revoked, not by the
+				// internal store key.
+				Provider:  credential.GrantNameForStoreKey(c.Provider),
 				Type:      credType(c),
 				GrantedAt: c.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 			})
@@ -108,7 +110,7 @@ func runGrantList(cmd *cobra.Command, args []string) error {
 	fmt.Fprintln(w, "PROVIDER\tTYPE\tGRANTED")
 	for _, c := range creds {
 		fmt.Fprintf(w, "%s\t%s\t%s\n",
-			c.Provider,
+			credential.GrantNameForStoreKey(c.Provider),
 			credType(c),
 			formatAge(c.CreatedAt),
 		)
@@ -140,6 +142,8 @@ func credType(c credential.Credential) string {
 			return "api-key (gateway)"
 		}
 		return "api-key"
+	case credential.ProviderCodexSubscription:
+		return "oauth"
 	case credential.ProviderOpenAI:
 		if c.Metadata != nil && c.Metadata["auth_type"] == "oauth" {
 			return "oauth"

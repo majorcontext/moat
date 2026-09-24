@@ -5,6 +5,7 @@ import (
 	"context"
 	"net"
 	"net/http"
+	"sort"
 	"sync"
 	"time"
 
@@ -53,6 +54,7 @@ type RunContext struct {
 	AuthToken   string `json:"auth_token"`
 
 	Credentials          map[string][]CredentialEntry                `json:"credentials"`
+	CredentialBundles    map[string][]credential.Bundle              `json:"-"` // contains secrets; never serialize
 	ExtraHeaders         map[string][]ExtraHeaderEntry               `json:"extra_headers"`
 	RemoveHeaders        map[string][]string                         `json:"remove_headers"`
 	TokenSubstitutions   map[string]TokenSubstitutionEntry           `json:"token_substitutions"`
@@ -98,12 +100,51 @@ func NewRunContext(runID string) *RunContext {
 	return &RunContext{
 		RunID:                runID,
 		Credentials:          make(map[string][]CredentialEntry),
+		CredentialBundles:    make(map[string][]credential.Bundle),
 		ExtraHeaders:         make(map[string][]ExtraHeaderEntry),
 		RemoveHeaders:        make(map[string][]string),
 		TokenSubstitutions:   make(map[string]TokenSubstitutionEntry),
 		ResponseTransformers: make(map[string][]credential.ResponseTransformer),
 		RegisteredAt:         time.Now(),
 	}
+}
+
+// SetCredentialBundle implements credential.BundleConfigurer.
+func (rc *RunContext) SetCredentialBundle(host string, bundle credential.Bundle) {
+	rc.mu.Lock()
+	defer rc.mu.Unlock()
+	for i, existing := range rc.CredentialBundles[host] {
+		if existing.ID == bundle.ID {
+			rc.CredentialBundles[host][i] = bundle
+			return
+		}
+	}
+	rc.CredentialBundles[host] = append(rc.CredentialBundles[host], bundle)
+}
+
+// CredentialBundleGrants returns the distinct grants that have a bundle
+// installed, in a stable order.
+//
+// Bundles carry real secrets and are deliberately not serialized, so a run
+// holding one cannot hand its values to the daemon in a registration request.
+// It sends these grant names instead and the daemon resolves the current
+// credential from the encrypted store itself — see RegisterRequest.CredentialRefs.
+func (rc *RunContext) CredentialBundleGrants() []string {
+	rc.mu.RLock()
+	defer rc.mu.RUnlock()
+	seen := make(map[string]bool)
+	var grants []string
+	for _, bundles := range rc.CredentialBundles {
+		for _, bundle := range bundles {
+			if bundle.Grant == "" || seen[bundle.Grant] {
+				continue
+			}
+			seen[bundle.Grant] = true
+			grants = append(grants, bundle.Grant)
+		}
+	}
+	sort.Strings(grants)
+	return grants
 }
 
 // CancelRefresh cancels the token refresh goroutine, if any.
@@ -319,6 +360,25 @@ func (rc *RunContext) ToProxyContextData() *proxy.RunContextData {
 	for host, creds := range rc.Credentials {
 		for _, c := range creds {
 			d.Credentials[host] = append(d.Credentials[host], proxy.CredentialHeader{Name: c.Name, Value: c.Value, Grant: c.Grant})
+		}
+	}
+	for _, bundles := range rc.CredentialBundles {
+		for _, bundle := range bundles {
+			converted := proxy.CredentialBundle{
+				ID: bundle.ID, Grant: bundle.Grant, RequireAll: bundle.RequireAll,
+				Scope: proxy.CredentialScope{
+					RequireTLS:   bundle.Scope.RequireTLS,
+					Origins:      append([]string(nil), bundle.Scope.Origins...),
+					Methods:      append([]string(nil), bundle.Scope.Methods...),
+					PathPrefixes: append([]string(nil), bundle.Scope.PathPrefixes...),
+				},
+			}
+			for _, replacement := range bundle.Replacements {
+				converted.Replacements = append(converted.Replacements, proxy.HeaderReplacement{
+					Name: replacement.Name, Placeholder: replacement.Placeholder, Value: replacement.Value,
+				})
+			}
+			d.CredentialBundles = append(d.CredentialBundles, converted)
 		}
 	}
 

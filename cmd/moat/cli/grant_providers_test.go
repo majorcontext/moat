@@ -64,9 +64,9 @@ func TestGrantProviderInfosKeepsCredentialOwningAgents(t *testing.T) {
 		listed[info.Name] = true
 	}
 
-	// gemini owns its credential; claude and codex own theirs and are listed
-	// under the names users type (codex as its openai alias).
-	for _, name := range []string{"gemini", "claude", "openai"} {
+	// These providers each own distinct credentials and are listed under the
+	// exact names users grant.
+	for _, name := range []string{"gemini", "claude", "codex", "openai"} {
 		p := provider.Get(name)
 		if p == nil {
 			t.Fatalf("provider %q is not registered — this test would pass vacuously", name)
@@ -89,7 +89,7 @@ func TestGrantProviderInfosKeepsRealGrants(t *testing.T) {
 		listed[info.Name] = true
 	}
 
-	for _, name := range []string{"claude", "anthropic", "github", "openai"} {
+	for _, name := range []string{"claude", "anthropic", "github", "codex", "openai"} {
 		if !listed[name] {
 			t.Errorf("provider %q should be listed under 'moat grant providers'", name)
 		}
@@ -121,8 +121,7 @@ func TestGrantProviderInfosNoDuplicates(t *testing.T) {
 	}
 }
 
-// Every listed name must be usable as 'moat grant <name>' — including
-// alias-only names like "openai", which resolve through the registry alias.
+// Every listed name must be usable as 'moat grant <name>'.
 func TestGrantProviderInfosNamesAreGrantable(t *testing.T) {
 	for _, info := range grantProviderInfos() {
 		if provider.Get(info.Name) == nil {

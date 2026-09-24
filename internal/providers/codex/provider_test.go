@@ -9,6 +9,7 @@ import (
 
 	"github.com/pelletier/go-toml/v2"
 
+	"github.com/majorcontext/moat/internal/credential"
 	"github.com/majorcontext/moat/internal/provider"
 )
 
@@ -16,12 +17,14 @@ import (
 type mockProxyConfigurer struct {
 	credentials map[string]string
 	headers     map[string]map[string]string
+	bundles     map[string]credential.Bundle
 }
 
 func newMockProxyConfigurer() *mockProxyConfigurer {
 	return &mockProxyConfigurer{
 		credentials: make(map[string]string),
 		headers:     make(map[string]map[string]string),
+		bundles:     make(map[string]credential.Bundle),
 	}
 }
 
@@ -58,6 +61,10 @@ func (m *mockProxyConfigurer) RemoveRequestHeader(host, header string) {}
 
 func (m *mockProxyConfigurer) SetTokenSubstitution(host, placeholder, realToken string) {}
 
+func (m *mockProxyConfigurer) SetCredentialBundle(host string, bundle credential.Bundle) {
+	m.bundles[host] = bundle
+}
+
 func TestProvider_Name(t *testing.T) {
 	p := &Provider{}
 	if got := p.Name(); got != "codex" {
@@ -69,16 +76,21 @@ func TestProvider_ConfigureProxy(t *testing.T) {
 	p := &Provider{}
 	proxy := newMockProxyConfigurer()
 	cred := &provider.Credential{
-		Provider: "codex",
-		Token:    "sk-test-api-key-12345",
+		Provider: string(credential.ProviderCodexSubscription),
+		Token:    `{"id_token":"id","access_token":"real-access","refresh_token":"refresh","account_id":"real-account"}`,
 	}
 
 	p.ConfigureProxy(proxy, cred)
 
-	// Check that api.openai.com has the Bearer token (stored as "Header: Value")
-	want := "Bearer sk-test-api-key-12345"
-	if got := proxy.headers["api.openai.com"]["Authorization"]; got != want {
-		t.Errorf("api.openai.com Authorization header = %q, want %q", got, want)
+	bundle, ok := proxy.bundles[subscriptionHost]
+	if !ok {
+		t.Fatal("subscription credential bundle was not configured")
+	}
+	if bundle.ID != string(credential.ProviderCodexSubscription) || !bundle.RequireAll || len(bundle.Replacements) != 2 {
+		t.Fatalf("unexpected bundle: %+v", bundle)
+	}
+	if got := bundle.Replacements[0].Value; got != "Bearer real-access" {
+		t.Errorf("Authorization replacement = %q", got)
 	}
 }
 
@@ -91,13 +103,8 @@ func TestProvider_ContainerEnv(t *testing.T) {
 
 	env := p.ContainerEnv(cred)
 
-	if len(env) != 1 {
-		t.Fatalf("ContainerEnv() returned %d items, want 1", len(env))
-	}
-
-	expected := "OPENAI_API_KEY=" + OpenAIAPIKeyPlaceholder
-	if env[0] != expected {
-		t.Errorf("ContainerEnv()[0] = %q, want %q", env[0], expected)
+	if len(env) != 0 {
+		t.Fatalf("ContainerEnv() = %v, want no API-key override", env)
 	}
 }
 
@@ -133,11 +140,7 @@ func TestProvider_ImpliedDependencies(t *testing.T) {
 func TestPopulateStagingDir(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	cred := &provider.Credential{
-		Provider:  "codex",
-		Token:     "sk-test-api-key-12345",
-		CreatedAt: time.Now(),
-	}
+	cred := &provider.Credential{Provider: string(credential.ProviderCodexSubscription), Token: "sentinel-real-secret", CreatedAt: time.Now()}
 
 	err := PopulateStagingDir(cred, tmpDir)
 	if err != nil {
@@ -151,13 +154,13 @@ func TestPopulateStagingDir(t *testing.T) {
 		t.Fatalf("reading auth.json: %v", err)
 	}
 
-	// Verify content contains placeholder, not real key
+	// Verify content contains synthetic subscription auth, not a real secret.
 	content := string(data)
-	if !contains(content, OpenAIAPIKeyPlaceholder) {
-		t.Errorf("auth.json should contain placeholder key, got: %s", content)
+	if !contains(content, "chatgptAuthTokens") || !contains(content, syntheticAccountID) {
+		t.Errorf("auth.json should contain synthetic subscription auth, got: %s", content)
 	}
-	if contains(content, "sk-test-api-key-12345") {
-		t.Errorf("auth.json should NOT contain real API key")
+	if contains(content, "sentinel-real-secret") {
+		t.Errorf("auth.json should NOT contain real credential")
 	}
 }
 
@@ -545,7 +548,7 @@ func TestPrepareContainer_LocalMCP_MinimalFields(t *testing.T) {
 	if contains(content, "cwd =") {
 		t.Errorf("config.toml should not contain cwd when not set, got: %s", content)
 	}
-	if contains(content, "url =") {
+	if contains(content, "\nurl =") {
 		t.Errorf("config.toml should not contain url for a stdio server, got: %s", content)
 	}
 }

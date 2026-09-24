@@ -145,7 +145,10 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 // registering, so a newer CLI against an older daemon fails with an explanation
 // rather than a run that silently lacks a feature.
 func (s *Server) capabilities() []string {
-	caps := []string{CapKeepPolicy, CapKeepBodyPolicy, CapHostGatewayV2}
+	// Credential refs and bundles are unconditional: they are properties of
+	// this binary, not of runtime wiring. Serial is conditional because the
+	// broker may not be running.
+	caps := []string{CapKeepPolicy, CapKeepBodyPolicy, CapHostGatewayV2, CapCredentialRefs, CapCredentialBundles}
 	if s.serial != nil {
 		caps = append(caps, CapSerialDevices)
 	}
@@ -171,6 +174,34 @@ func (s *Server) handleRegisterRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rc := req.ToRunContext()
+	if len(req.CredentialRefs) > 0 {
+		// A ref makes the daemon read a secret out of the encrypted store on the
+		// caller's behalf, so it must not be trusted the way a caller-supplied
+		// credential value can be — that one the caller already held. Accept
+		// only refs the run declared as grants, and only for the mechanism refs
+		// exist to serve. Same reasoning as the profile guard above: the daemon
+		// does not trust its socket input.
+		if err := validateCredentialRefs(req.CredentialRefs, req.Grants); err != nil {
+			writeJSON(w, http.StatusBadRequest, RegisterResponse{Error: err.Error()})
+			return
+		}
+		key, err := credential.DefaultEncryptionKey()
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, RegisterResponse{Error: "opening credential store"})
+			return
+		}
+		store, err := credential.NewFileStore(storeDirForRun(rc), key)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, RegisterResponse{Error: "opening credential store"})
+			return
+		}
+		// syncRefresh=true: the container is about to start and must not race
+		// an asynchronous refresh on its first request.
+		if err := resolveCredentials(rc, req.CredentialRefs, req.MCPServers, store, true); err != nil {
+			writeJSON(w, http.StatusBadRequest, RegisterResponse{Error: err.Error()})
+			return
+		}
+	}
 
 	// On Linux with Docker host networking, the host gateway is 127.0.0.1 and
 	// the proxy also listens on 127.0.0.1. Implicitly allow the proxy port so

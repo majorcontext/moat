@@ -62,9 +62,12 @@ type TransformerSpec struct {
 
 // RegisterRequest is sent to POST /v1/runs.
 type RegisterRequest struct {
-	RunID                string                   `json:"run_id"`
-	AuthToken            string                   `json:"auth_token,omitempty"` // Re-registration: use existing token
-	Credentials          []CredentialSpec         `json:"credentials,omitempty"`
+	RunID       string           `json:"run_id"`
+	AuthToken   string           `json:"auth_token,omitempty"` // Re-registration: use existing token
+	Credentials []CredentialSpec `json:"credentials,omitempty"`
+	// CredentialRefs are grant names the daemon must resolve from the encrypted
+	// store. Unlike Credentials, they are safe for clients to retain and replay.
+	CredentialRefs       []string                 `json:"credential_refs,omitempty"`
 	ExtraHeaders         []ExtraHeaderSpec        `json:"extra_headers,omitempty"`
 	RemoveHeaders        []RemoveHeaderSpec       `json:"remove_headers,omitempty"`
 	TokenSubstitutions   []TokenSubstitutionSpec  `json:"token_substitutions,omitempty"`
@@ -161,10 +164,12 @@ type UpdateRunRequest struct {
 // literal — keep them as shared constants to prevent an advertise/check typo
 // from silently disabling a capability gate. Add, never rename or remove.
 const (
-	CapKeepPolicy     = "keep-policy"
-	CapKeepBodyPolicy = "keep-body-policy"
-	CapHostGatewayV2  = "host-gateway-v2"
-	CapSerialDevices  = "serial-devices"
+	CapKeepPolicy        = "keep-policy"
+	CapKeepBodyPolicy    = "keep-body-policy"
+	CapHostGatewayV2     = "host-gateway-v2"
+	CapCredentialRefs    = "credential-refs-v1"
+	CapCredentialBundles = "credential-bundles-v1"
+	CapSerialDevices     = "serial-devices"
 )
 
 // HealthResponse is returned from GET /v1/health.

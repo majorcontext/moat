@@ -40,7 +40,7 @@ func TestCanonicalAgent(t *testing.T) {
 	}{
 		{"registered agent", "claude", "claude"},
 		{"documented variant", "claude-code", "claude"},
-		{"registry alias", "openai", "codex"},
+		{"agent alias", "openai", "codex"},
 		{"hallucinated value", "vibrant-code", ""},
 		{"non-agent provider", "github", ""},
 		{"empty", "", ""},
@@ -57,10 +57,8 @@ func TestCanonicalAgent(t *testing.T) {
 func TestKnownAgentNamesIncludesVariants(t *testing.T) {
 	names := cli.KnownAgentNames()
 	joined := strings.Join(names, ",")
-	// "openai" is a registry alias (RegisterAlias("openai", "codex") in
-	// internal/providers/codex/provider.go), not a documented variant like
-	// claude-code — it must still appear here so a typo'd `agent:` warning
-	// tells the user it's an accepted value.
+	// "openai" is an agent-only compatibility alias. It must still appear here
+	// so a typo'd `agent:` warning tells the user it's an accepted value.
 	for _, want := range []string{"claude", "claude-code", "codex", "openai"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("KnownAgentNames() = %v, missing %q", names, want)
@@ -231,12 +229,8 @@ func TestExpandAgents(t *testing.T) {
 			t.Errorf("expected dependency %q; got %v", dep, cfg.Dependencies)
 		}
 	}
-	// codex's grant is openai, not codex.
-	if !slices.Contains(grants, "openai") {
-		t.Errorf("expected grant openai; got %v", grants)
-	}
-	if slices.Contains(grants, "codex") {
-		t.Errorf("codex must expand to the openai grant, not codex; got %v", grants)
+	if !slices.Contains(grants, "codex") {
+		t.Errorf("expected grant codex; got %v", grants)
 	}
 	// ExpandAgents must not mutate cfg.Grants directly — see its doc comment:
 	// derived grants are returned so callers can give them lower precedence
@@ -312,8 +306,8 @@ func TestExpandAgentsWriteBackEnablesCodexLogSync(t *testing.T) {
 		t.Fatalf("ExpandAgents: %v", err)
 	}
 	cli.AppendDerivedGrants(cfg, derived)
-	if !slices.Contains(cfg.Grants, "openai") {
-		t.Fatalf("expected openai written back into cfg.Grants; got %v", cfg.Grants)
+	if !slices.Contains(cfg.Grants, "codex") {
+		t.Fatalf("expected codex written back into cfg.Grants; got %v", cfg.Grants)
 	}
 	if !cfg.ShouldSyncCodexLogs() {
 		t.Errorf("ShouldSyncCodexLogs() = false, want true once the derived openai grant is on cfg.Grants")

@@ -25,12 +25,39 @@ const (
 	ProviderAWS       Provider = "aws"
 	ProviderAnthropic Provider = "anthropic"
 	ProviderClaude    Provider = "claude"
+	ProviderCodex     Provider = "codex"
 	ProviderOpenAI    Provider = "openai"
-	ProviderGemini    Provider = "gemini"
-	ProviderNpm       Provider = "npm"
-	ProviderGraphite  Provider = "graphite"
-	ProviderMeta      Provider = "meta"
+	// ProviderCodexSubscription is intentionally not a public grant name.
+	// Keeping a versioned storage key prevents older binaries from treating a
+	// refresh-token bundle as an OpenAI API key.
+	ProviderCodexSubscription Provider = "codex-subscription-v1"
+	ProviderGemini            Provider = "gemini"
+	ProviderNpm               Provider = "npm"
+	ProviderGraphite          Provider = "graphite"
+	ProviderMeta              Provider = "meta"
 )
+
+// StoreKeyForGrant maps a user-facing grant name to the key its credential is
+// stored under. They differ only where a grant deliberately keeps an internal,
+// versioned identity: the Codex subscription is stored as
+// ProviderCodexSubscription so an older binary cannot mistake a refresh-token
+// bundle for an OpenAI API key.
+func StoreKeyForGrant(grant string) Provider {
+	if grant == string(ProviderCodex) {
+		return ProviderCodexSubscription
+	}
+	return Provider(grant)
+}
+
+// GrantNameForStoreKey is the inverse of StoreKeyForGrant, for display. It lets
+// output name a credential the way the user would grant or revoke it instead of
+// exposing an internal store key.
+func GrantNameForStoreKey(key Provider) string {
+	if key == ProviderCodexSubscription {
+		return string(ProviderCodex)
+	}
+	return string(key)
+}
 
 // Credential represents a stored credential.
 type Credential struct {
@@ -61,7 +88,7 @@ func RegisterDynamicProvider(p Provider) {
 
 // KnownProviders returns a list of all known credential providers.
 func KnownProviders() []Provider {
-	base := []Provider{ProviderGitHub, ProviderAWS, ProviderAnthropic, ProviderClaude, ProviderOpenAI, ProviderGemini, ProviderNpm, ProviderGraphite, ProviderMeta}
+	base := []Provider{ProviderGitHub, ProviderAWS, ProviderAnthropic, ProviderClaude, ProviderCodex, ProviderOpenAI, ProviderGemini, ProviderNpm, ProviderGraphite, ProviderMeta}
 	known := make([]Provider, 0, len(base)+len(dynamicProviders))
 	known = append(known, base...)
 	return append(known, dynamicProviders...)
@@ -70,7 +97,7 @@ func KnownProviders() []Provider {
 // IsKnownProvider returns true if the provider is a known credential provider.
 func IsKnownProvider(p Provider) bool {
 	switch p {
-	case ProviderGitHub, ProviderAWS, ProviderAnthropic, ProviderClaude, ProviderOpenAI, ProviderGemini, ProviderNpm, ProviderGraphite, ProviderMeta:
+	case ProviderGitHub, ProviderAWS, ProviderAnthropic, ProviderClaude, ProviderCodex, ProviderOpenAI, ProviderGemini, ProviderNpm, ProviderGraphite, ProviderMeta:
 		return true
 	default:
 		for _, dp := range dynamicProviders {
