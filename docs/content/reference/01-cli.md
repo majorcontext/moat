@@ -1679,10 +1679,10 @@ not the pinned unit — the case a run rejects.
 
 Pins whose device is not attached are listed separately.
 
-USB devices with no serial interface (SDR dongles like the RTL2832U, keyboards, storage)
-are listed in a separate section — they cannot go through `devices:`, which only brokers
-serial hardware. Such devices belong on the host, with the container reaching them over
-the network through an allowed `network: host:` port.
+USB devices with no serial interface (SDR dongles, keyboards, storage) are listed in a
+separate section — they cannot go through `devices:`, which only brokers serial hardware.
+The section exists so a plugged-in device is visibly detected rather than appearing to be
+missed; it does not imply an alternative route into the container.
 
 ### moat device forget
 

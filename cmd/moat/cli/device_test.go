@@ -240,10 +240,15 @@ func TestDeviceListShowsNonSerialUSBDevices(t *testing.T) {
 	if !strings.Contains(out, "no serial interface") {
 		t.Fatalf("the section must say these cannot go through devices::\n%s", out)
 	}
-	// The advice must be actionable without pointing at a file: name the
-	// host-side server pattern and the config knob that allows it.
-	if !strings.Contains(out, "network: host:") {
-		t.Fatalf("the section must name how to allow a host-side server:\n%s", out)
+	// The section must NOT prescribe a fix. These rows are keyboards, cameras
+	// and LAN adapters as often as SDRs, and no single remedy covers them —
+	// an earlier version told the user to allow a host port with
+	// `network: host:`, which is unnecessary under a permissive policy and
+	// insufficient under a strict one, and is meaningless for a keyboard.
+	for _, overfit := range []string{"network: host:", "rtl_tcp", "sample server"} {
+		if strings.Contains(out, overfit) {
+			t.Fatalf("the section prescribes %q, which does not apply to most of what it lists:\n%s", overfit, out)
+		}
 	}
 	// The USB device must not be presented as usable by the serial broker.
 	if !strings.Contains(out, "not usable with devices:") {
@@ -264,9 +269,6 @@ func TestDeviceListUSBOnlyDoesNotClaimNothingIsAttached(t *testing.T) {
 	}
 	if !strings.Contains(out, "0bda:2838") {
 		t.Fatalf("the attached SDR must still be listed:\n%s", out)
-	}
-	if !strings.Contains(out, "network: host:") {
-		t.Fatalf("the section must name how to allow a host-side server:\n%s", out)
 	}
 	// Telling someone to plug hardware in when they already have is the
 	// original complaint; with a USB device present the copy must not do it.

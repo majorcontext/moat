@@ -284,9 +284,14 @@ USB hardware with no serial interface never appears in the `devices:` list. This
 moat failing to detect it — an SDR dongle (RTL2832U), a keyboard, or a USB drive has no
 tty and no CDC class, so there is nothing for a serial broker to serve. `moat device
 list` shows such devices in a separate "Other USB devices" section so a plugged-in
-device is visible. Streaming hardware like an SDR belongs on the host, with the container
-consuming its samples over the network: run a sample server on the host (for an SDR,
-`rtl_tcp`), and allow its port with `network: host:`.
+device is visible.
+
+Reaching that hardware from a container is a networking question, not a `devices:` one,
+and the answer depends on the device. Some streaming hardware has host-side server
+software a container can consume over the network; most USB peripherals have no such
+equivalent. Whether a container can open that connection depends on the run's
+[network policy](../concepts/05-networking.md) — a permissive run reaches host ports directly,
+and a strict run's firewall allows only the proxy and the run's own device listeners.
 
 ## Platform support
 

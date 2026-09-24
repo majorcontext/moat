@@ -84,11 +84,6 @@ func listDevices(cmd *cobra.Command, _ []string) error {
 	return printDevices(cmd.OutOrStdout(), devices, usbDevices, allPins)
 }
 
-// serialGuideURL is where the long-form explanation lives. Command output
-// points at it rather than reprinting it: the terminal is for what is
-// attached right now, not for teaching the model.
-const serialGuideURL = "https://majorcontext.com/moat/guides/serial-devices"
-
 // printDevices renders the device table. Splitting it out keeps the formatting
 // testable without hardware.
 func printDevices(w io.Writer, devices []serialdev.Device, usbDevices []serialdev.Device, pins []serialdev.Pin) error {
@@ -166,15 +161,12 @@ func printUSBDevices(w io.Writer, usbDevices []serialdev.Device) error {
 	for _, d := range usbDevices {
 		fmt.Fprintf(tw, "%s:%s\t%s\t%s\n", d.VID, d.PID, serialNumberOrDash(d), descriptionOrDash(d))
 	}
-	if err := tw.Flush(); err != nil {
-		return err
-	}
-	// One line, next to the table it explains. Bulk-transfer hardware is the
-	// common reason a device shows up here, and "it stays on the host" is the
-	// whole answer; the guide carries the rest.
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "These stay on the host, reached over network: host: — "+serialGuideURL)
-	return nil
+	// No advice here. The rows are a keyboard, a camera, a LAN adapter as often
+	// as they are an SDR, and there is no single thing to do about them — the
+	// header already says the one fact that applies to all of them. Naming a
+	// specific escape hatch overfits to whichever device prompted the section
+	// and is wrong for the rest.
+	return tw.Flush()
 }
 
 func serialNumberOrDash(d serialdev.Device) string {
