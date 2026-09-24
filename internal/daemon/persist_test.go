@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/majorcontext/moat/internal/provider"
 	"net"
 	"os"
 	"path/filepath"
@@ -14,6 +13,7 @@ import (
 
 	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/credential"
+	"github.com/majorcontext/moat/internal/provider"
 )
 
 func TestRunPersister_SaveAndLoad(t *testing.T) {
