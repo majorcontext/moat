@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/containerd/errdefs"
+	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/build"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
@@ -54,6 +55,19 @@ For Docker Desktop (macOS/Windows):
 To bypass (reduced isolation):
   moat run --no-sandbox`)
 
+// warnPodmanGvisorUnverified emits the unverified-gVisor warning, at most once
+// per process since several DockerRuntimes may be constructed in a single run.
+func warnPodmanGvisorUnverified() {
+	podmanGvisorWarnOnce.Do(func() {
+		ui.Warn("gVisor availability is engine-reported and unverified under podman; container creation may fail if runsc isn't actually installed. Check with: podman machine ssh -- which runsc (macOS) or which runsc (Linux). Use --no-sandbox or MOAT_NO_SANDBOX=1 to bypass.")
+	})
+}
+
+// podmanGvisorWarnOnce guards warnPodmanGvisorUnverified. Because it is
+// process-global, a test asserting the warning must reset it (see
+// resetPodmanGvisorWarnOnce) rather than depend on running first.
+var podmanGvisorWarnOnce sync.Once
+
 // DockerRuntime implements Runtime using Docker.
 type DockerRuntime struct {
 	cli        *client.Client
@@ -62,6 +76,12 @@ type DockerRuntime struct {
 	// gVisor availability cache (initialized once via sync.Once, safe for concurrent reads)
 	gvisorOnce  sync.Once
 	gvisorAvail bool
+
+	// podman engine identification cache; nil means "not yet determined".
+	// Guarded by podmanMu rather than sync.Once so a transient error doesn't
+	// consume the one-shot initialization.
+	podmanMu   sync.Mutex
+	podmanIsRT *bool
 
 	networkMgr *dockerNetworkManager
 	sidecarMgr *dockerSidecarManager
@@ -98,7 +118,38 @@ func NewDockerRuntime(sandbox bool) (*DockerRuntime, error) {
 	if err != nil {
 		return nil, fmt.Errorf("creating docker client: %w", err)
 	}
+	return newDockerRuntimeFromClient(cli, sandbox)
+}
 
+// NewDockerRuntimeWithHost creates a new Docker runtime pinned to the given
+// Docker-API endpoint (e.g. a podman or Rancher Desktop socket), without
+// reading or mutating the process-wide DOCKER_HOST environment variable.
+// Used when reconnecting to a run whose containers live on a non-default
+// endpoint recorded in its metadata (storage.Metadata.DockerHost).
+//
+// FromEnv must be applied before WithHost: opts apply in order, and WithHost
+// overrides only the host field, so FromEnv still supplies TLS config
+// (DOCKER_TLS_VERIFY/DOCKER_CERT_PATH) needed to reconnect to a secured tcp://
+// endpoint. The later WithHost always wins, so the environment's DOCKER_HOST
+// can't override the caller's.
+func NewDockerRuntimeWithHost(host string, sandbox bool) (*DockerRuntime, error) {
+	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithHost(host), client.WithAPIVersionNegotiation())
+	if err != nil {
+		return nil, fmt.Errorf("creating docker client for host %s: %w", host, err)
+	}
+	return newDockerRuntimeFromClient(cli, sandbox)
+}
+
+// DaemonHost returns the Docker-API endpoint this runtime is connected to,
+// e.g. "unix:///var/run/docker.sock". ForEachAvailable uses it to spot a
+// host-pinned runtime that points at the pool's default engine.
+func (r *DockerRuntime) DaemonHost() string {
+	return r.cli.DaemonHost()
+}
+
+// newDockerRuntimeFromClient builds a DockerRuntime around an already-constructed
+// Docker API client, shared by NewDockerRuntime and NewDockerRuntimeWithHost.
+func newDockerRuntimeFromClient(cli *client.Client, sandbox bool) (*DockerRuntime, error) {
 	r := &DockerRuntime{
 		cli: cli,
 	}
@@ -119,6 +170,14 @@ func NewDockerRuntime(sandbox bool) (*DockerRuntime, error) {
 			return nil, fmt.Errorf("%w", ErrGVisorNotAvailable)
 		}
 		ociRuntime = "runsc"
+
+		// Podman reports every OCI runtime configured in containers.conf as
+		// available whether or not the binary is installed, and the compat API
+		// can't tell the difference — warn so a later creation failure isn't a
+		// surprise.
+		if isPodman, err := r.IsPodmanEngine(context.Background()); err == nil && isPodman {
+			warnPodmanGvisorUnverified()
+		}
 	}
 
 	r.ociRuntime = ociRuntime
@@ -426,10 +485,38 @@ func (r *DockerRuntime) CreateContainer(ctx context.Context, cfg Config) (string
 		cfg.Name,
 	)
 	if err != nil {
-		return "", fmt.Errorf("creating container: %w", err)
+		return "", r.diagnoseRunscPodmanCreateError(ctx, fmt.Errorf("creating container: %w", err))
 	}
 
 	return resp.ID, nil
+}
+
+// diagnoseRunscPodmanCreateError wraps a container-creation failure with a
+// diagnostic when the runtime requested runsc and the engine is podman:
+// podman reports every OCI runtime configured in containers.conf as
+// available whether or not the binary is installed (see
+// warnPodmanGvisorUnverified), so a creation failure in this exact
+// configuration is very likely explained by runsc simply not being
+// installed, rather than by whatever the raw engine error says on its own.
+//
+// Uses IsPodmanEngine's cache rather than probing: by the time
+// CreateContainer can fail with r.ociRuntime == "runsc", the sandbox path in
+// newDockerRuntimeFromClient has already populated it, so this does not add
+// a new network round trip to the error path. If the cache was never
+// populated and the lookup itself errors, the original error is returned
+// unwrapped rather than risk masking it with a diagnostic we can't confirm.
+//
+// err is wrapped with %w so errdefs-based classification (e.g. IsNotFound)
+// keeps working through the added diagnostic.
+func (r *DockerRuntime) diagnoseRunscPodmanCreateError(ctx context.Context, err error) error {
+	if r.ociRuntime != "runsc" {
+		return err
+	}
+	isPodman, ierr := r.IsPodmanEngine(ctx)
+	if ierr != nil || !isPodman {
+		return err
+	}
+	return fmt.Errorf("podman reported runsc as available but creating the container with it failed; runsc is very likely not actually installed. Check with: podman machine ssh -- which runsc (macOS) or which runsc (Linux). Use --no-sandbox or MOAT_NO_SANDBOX=1 to bypass: %w", err)
 }
 
 // StartContainer starts an existing container.
@@ -611,6 +698,13 @@ func (r *DockerRuntime) StopContainer(ctx context.Context, containerID string) e
 	return nil
 }
 
+// IsNotFound reports whether err indicates the engine has no such container
+// (or other object). It unwraps, so it still matches errors wrapped with %w by
+// the runtime methods above.
+func IsNotFound(err error) bool {
+	return errdefs.IsNotFound(err)
+}
+
 // WaitContainer blocks until the container exits.
 func (r *DockerRuntime) WaitContainer(ctx context.Context, containerID string) (int64, error) {
 	statusCh, errCh := r.cli.ContainerWait(ctx, containerID, container.WaitConditionNotRunning)
@@ -772,6 +866,64 @@ func (r *DockerRuntime) gvisorAvailable() bool {
 		r.gvisorAvail = false
 	})
 	return r.gvisorAvail
+}
+
+// IsPodmanEngine reports whether the connected daemon is podman rather than
+// real Docker. A successful determination is cached for this runtime's
+// lifetime; a transient error is returned and never cached, so a later call
+// can retry instead of being permanently treated as "not podman".
+func (r *DockerRuntime) IsPodmanEngine(ctx context.Context) (bool, error) {
+	r.podmanMu.Lock()
+	cached := r.podmanIsRT
+	r.podmanMu.Unlock()
+	if cached != nil {
+		return *cached, nil
+	}
+
+	checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	version, err := r.cli.ServerVersion(checkCtx)
+	if err != nil {
+		log.Debug("podman engine check failed - not caching, will retry", "error", err)
+		return false, err
+	}
+
+	isPodman := versionIsPodman(version)
+	r.podmanMu.Lock()
+	r.podmanIsRT = &isPodman
+	r.podmanMu.Unlock()
+	return isPodman, nil
+}
+
+// EngineName returns the identity of the engine behind this runtime's
+// Docker-API client — "podman" or "docker". It's a thin, human-readable
+// wrapper over IsPodmanEngine and shares that method's cache, so calling both
+// (or calling EngineName repeatedly) never costs more than one probe per
+// runtime. Callers that want to report a "you asked for X but got Y" mismatch
+// (see the forced-docker path in NewRuntimeWithOptions) should call this
+// lazily, only once identity is otherwise needed — not as a dedicated probe.
+func (r *DockerRuntime) EngineName(ctx context.Context) (string, error) {
+	isPodman, err := r.IsPodmanEngine(ctx)
+	if err != nil {
+		return "", err
+	}
+	if isPodman {
+		return "podman", nil
+	}
+	return "docker", nil
+}
+
+// versionIsPodman reports whether a Docker Engine API /version response
+// describes podman's compat API rather than real Docker. Podman's compat API
+// includes a Components entry named "Podman Engine"; real Docker never does.
+func versionIsPodman(version types.Version) bool {
+	for _, c := range version.Components {
+		if strings.Contains(c.Name, "Podman") {
+			return true
+		}
+	}
+	return false
 }
 
 // SetupFirewall configures iptables and ip6tables to block all outbound traffic

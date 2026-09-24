@@ -329,7 +329,7 @@ func cleanResources(cmd *cobra.Command, args []string) error {
 			skippedCount++
 			continue
 		}
-		if err := manager.Destroy(ctx, r.ID); err != nil {
+		if err := manager.Destroy(ctx, r.ID, false); err != nil {
 			fmt.Printf("%s\n", ui.Red(fmt.Sprintf("error: %v", err)))
 			failedCount++
 			continue

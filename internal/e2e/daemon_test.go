@@ -57,7 +57,7 @@ func TestDaemonStartsWithRun(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Create: %v", err)
 		}
-		defer mgr.Destroy(context.Background(), r.ID)
+		defer mgr.Destroy(context.Background(), r.ID, true)
 
 		// Verify the daemon is running via lock file
 		daemonDir := filepath.Join(config.GlobalConfigDir(), "proxy")
@@ -121,7 +121,7 @@ func TestDaemonReusedAcrossRuns(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Create r1: %v", err)
 		}
-		defer mgr.Destroy(context.Background(), r1.ID)
+		defer mgr.Destroy(context.Background(), r1.ID, true)
 
 		// Read daemon info after first run
 		daemonDir := filepath.Join(config.GlobalConfigDir(), "proxy")
@@ -141,7 +141,7 @@ func TestDaemonReusedAcrossRuns(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Create r2: %v", err)
 		}
-		defer mgr.Destroy(context.Background(), r2.ID)
+		defer mgr.Destroy(context.Background(), r2.ID, true)
 
 		// Read daemon info after second run
 		lock2, err := daemon.ReadLockFile(daemonDir)
@@ -207,7 +207,7 @@ func TestDaemonNetworkLogging(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Create: %v", err)
 		}
-		defer mgr.Destroy(context.Background(), r.ID)
+		defer mgr.Destroy(context.Background(), r.ID, true)
 
 		if err := mgr.Start(ctx, r.ID); err != nil {
 			t.Fatalf("Start: %v", err)
@@ -290,7 +290,7 @@ func TestDaemonCredentialInjection(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Create: %v", err)
 		}
-		defer mgr.Destroy(context.Background(), r.ID)
+		defer mgr.Destroy(context.Background(), r.ID, true)
 
 		if err := mgr.Start(ctx, r.ID); err != nil {
 			t.Fatalf("Start: %v", err)
@@ -360,7 +360,7 @@ func TestDaemonProxyEnvInContainer(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Create: %v", err)
 		}
-		defer mgr.Destroy(context.Background(), r.ID)
+		defer mgr.Destroy(context.Background(), r.ID, true)
 
 		if err := mgr.Start(ctx, r.ID); err != nil {
 			t.Fatalf("Start: %v", err)
@@ -437,7 +437,7 @@ func TestDaemonNetworkLoggingIsolation(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Create r1: %v", err)
 		}
-		defer mgr.Destroy(context.Background(), r1.ID)
+		defer mgr.Destroy(context.Background(), r1.ID, true)
 
 		ws2 := createTestWorkspace(t)
 		r2, err := mgr.Create(ctx, run.Options{
@@ -452,7 +452,7 @@ func TestDaemonNetworkLoggingIsolation(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Create r2: %v", err)
 		}
-		defer mgr.Destroy(context.Background(), r2.ID)
+		defer mgr.Destroy(context.Background(), r2.ID, true)
 
 		// Start both runs
 		if err := mgr.Start(ctx, r1.ID); err != nil {

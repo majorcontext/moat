@@ -22,6 +22,23 @@ func parseEnvFlags(envFlags []string, cfg *config.Config) error {
 	return intcli.ParseEnvFlags(envFlags, cfg)
 }
 
+// runtimeDisplayLabel formats the runtime column in `moat list` and `moat
+// status`. Podman runs record their type as "docker", so a recorded engine
+// of "podman" is labeled "docker (podman)" to match `moat doctor`. engine is
+// the value recorded at run creation (storage.Metadata.Engine / run.Run.Engine)
+// — never guessed here. A legacy run persisted before that field existed has
+// engine == "" and renders as plain "docker": empty means "unknown", not
+// "not podman", so it must not fall back to sniffing DockerHost.
+func runtimeDisplayLabel(runtime, engine string) string {
+	if runtime == "" {
+		return "-"
+	}
+	if runtime == "docker" && engine == "podman" {
+		return "docker (podman)"
+	}
+	return runtime
+}
+
 // shortenPath shortens a path for display, using ~ for home directory.
 func shortenPath(path string) string {
 	home, err := os.UserHomeDir()

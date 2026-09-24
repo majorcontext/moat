@@ -293,7 +293,7 @@ func TestProxyTokenValidInContainer(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Create: %v", err)
 		}
-		defer mgr.Destroy(context.Background(), r.ID)
+		defer mgr.Destroy(context.Background(), r.ID, true)
 
 		if err := mgr.Start(ctx, r.ID); err != nil {
 			t.Fatalf("Start: %v", err)
@@ -397,7 +397,7 @@ func startEndpointRun(t *testing.T, name string, ports map[string]int, cmd []str
 	}
 
 	if err := mgr.Start(ctx, r.ID); err != nil {
-		mgr.Destroy(context.Background(), r.ID)
+		mgr.Destroy(context.Background(), r.ID, true)
 		mgr.Close()
 		cancel()
 		t.Fatalf("Start: %v", err)
@@ -411,7 +411,7 @@ func startEndpointRun(t *testing.T, name string, ports map[string]int, cmd []str
 
 	cleanup := func() {
 		mgr.Stop(context.Background(), r.ID)
-		mgr.Destroy(context.Background(), r.ID)
+		mgr.Destroy(context.Background(), r.ID, true)
 		mgr.Close()
 		cancel()
 	}

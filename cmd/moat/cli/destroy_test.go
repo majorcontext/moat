@@ -82,3 +82,52 @@ func writeRunSnapshots(t *testing.T, runID string, metas []snapshot.Metadata) {
 		t.Fatalf("write snapshots.json: %v", err)
 	}
 }
+
+// TestDestroyForceFlagsAreIndependent pins the split between --force (skip the
+// volume-mode extraction-snapshot guard) and --force-running (tear down a run
+// that is still running). They were briefly the same flag, which meant anyone
+// passing --force for the data-loss guard silently also lost the running-run
+// guard.
+func TestDestroyForceFlagsAreIndependent(t *testing.T) {
+	flags := destroyCmd.Flags()
+
+	force := flags.Lookup("force")
+	if force == nil {
+		t.Fatal("--force should still exist")
+	}
+	forceRunning := flags.Lookup("force-running")
+	if forceRunning == nil {
+		t.Fatal("--force-running should exist as its own flag")
+	}
+	if forceRunning.Shorthand != "" {
+		t.Errorf("--force-running should not take a shorthand, got -%s", forceRunning.Shorthand)
+	}
+
+	// Each flag must move only its own variable.
+	t.Cleanup(func() {
+		destroyForce, destroyForceRunning = false, false
+		_ = flags.Set("force", "false")
+		_ = flags.Set("force-running", "false")
+	})
+
+	if err := flags.Set("force", "true"); err != nil {
+		t.Fatalf("set --force: %v", err)
+	}
+	if !destroyForce {
+		t.Error("--force should set destroyForce")
+	}
+	if destroyForceRunning {
+		t.Error("--force must NOT grant running-run teardown")
+	}
+
+	destroyForce = false
+	if err := flags.Set("force-running", "true"); err != nil {
+		t.Fatalf("set --force-running: %v", err)
+	}
+	if !destroyForceRunning {
+		t.Error("--force-running should set destroyForceRunning")
+	}
+	if destroyForce {
+		t.Error("--force-running must NOT skip the extraction-snapshot guard")
+	}
+}

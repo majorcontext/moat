@@ -327,3 +327,35 @@ func TestFormatTimeAgo(t *testing.T) {
 		})
 	}
 }
+
+func TestRuntimeDisplayLabel(t *testing.T) {
+	tests := []struct {
+		name    string
+		runtime string
+		engine  string
+		want    string
+	}{
+		// Podman is surfaced only from the recorded engine identity.
+		{"recorded podman engine", "docker", "podman", "docker (podman)"},
+		// Companion: a docker run keeps reading "docker".
+		{"recorded docker engine", "docker", "docker", "docker"},
+		// Legacy run persisted before Engine existed: Engine == "" MUST render
+		// as plain "docker", never guessed from anything else (there is no
+		// dockerHost parameter anymore — this is the whole point of D2).
+		{"legacy run, no recorded engine", "docker", "", "docker"},
+		// Other runtimes and the empty legacy case are untouched.
+		{"apple", "apple", "", "apple"},
+		{"empty runtime", "", "", "-"},
+		// Guard: a "podman" engine value is only honored for the docker runtime.
+		{"apple with stray engine value", "apple", "podman", "apple"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := runtimeDisplayLabel(tt.runtime, tt.engine)
+			if got != tt.want {
+				t.Errorf("runtimeDisplayLabel(%q, %q) = %q, want %q", tt.runtime, tt.engine, got, tt.want)
+			}
+		})
+	}
+}

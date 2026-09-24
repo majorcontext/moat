@@ -41,7 +41,7 @@ func cleanupRun(t *testing.T, mgr *run.Manager, runID string) {
 		if err := mgr.Stop(ctx, runID); err != nil {
 			t.Logf("cleanup: stop run %s: %v", runID, err)
 		}
-		if err := mgr.Destroy(ctx, runID); err != nil {
+		if err := mgr.Destroy(ctx, runID, true); err != nil {
 			t.Logf("cleanup: destroy run %s: %v", runID, err)
 		}
 	})
@@ -397,7 +397,7 @@ func TestServiceCleanup(t *testing.T) {
 	}
 
 	// Destroy the run (should clean up service containers)
-	if err := mgr.Destroy(ctx, r.ID); err != nil {
+	if err := mgr.Destroy(ctx, r.ID, true); err != nil {
 		t.Fatalf("Destroy: %v", err)
 	}
 

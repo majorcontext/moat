@@ -104,6 +104,7 @@ func (s *containerSection) Print(w io.Writer) error {
 	// Check which runtimes are available
 	var runtimes []string
 	var dockerRT *container.DockerRuntime
+	identity := engineUnknown
 
 	// Check Docker
 	if rt, err := container.NewDockerRuntime(false); err == nil {
@@ -112,7 +113,22 @@ func (s *containerSection) Print(w io.Writer) error {
 		if defaultRT.Type() == container.RuntimeDocker {
 			marker = " (default)"
 		}
-		runtimes = append(runtimes, "docker"+marker)
+
+		// Client creation doesn't dial, so ping before trusting IsPodmanEngine.
+		// On timeout or error identity stays engineUnknown — never fail open.
+		pingCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		if rt.Ping(pingCtx) == nil {
+			if isPodman, err := rt.IsPodmanEngine(pingCtx); err == nil {
+				if isPodman {
+					identity = enginePodman
+				} else {
+					identity = engineDocker
+				}
+			}
+		}
+		cancel()
+
+		runtimes = append(runtimes, dockerRuntimeEntry(marker, identity))
 	}
 
 	// Check Apple Containers
@@ -131,14 +147,16 @@ func (s *containerSection) Print(w io.Writer) error {
 		fmt.Fprintln(tw, "Available:\tnone")
 	}
 
+	// Surface an idle podman socket when the engine isn't already confirmed
+	// podman — a machine may be running alongside a real Docker daemon.
+	if line := podmanSocketLine(identity, container.PodmanSocketPaths()); line != "" {
+		fmt.Fprintf(tw, "Podman:\t%s\n", line)
+	}
+
 	// Check for Docker-specific features
 	if dockerRT != nil {
 		// Check gVisor
-		if hasGVisor() {
-			fmt.Fprintf(tw, "gVisor:\t%s available\n", ui.OKTag())
-		} else {
-			fmt.Fprintf(tw, "gVisor:\t%s not available\n", ui.Dim("—"))
-		}
+		fmt.Fprintf(tw, "gVisor:\t%s\n", gvisorLine(identity, hasGVisor()))
 
 		// Check BuildKit
 		buildkit := os.Getenv("DOCKER_BUILDKIT")
@@ -465,6 +483,56 @@ func (s *storageSection) Print(w io.Writer) error {
 	}
 
 	return tw.Flush()
+}
+
+// engineIdentity is what doctor could confirm about the engine behind the
+// Docker-API client. A failed ping or IsPodmanEngine error leaves it
+// engineUnknown, which must be treated as untrusted rather than real Docker.
+type engineIdentity int
+
+const (
+	engineUnknown engineIdentity = iota
+	engineDocker
+	enginePodman
+)
+
+// dockerRuntimeEntry formats the "Available:" entry for the Docker runtime,
+// labeling it when the engine is confirmed podman. marker is appended as-is
+// (e.g. " (default)"). engineUnknown renders as plain docker — the label must
+// not speculate about an identity doctor never confirmed.
+func dockerRuntimeEntry(marker string, identity engineIdentity) string {
+	label := "docker"
+	if identity == enginePodman {
+		label = "docker (podman)"
+	}
+	return label + marker
+}
+
+// gvisorLine formats the doctor "gVisor:" status line. Podman's compat /info
+// lists every OCI runtime in containers.conf — runsc included — whether or not
+// it's installed, so a reported runsc can't be trusted from podman, nor from
+// an unidentified engine that may well be podman. reported is raw hasGVisor().
+func gvisorLine(identity engineIdentity, reported bool) string {
+	switch {
+	case !reported:
+		return ui.Dim("—") + " not available"
+	case identity == enginePodman:
+		return ui.WarnTag() + " reported by engine — unverified (podman lists configured OCI runtimes even when not installed)"
+	case identity == engineUnknown:
+		return ui.WarnTag() + " reported — engine identity unverified (daemon did not respond to ping)"
+	default:
+		return ui.OKTag() + " available"
+	}
+}
+
+// podmanSocketLine formats the doctor "Podman:" status line, or "" when it
+// should be suppressed — for enginePodman the "Available:" line already says
+// so. sockets is the stat-only result of container.PodmanSocketPaths().
+func podmanSocketLine(identity engineIdentity, sockets []string) string {
+	if identity == enginePodman || len(sockets) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("socket found at %s — use --runtime podman", strings.Join(sockets, ", "))
 }
 
 // hasBuildx checks if docker buildx is available

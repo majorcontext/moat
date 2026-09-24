@@ -359,6 +359,26 @@ runtime: docker
 	}
 }
 
+func TestLoadConfigAcceptsPodmanRuntime(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "moat.yaml")
+
+	content := `
+name: myapp
+agent: test
+runtime: podman
+`
+	os.WriteFile(configPath, []byte(content), 0o644)
+
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load should accept runtime: podman, got error: %v", err)
+	}
+	if cfg.Runtime != "podman" {
+		t.Errorf("Runtime = %q, want %q", cfg.Runtime, "podman")
+	}
+}
+
 func TestLoadConfigRejectsInvalidRuntime(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "moat.yaml")

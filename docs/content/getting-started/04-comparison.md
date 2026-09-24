@@ -22,7 +22,7 @@ These tools solve related problems. The right choice depends on what you're opti
 | **Network monitoring** | Yes | No | Yes | No |
 | **Audit logging** | Tamper-proof with hash chain | No | Event streaming | No |
 | **Policy language** | YAML (allow list) | None | Cedar | None |
-| **Container runtime** | Docker, Apple containers | Docker | Docker, Podman, OrbStack | Docker |
+| **Container runtime** | Docker, Podman, Apple containers | Docker | Docker, Podman, OrbStack | Docker |
 | **Setup complexity** | Low | Low | Medium | Low-Medium |
 | **macOS native** | Yes (Apple containers) | No | Experimental | No |
 
@@ -137,12 +137,12 @@ Leash offers the most granular control. Moat provides network-level policies. pa
 
 | Tool | macOS (Intel) | macOS (Apple Silicon) | Linux |
 |------|--------------|----------------------|-------|
-| **Moat** | Docker | Docker or Apple containers | Docker |
+| **Moat** | Docker or Podman | Docker, Podman, or Apple containers | Docker or Podman |
 | **packnplay** | Docker | Docker | Docker |
 | **Leash** | Docker | Docker or native (experimental) | Docker + eBPF |
 | **Dev Containers** | Docker | Docker | Docker |
 
-Moat's Apple container support on macOS 26+ provides native virtualization without Docker Desktop. Leash's macOS native mode is experimental and does not support credential injection.
+Moat's Apple container support on macOS 26+ provides native virtualization without Docker Desktop. Podman support runs through Moat's existing Docker runtime against Podman's Docker-API-compatible socket -- see [Runtimes](../concepts/07-runtimes.md#podman). Leash's macOS native mode is experimental and does not support credential injection.
 
 ## Migration paths
 

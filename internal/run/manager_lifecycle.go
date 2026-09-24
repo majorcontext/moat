@@ -285,11 +285,34 @@ func (m *Manager) Stop(ctx context.Context, runID string) error {
 
 	rt, rtErr := m.runtimeForRun(r)
 	if rtErr != nil {
+		// Leaving the run in StateStopping would make every later Stop hit the
+		// "already stopped" early return above and silently no-op.
+		r.SetState(currentState)
 		return fmt.Errorf("resolving runtime for run %s: %w", runID, rtErr)
 	}
 
 	// Stop the main container
 	if err := rt.StopContainer(ctx, r.ContainerID); err != nil {
+		// Not-found on a run with no recorded endpoint is ambiguous only where
+		// a second, different, live docker-API engine could actually be
+		// holding the container. Gating on "a podman socket file exists" was
+		// too broad: every pre-existing run whose container is legitimately
+		// gone (prune, reboot, --rm, a manual docker rm) hit the hard-fail on
+		// any host that merely has an idle podman socket lying around. We
+		// probe for a reachable podman endpoint instead, and explicitly
+		// exclude the one we just queried — if that endpoint IS podman (e.g.
+		// moat auto-detected it), it's the only engine in play and there's no
+		// ambiguity at all, so that case must warn like every other host.
+		var queriedEndpoint string
+		if dr, ok := rt.(*container.DockerRuntime); ok {
+			queriedEndpoint = dr.DaemonHost()
+		}
+		if container.IsNotFound(err) && r.DockerHost == "" && rt.Type() == container.RuntimeDocker {
+			if otherEndpoint, ok := reachablePodmanEndpointOtherThan(ctx, queriedEndpoint); ok {
+				r.SetState(currentState)
+				return fmt.Errorf("run %s: no such container on the docker engine, but a different, live podman engine is also reachable at %s; this run has no recorded engine endpoint, so moat cannot rule out the container still running there. Retry 'moat stop' with the runtime the run was created on, or if it's genuinely gone: 'moat destroy --force-running %s'", runID, otherEndpoint, runID)
+			}
+		}
 		ui.Warnf("%v", err)
 		log.Debug("failed to stop container", "container_id", r.ContainerID, "error", err)
 	}
@@ -343,8 +366,9 @@ func (m *Manager) Wait(ctx context.Context, runID string) error {
 	}
 }
 
-// Destroy removes a run and its resources.
-func (m *Manager) Destroy(ctx context.Context, runID string) error {
+// Destroy removes a run and its resources. forceRunning skips the guard that
+// requires a run to be stopped first.
+func (m *Manager) Destroy(ctx context.Context, runID string, forceRunning bool) error {
 	m.mu.Lock()
 	r, ok := m.runs[runID]
 	if !ok {
@@ -353,8 +377,12 @@ func (m *Manager) Destroy(ctx context.Context, runID string) error {
 	}
 	m.mu.Unlock()
 
-	if r.GetState() == StateRunning {
-		return fmt.Errorf("cannot destroy running run %s; stop it first", runID)
+	// forceRunning tears down a run that can't be stopped cleanly — its
+	// container is on an engine this process can't reach. Deliberately separate
+	// from --force (the extraction-snapshot guard), so neither silently grants
+	// the other. Cleanup below is idempotent.
+	if r.GetState() == StateRunning && !forceRunning {
+		return fmt.Errorf("cannot destroy running run %s; stop it first (or use 'moat destroy --force-running %s')", runID, runID)
 	}
 
 	// Clean up all run resources (idempotent - may already be done by Stop/monitorContainerExit)

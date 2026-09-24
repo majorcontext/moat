@@ -113,7 +113,7 @@ func TestVolumePersistenceAcrossRuns(t *testing.T) {
 		}
 
 		// Destroy run 1 (volume should persist)
-		if err := mgr.Destroy(ctx, r1.ID); err != nil {
+		if err := mgr.Destroy(ctx, r1.ID, true); err != nil {
 			t.Fatalf("Destroy run 1: %v", err)
 		}
 
@@ -133,7 +133,7 @@ func TestVolumePersistenceAcrossRuns(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Create run 2: %v", err)
 		}
-		defer mgr.Destroy(context.Background(), r2.ID)
+		defer mgr.Destroy(context.Background(), r2.ID, true)
 
 		if err := mgr.Start(ctx, r2.ID); err != nil {
 			t.Fatalf("Start run 2: %v", err)
@@ -206,7 +206,7 @@ func TestVolumeReadOnly(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Create: %v", err)
 		}
-		defer mgr.Destroy(context.Background(), r.ID)
+		defer mgr.Destroy(context.Background(), r.ID, true)
 
 		if err := mgr.Start(ctx, r.ID); err != nil {
 			t.Fatalf("Start: %v", err)
@@ -327,7 +327,7 @@ func TestVolumeIsolation(t *testing.T) {
 		t.Fatalf("Agent1 failed to write to volume\nLogs:%s", formatLogEntries(logs1))
 	}
 
-	if err := mgr.Destroy(ctx, r1.ID); err != nil {
+	if err := mgr.Destroy(ctx, r1.ID, true); err != nil {
 		t.Fatalf("Destroy agent1: %v", err)
 	}
 
@@ -347,7 +347,7 @@ func TestVolumeIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create agent2: %v", err)
 	}
-	defer mgr.Destroy(context.Background(), r2.ID)
+	defer mgr.Destroy(context.Background(), r2.ID, true)
 
 	if err := mgr.Start(ctx, r2.ID); err != nil {
 		t.Fatalf("Start agent2: %v", err)

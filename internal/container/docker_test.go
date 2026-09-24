@@ -2,6 +2,13 @@ package container
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"reflect"
 	"strconv"
@@ -10,9 +17,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/containerd/errdefs"
+
+	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/client"
+	"github.com/majorcontext/moat/internal/ui"
 )
 
 func TestBuildContainerMounts_TmpfsWritableAndExec(t *testing.T) {
@@ -735,5 +746,208 @@ func TestDockerRuntime_BuildImage_PathSelection(t *testing.T) {
 				t.Errorf("expected standalone buildkit path, but got legacy builder error: %v", err)
 			}
 		})
+	}
+}
+
+func TestIsNotFound(t *testing.T) {
+	if !IsNotFound(errdefs.ErrNotFound) {
+		t.Error("IsNotFound should match errdefs.ErrNotFound")
+	}
+	// Must unwrap through the %w wrapping the runtime methods apply.
+	wrapped := fmt.Errorf("stopping container: %w", errdefs.ErrNotFound)
+	if !IsNotFound(wrapped) {
+		t.Error("IsNotFound should unwrap a wrapped not-found error")
+	}
+	// Companion: an unrelated error is not a false positive.
+	if IsNotFound(errors.New("daemon unreachable")) {
+		t.Error("IsNotFound should not match an unrelated error")
+	}
+}
+
+// TestDockerRuntimeEngineName pins F5's cached accessor: EngineName reports
+// "podman" or "docker" per the underlying engine, implemented purely in terms
+// of IsPodmanEngine so there's exactly one identity probe and one cache.
+func TestDockerRuntimeEngineName(t *testing.T) {
+	tests := []struct {
+		name   string
+		podman bool
+		want   string
+	}{
+		{"podman engine", true, "podman"},
+		{"docker engine", false, "docker"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := newFakeDockerAPIServer(t, tt.podman)
+			u, err := url.Parse(srv.URL)
+			if err != nil {
+				t.Fatalf("parsing server URL: %v", err)
+			}
+
+			rt, err := NewDockerRuntimeWithHost("tcp://"+u.Host, false)
+			if err != nil {
+				t.Fatalf("NewDockerRuntimeWithHost: %v", err)
+			}
+			defer rt.Close()
+
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+
+			got, err := rt.EngineName(ctx)
+			if err != nil {
+				t.Fatalf("EngineName: %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("EngineName() = %q, want %q", got, tt.want)
+			}
+
+			// EngineName must reuse IsPodmanEngine's cache: once EngineName
+			// has determined identity, IsPodmanEngine must return the same
+			// result from cache without a second probe (proven the same way
+			// TestIsPodmanEngineDoesNotCacheError proves caching: this would
+			// be indistinguishable here since the fake server always answers
+			// the same way, but the shared podmanIsRT field is what
+			// TestIsPodmanEngineDoesNotCacheError exercises directly).
+			isPodman, err := rt.IsPodmanEngine(ctx)
+			if err != nil {
+				t.Fatalf("IsPodmanEngine: %v", err)
+			}
+			if isPodman != tt.podman {
+				t.Errorf("IsPodmanEngine() = %v, want %v", isPodman, tt.podman)
+			}
+		})
+	}
+}
+
+// newFakeDockerAPIServerForCreateFailure starts a fake Docker-API server
+// covering the full path CreateContainer exercises before it ever reaches
+// ContainerCreate itself (version negotiation, /_ping, /images/.../json for
+// ensureImage's exists-check, and /info for gvisorAvailable), so that only
+// the /containers/create call fails. podman controls whether /version
+// reports podman's compat-API marker; createStatus/createBody control the
+// synthetic ContainerCreate failure.
+func newFakeDockerAPIServerForCreateFailure(t *testing.T, podman bool, createStatus int, createBody string) *httptest.Server {
+	t.Helper()
+
+	version := types.Version{APIVersion: "1.44", Version: "24.0.0"}
+	if podman {
+		version.Components = []types.ComponentVersion{{Name: "Podman Engine", Version: "4.9.0"}}
+	}
+	versionBody, err := json.Marshal(version)
+	if err != nil {
+		t.Fatalf("marshal version: %v", err)
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/_ping"):
+			w.Header().Set("API-Version", "1.44")
+			w.WriteHeader(http.StatusOK)
+		case strings.HasSuffix(r.URL.Path, "/version"):
+			w.Header().Set("Content-Type", "application/json")
+			w.Write(versionBody)
+		case strings.HasSuffix(r.URL.Path, "/info"):
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"Runtimes":{"runsc":{"path":"runsc"}}}`))
+		case strings.Contains(r.URL.Path, "/images/") && strings.HasSuffix(r.URL.Path, "/json"):
+			// ensureImage's exists-check: report the image present so
+			// CreateContainer proceeds straight to ContainerCreate.
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"Id":"sha256:fake"}`))
+		case strings.HasSuffix(r.URL.Path, "/containers/create"):
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(createStatus)
+			w.Write([]byte(createBody))
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// TestCreateContainerPodmanRunscFailureGetsDiagnosticWrap pins B2: when
+// r.ociRuntime == "runsc" and the engine is podman, a ContainerCreate
+// failure is wrapped with a diagnostic naming runsc's likely absence, the
+// verification command, and the --no-sandbox bypass — while the original
+// error stays classifiable via errdefs (a 404 status must still satisfy
+// errdefs.IsNotFound after wrapping).
+func TestCreateContainerPodmanRunscFailureGetsDiagnosticWrap(t *testing.T) {
+	resetPodmanGvisorWarnOnce(t)
+	ui.SetWriter(io.Discard)
+	t.Cleanup(func() { ui.SetWriter(os.Stderr) })
+
+	srv := newFakeDockerAPIServerForCreateFailure(t, true, http.StatusNotFound,
+		`{"message":"OCI runtime create failed: runsc: executable file not found in $PATH: unknown"}`)
+	u, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatalf("parsing server URL: %v", err)
+	}
+
+	rt, err := NewDockerRuntimeWithHost("tcp://"+u.Host, true)
+	if err != nil {
+		t.Fatalf("NewDockerRuntimeWithHost: %v", err)
+	}
+	defer rt.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	_, err = rt.CreateContainer(ctx, Config{Image: "alpine:latest", Cmd: []string{"true"}})
+	if err == nil {
+		t.Fatal("expected CreateContainer to fail")
+	}
+
+	if !strings.Contains(err.Error(), "runsc is very likely not actually installed") {
+		t.Errorf("expected the podman/runsc diagnostic, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "--no-sandbox") {
+		t.Errorf("expected the --no-sandbox bypass hint, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "which runsc") {
+		t.Errorf("expected the verification command, got: %v", err)
+	}
+	if !errdefs.IsNotFound(err) {
+		t.Errorf("expected errdefs.IsNotFound to still classify the wrapped error, got: %v", err)
+	}
+}
+
+// TestCreateContainerNonPodmanRunscFailureNoDiagnosticWrap is the companion:
+// against a real (non-podman) Docker engine, the same runsc creation failure
+// must NOT get the podman-specific diagnostic — it doesn't apply — while
+// errdefs classification must still work identically either way.
+func TestCreateContainerNonPodmanRunscFailureNoDiagnosticWrap(t *testing.T) {
+	resetPodmanGvisorWarnOnce(t)
+	ui.SetWriter(io.Discard)
+	t.Cleanup(func() { ui.SetWriter(os.Stderr) })
+
+	srv := newFakeDockerAPIServerForCreateFailure(t, false, http.StatusNotFound,
+		`{"message":"OCI runtime create failed: runsc: executable file not found in $PATH: unknown"}`)
+	u, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatalf("parsing server URL: %v", err)
+	}
+
+	rt, err := NewDockerRuntimeWithHost("tcp://"+u.Host, true)
+	if err != nil {
+		t.Fatalf("NewDockerRuntimeWithHost: %v", err)
+	}
+	defer rt.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	_, err = rt.CreateContainer(ctx, Config{Image: "alpine:latest", Cmd: []string{"true"}})
+	if err == nil {
+		t.Fatal("expected CreateContainer to fail")
+	}
+
+	if strings.Contains(err.Error(), "runsc is very likely not actually installed") {
+		t.Errorf("the podman diagnostic should not apply against a real docker engine, got: %v", err)
+	}
+	if !errdefs.IsNotFound(err) {
+		t.Errorf("expected errdefs.IsNotFound to classify the unwrapped error, got: %v", err)
 	}
 }
