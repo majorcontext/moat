@@ -297,7 +297,20 @@ func (r *Run) SetStateFailedAt(errMsg string, timestamp time.Time) {
 //
 // For all other grants, we check that (1) the provider is registered and
 // (2) the credential exists and can be decrypted from the store.
-func validateGrants(grants []string, store *credential.FileStore) error {
+// mcpReferencesGrant reports whether any MCP server declares this grant.
+func mcpReferencesGrant(cfg *config.Config, grant string) bool {
+	if cfg == nil {
+		return false
+	}
+	for _, mcp := range cfg.MCP {
+		if mcp.Auth != nil && mcp.Auth.Grant == grant {
+			return true
+		}
+	}
+	return false
+}
+
+func validateGrants(grants []string, cfg *config.Config, store *credential.FileStore) error {
 	var errs []string
 	for _, grant := range grants {
 		grantName := strings.Split(grant, ":")[0]
@@ -312,6 +325,15 @@ func validateGrants(grants []string, store *credential.FileStore) error {
 		if provider.Get(grantName) == nil {
 			errs = append(errs, fmt.Sprintf("  - %s: unknown provider (available: %s)",
 				grantName, strings.Join(provider.Names(), ", ")))
+			continue
+		}
+
+		// An MCP server's codex grant is rejected outright by validateMCPGrants,
+		// whatever is stored. Skip it here so the user is told that, instead of
+		// being told to run a grant command that cannot fix it — validateGrants
+		// runs first, and appendMCPGrants has already copied the name into this
+		// list. Mirrors the same special case in DetectMissingGrants.
+		if provider.ResolveName(grantName) == providerCodex && mcpReferencesGrant(cfg, grant) {
 			continue
 		}
 

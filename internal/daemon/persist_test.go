@@ -421,7 +421,7 @@ func TestResolveCredentials_SSHSkipped(t *testing.T) {
 	store := &mockStore{creds: map[credential.Provider]*credential.Credential{}}
 
 	// SSH grants should be silently skipped.
-	if err := resolveCredentials(rc, []string{"ssh"}, nil, store); err != nil {
+	if err := resolveCredentials(rc, []string{"ssh"}, nil, store, true); err != nil {
 		t.Fatalf("resolveCredentials(ssh) = %v, want nil", err)
 	}
 	if len(rc.Credentials) != 0 {
@@ -433,7 +433,7 @@ func TestResolveCredentials_MissingCredential(t *testing.T) {
 	rc := NewRunContext("run-1")
 	store := &mockStore{creds: map[credential.Provider]*credential.Credential{}}
 
-	err := resolveCredentials(rc, []string{"nonexistent"}, nil, store)
+	err := resolveCredentials(rc, []string{"nonexistent"}, nil, store, true)
 	if err == nil {
 		t.Fatal("resolveCredentials(nonexistent) = nil, want error")
 	}
@@ -457,7 +457,7 @@ func TestResolveCredentials_MCPGrant(t *testing.T) {
 		},
 	}
 
-	if err := resolveCredentials(rc, []string{"mcp-test"}, mcpServers, store); err != nil {
+	if err := resolveCredentials(rc, []string{"mcp-test"}, mcpServers, store, true); err != nil {
 		t.Fatalf("resolveCredentials(mcp-test) = %v", err)
 	}
 
@@ -481,7 +481,7 @@ func TestResolveCredentials_OpenAI(t *testing.T) {
 		},
 	}
 	// OpenAI API-key auth remains independent from Codex subscription auth.
-	if err := resolveCredentials(rc, []string{"openai"}, nil, store); err != nil {
+	if err := resolveCredentials(rc, []string{"openai"}, nil, store, true); err != nil {
 		t.Fatalf("resolveCredentials(openai) = %v, want nil", err)
 	}
 }
@@ -490,10 +490,10 @@ func TestResolveCredentials_EmptyGrants(t *testing.T) {
 	rc := NewRunContext("run-1")
 	store := &mockStore{creds: map[credential.Provider]*credential.Credential{}}
 
-	if err := resolveCredentials(rc, nil, nil, store); err != nil {
+	if err := resolveCredentials(rc, nil, nil, store, true); err != nil {
 		t.Fatalf("resolveCredentials(nil) = %v, want nil", err)
 	}
-	if err := resolveCredentials(rc, []string{}, nil, store); err != nil {
+	if err := resolveCredentials(rc, []string{}, nil, store, true); err != nil {
 		t.Fatalf("resolveCredentials([]) = %v, want nil", err)
 	}
 }

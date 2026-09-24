@@ -387,7 +387,7 @@ func TestValidateGrants(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validateGrants(tt.grants, store)
+			err := validateGrants(tt.grants, nil, store)
 			if tt.wantErr && err == nil {
 				t.Fatal("expected error, got nil")
 			}
@@ -410,7 +410,7 @@ func TestValidateGrantsErrorFormat(t *testing.T) {
 	rand.Read(key)
 	store, _ := credential.NewFileStore(credDir, key)
 
-	err := validateGrants([]string{"github"}, store)
+	err := validateGrants([]string{"github"}, nil, store)
 	if err == nil {
 		t.Fatal("expected error for missing github grant")
 	}
@@ -446,7 +446,7 @@ func TestValidateGrantsDecryptionFailure(t *testing.T) {
 	rand.Read(key2)
 	store2, _ := credential.NewFileStore(credDir, key2)
 
-	err := validateGrants([]string{"github"}, store2)
+	err := validateGrants([]string{"github"}, nil, store2)
 	if err == nil {
 		t.Fatal("expected error for credential encrypted with different key")
 	}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/majorcontext/moat/internal/config"
@@ -90,7 +91,7 @@ func TestDetectMissingGrantsMatchesValidators(t *testing.T) {
 	grants := AppendMCPGrants([]string{"github"}, cfg)
 
 	detected := len(DetectMissingGrants(grants, cfg, store)) > 0
-	rejected := validateGrants(grants, store) != nil || validateMCPGrants(cfg, store) != nil
+	rejected := validateGrants(grants, cfg, store) != nil || validateMCPGrants(cfg, store) != nil
 	if detected != rejected {
 		t.Fatalf("missing case: detector=%v validators=%v — they must agree", detected, rejected)
 	}
@@ -105,7 +106,7 @@ func TestDetectMissingGrantsMatchesValidators(t *testing.T) {
 		}
 	}
 	detected = len(DetectMissingGrants(grants, cfg, full)) > 0
-	rejected = validateGrants(grants, full) != nil || validateMCPGrants(cfg, full) != nil
+	rejected = validateGrants(grants, cfg, full) != nil || validateMCPGrants(cfg, full) != nil
 	if detected || rejected {
 		t.Fatalf("present case: detector=%v validators=%v — both must report none", detected, rejected)
 	}
@@ -116,12 +117,12 @@ func TestDetectMissingGrantsMatchesValidators(t *testing.T) {
 	// normalization.
 	copilotGrants := []string{"copilot"}
 	detected = len(DetectMissingGrants(copilotGrants, nil, store)) > 0
-	rejected = validateGrants(copilotGrants, store) != nil
+	rejected = validateGrants(copilotGrants, cfg, store) != nil
 	if detected != rejected {
 		t.Fatalf("copilot missing case: detector=%v validators=%v — they must agree", detected, rejected)
 	}
 	detected = len(DetectMissingGrants(copilotGrants, nil, full)) > 0
-	rejected = validateGrants(copilotGrants, full) != nil
+	rejected = validateGrants(copilotGrants, cfg, full) != nil
 	if detected || rejected {
 		t.Fatalf("copilot present case: detector=%v validators=%v — both must report none", detected, rejected)
 	}
@@ -303,14 +304,14 @@ func TestDetectMissingGrantsMatchesValidators_Codex(t *testing.T) {
 
 	empty := newGrantsTestStore(t)
 	detected := len(DetectMissingGrants(grants, nil, empty)) > 0
-	rejected := validateGrants(grants, empty) != nil
+	rejected := validateGrants(grants, nil, empty) != nil
 	if !detected || !rejected {
 		t.Fatalf("absent case: detector=%v validator=%v — both must object", detected, rejected)
 	}
 
 	full := storeWithCodexSubscription(t)
 	detected = len(DetectMissingGrants(grants, nil, full)) > 0
-	rejected = validateGrants(grants, full) != nil
+	rejected = validateGrants(grants, nil, full) != nil
 	if detected || rejected {
 		t.Fatalf("present case: detector=%v validator=%v — both must be satisfied", detected, rejected)
 	}
@@ -322,7 +323,7 @@ func TestDetectMissingGrantsMatchesValidators_Codex(t *testing.T) {
 		t.Fatal(err)
 	}
 	detected = len(DetectMissingGrants(grants, nil, fallback)) > 0
-	rejected = validateGrants(grants, fallback) != nil
+	rejected = validateGrants(grants, nil, fallback) != nil
 	if detected || rejected {
 		t.Fatalf("fallback case: detector=%v validator=%v — both must accept the API key", detected, rejected)
 	}
@@ -338,4 +339,55 @@ func storeWithCodexSubscription(t *testing.T) *credential.FileStore {
 		t.Fatal(err)
 	}
 	return store
+}
+
+// Create runs validateGrants before validateMCPGrants, and AppendMCPGrants has
+// already copied an MCP server's `codex` grant into the generic list. With
+// nothing stored, validateGrants used to fail first with "not configured — Run:
+// moat grant codex" — advice that cannot work, because validateMCPGrants
+// rejects that configuration unconditionally whether or not a credential
+// exists. The user would complete an interactive ChatGPT login and hit a
+// different error on the next attempt.
+func TestValidateGrants_MCPReferencedCodexGrantDefersToTheMCPMessage(t *testing.T) {
+	cfg := &config.Config{MCP: []config.MCPServerConfig{
+		{Name: "srv", URL: "https://example.com", Auth: &config.MCPAuthConfig{Grant: "codex", Header: "Authorization"}},
+	}}
+	grants := AppendMCPGrants(nil, cfg)
+
+	for _, tt := range []struct {
+		name  string
+		store *credential.FileStore
+	}{
+		{"nothing stored", newGrantsTestStore(t)},
+		{"subscription stored", storeWithCodexSubscription(t)},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			// validateGrants must not claim this is fixable by granting.
+			if err := validateGrants(grants, cfg, tt.store); err != nil {
+				if strings.Contains(err.Error(), "moat grant codex") {
+					t.Fatalf("validateGrants tells the user to run a command that cannot fix it: %v", err)
+				}
+			}
+			// The MCP validator still has to reject it, with its own message.
+			err := validateMCPGrants(cfg, tt.store)
+			if err == nil {
+				t.Fatal("validateMCPGrants accepted an MCP server using the codex grant")
+			}
+			if !strings.Contains(err.Error(), "openai") {
+				t.Errorf("error should point at the openai grant, got: %v", err)
+			}
+		})
+	}
+}
+
+// Companion: a codex grant the user actually declared is still validated
+// normally, so the skip above cannot swallow a real missing-credential error.
+func TestValidateGrants_DeclaredCodexGrantStillValidated(t *testing.T) {
+	err := validateGrants([]string{"codex"}, nil, newGrantsTestStore(t))
+	if err == nil {
+		t.Fatal("a declared codex grant with nothing stored must fail validation")
+	}
+	if !strings.Contains(err.Error(), "moat grant codex") {
+		t.Errorf("a real missing codex grant should say how to fix it, got: %v", err)
+	}
 }

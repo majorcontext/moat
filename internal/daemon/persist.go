@@ -228,7 +228,12 @@ func RestoreRuns(ctx context.Context, registry *Registry, runs []PersistedRun) i
 			continue
 		}
 
-		if err := resolveCredentials(rc, pr.Grants, pr.MCPServers, store); err != nil {
+		// syncRefresh=false: these containers are already running, and
+		// StartTokenRefresh below performs an initial refresh of its own.
+		// A blocking exchange here is serialized across every restored run by
+		// codexRefreshMu, so one unreachable token endpoint would stall daemon
+		// startup by its full timeout for each run in turn.
+		if err := resolveCredentials(rc, pr.Grants, pr.MCPServers, store, false); err != nil {
 			log.Warn("restore: failed to resolve credentials, skipping run",
 				"run_id", pr.RunID, "error", err)
 			continue
@@ -286,7 +291,15 @@ func RestoreRuns(ctx context.Context, registry *Registry, runs []PersistedRun) i
 // Create() (around the "Configure proxy with credentials" section). If you add
 // a new provider setup step there, add the corresponding logic here too.
 // A future refactor should extract a shared ConfigureRunFromGrants helper.
-func resolveCredentials(rc *RunContext, grants []string, mcpServers []config.MCPServerConfig, store credential.Store) error {
+// syncRefresh controls whether a near-expiry Codex subscription is exchanged
+// before this function returns.
+//
+// A newly registering run needs it: its container is about to make its first
+// request and must not race an asynchronous refresh. A restored run does not —
+// its container is already running, StartTokenRefresh performs an initial
+// refresh in the background moments later, and blocking here would hold up
+// daemon startup for every run queued behind it.
+func resolveCredentials(rc *RunContext, grants []string, mcpServers []config.MCPServerConfig, store credential.Store, syncRefresh bool) error {
 	for _, grant := range grants {
 		grantName := strings.Split(grant, ":")[0]
 		if grantName == "ssh" {
@@ -298,10 +311,10 @@ func resolveCredentials(rc *RunContext, grants []string, mcpServers []config.MCP
 			return fmt.Errorf("grant %q: credential not found: %w", grantName, err)
 		}
 		provCred := provider.FromLegacy(cred)
-		if credName == credential.ProviderCodexSubscription {
+		if credName == credential.ProviderCodexSubscription && syncRefresh {
 			// Refresh before the bundle is installed so the container does not
 			// race an asynchronous startup refresh with its first request.
-			updated, refreshErr := refreshCodexSubscription(context.Background(), store, provCred)
+			updated, _, refreshErr := refreshCodexSubscription(context.Background(), store, provCred)
 			switch {
 			case refreshErr == nil:
 				provCred = updated

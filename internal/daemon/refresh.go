@@ -152,9 +152,14 @@ func codexNeedsRefresh(cred *provider.Credential) bool {
 //
 // Persistence happens before the value is returned for publication, so a daemon
 // restart never resurrects a refresh token the OAuth server has already rotated.
-func refreshCodexSubscription(ctx context.Context, store credential.Store, cred *provider.Credential) (*provider.Credential, error) {
+// The bool reports whether this call performed the token exchange, as opposed
+// to finding a fresher credential someone else had already written. Callers
+// that log or count rotations need that distinction: several runs share one
+// subscription, so token inequality alone is true for every run that merely
+// waited on the lock and re-read the result.
+func refreshCodexSubscription(ctx context.Context, store credential.Store, cred *provider.Credential) (*provider.Credential, bool, error) {
 	if !codexNeedsRefresh(cred) {
-		return cred, nil
+		return cred, false, nil
 	}
 	codexRefreshMu.Lock()
 	defer codexRefreshMu.Unlock()
@@ -162,31 +167,32 @@ func refreshCodexSubscription(ctx context.Context, store credential.Store, cred 
 	if latest, err := store.Get(credential.ProviderCodexSubscription); err == nil {
 		reloaded := provider.FromLegacy(latest)
 		if !codexNeedsRefresh(reloaded) {
-			return reloaded, nil
+			// Another run exchanged while this one waited on the lock.
+			return reloaded, false, nil
 		}
 		cred = reloaded
 	}
 
 	rp, ok := provider.Get("codex").(provider.RefreshableProvider)
 	if !ok || !rp.CanRefresh(cred) {
-		return cred, nil
+		return cred, false, nil
 	}
 	refreshCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	updated, err := rp.Refresh(refreshCtx, nil, cred)
 	cancel()
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if updated == nil || updated.Token == cred.Token {
-		return cred, nil
+		return cred, false, nil
 	}
 	if saveErr := store.Save(credential.Credential{
 		Provider: credential.ProviderCodexSubscription, Token: updated.Token, Scopes: updated.Scopes,
 		ExpiresAt: updated.ExpiresAt, CreatedAt: updated.CreatedAt, Metadata: updated.Metadata,
 	}); saveErr != nil {
-		return nil, fmt.Errorf("persisting refreshed Codex subscription: %w", saveErr)
+		return nil, false, fmt.Errorf("persisting refreshed Codex subscription: %w", saveErr)
 	}
-	return updated, nil
+	return updated, true, nil
 }
 
 func refreshTokensForRun(ctx context.Context, rc *RunContext, grants []string, store credential.Store) {
@@ -221,16 +227,18 @@ func refreshTokenForGrant(ctx context.Context, rc *RunContext, grant string, sto
 	// each redeem the same single-use refresh token. Every other provider
 	// refreshes per run against its own credential.
 	if credName == credential.ProviderCodexSubscription {
-		updated, refreshErr := refreshCodexSubscription(ctx, store, provCred)
+		updated, exchanged, refreshErr := refreshCodexSubscription(ctx, store, provCred)
 		if refreshErr != nil {
 			log.Warn("Codex subscription refresh failed", "error", refreshErr)
 			return
 		}
-		if updated.Token != provCred.Token {
+		if exchanged {
 			// The one positive signal that refresh is working. Without it a
 			// successful rotation is indistinguishable from one that never
-			// ran, since only failures were recorded. Never log token values;
-			// the new expiry is what makes the event checkable.
+			// ran, since only failures were recorded. Gated on the exchange,
+			// not on token inequality, so several runs sharing a subscription
+			// produce one line per rotation rather than one per run. Never log
+			// token values; the new expiry is what makes the event checkable.
 			log.Info("Codex subscription refreshed",
 				"run_id", rc.RunID, "expires_at", updated.ExpiresAt.Format(time.RFC3339))
 		}

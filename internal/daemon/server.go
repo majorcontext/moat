@@ -172,7 +172,9 @@ func (s *Server) handleRegisterRun(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusInternalServerError, RegisterResponse{Error: "opening credential store"})
 			return
 		}
-		if err := resolveCredentials(rc, req.CredentialRefs, req.MCPServers, store); err != nil {
+		// syncRefresh=true: the container is about to start and must not race
+		// an asynchronous refresh on its first request.
+		if err := resolveCredentials(rc, req.CredentialRefs, req.MCPServers, store, true); err != nil {
 			writeJSON(w, http.StatusBadRequest, RegisterResponse{Error: err.Error()})
 			return
 		}

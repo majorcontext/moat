@@ -152,7 +152,7 @@ func (m *Manager) Create(ctx context.Context, opts Options) (resRun *Run, retErr
 		if err != nil {
 			return nil, err
 		}
-		if err := validateGrants(opts.Grants, store); err != nil {
+		if err := validateGrants(opts.Grants, opts.Config, store); err != nil {
 			return nil, err
 		}
 		if opts.Config != nil && len(opts.Config.MCP) > 0 {
