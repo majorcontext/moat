@@ -2379,3 +2379,28 @@ func TestRevokeWaitsForTheDetachEvent(t *testing.T) {
 		t.Fatalf("Revoke returned before the detach event was emitted: %v", got)
 	}
 }
+
+// A connection accepted just before the broker closes must not race the
+// listener's shutdown. serve() registers each accepted connection with a
+// WaitGroup that close() waits on, and a WaitGroup requires every Add from
+// zero to happen-before Wait. Dial and close back to back, many times, so
+// close() regularly runs before the connection's handler has touched any
+// shared state — the window where nothing else orders the two. Run with -race.
+func TestCloseRightAfterAcceptDoesNotRace(t *testing.T) {
+	for i := 0; i < 50; i++ {
+		fp := serialtest.NewFakePort(t)
+		b := serialbroker.New(serialbroker.Options{
+			OpenPort: func(string) (serialport.Port, error) { return fp, nil },
+		})
+		_, addr, err := b.Listen("run-a", serialbroker.Approved{Name: "esp32", Device: testDevice()}, "")
+		if err != nil {
+			t.Fatalf("Listen: %v", err)
+		}
+		c, err := net.DialTimeout("tcp", addr, 2*time.Second)
+		if err != nil {
+			t.Fatalf("dial: %v", err)
+		}
+		b.Close()
+		c.Close()
+	}
+}

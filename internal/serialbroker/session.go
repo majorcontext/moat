@@ -61,7 +61,19 @@ func (l *listener) serve() {
 			continue
 		}
 		backoff = 0
+		// Add under l.mu, after checking closed: close() sets closed under the
+		// same lock before it calls wg.Wait, so every Add either happens-before
+		// that Wait or sees closed and drops the connection. Without the lock a
+		// connection accepted as the listener closes calls Add concurrently with
+		// Wait, which sync.WaitGroup forbids.
+		l.mu.Lock()
+		if l.closed {
+			l.mu.Unlock()
+			conn.Close()
+			return
+		}
 		l.wg.Add(1)
+		l.mu.Unlock()
 		go func() {
 			defer l.wg.Done()
 			l.handle(conn)
