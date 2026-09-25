@@ -26,6 +26,10 @@ Pi starts on the first model LunaRoute lists; switch with `/model` inside Pi.
 - Writes `~/.pi/agent/auth.json` with a placeholder login. The proxy swaps in the real key on `gw.lunaroute.com` (`Authorization: Bearer`) and `mcp.lunaroute.com` (`LUNAROUTE-API-KEY`), and nowhere else.
 - Loads LunaRoute's model list before Pi starts (about 1–2 seconds). Pi picks its model before it fetches any list, so without this step a new container fails with `Unknown provider "lunaroute"`.
 
+## Recommended packages
+
+`moat.yaml` also installs the Pi packages the LunaRoute team recommends (September 2026), pinned to the versions tested with this example. None are required, and each is third-party code that runs inside Pi, so trim the list to what you want. Together they add a few seconds to startup.
+
 ## Common mistakes
 
 - **Using `moat grant anthropic --base-url https://gw.lunaroute.com` for Pi.** That grant is for Claude Code. `moat pi` refuses to start with it and tells you to run `moat grant lunaroute`.
