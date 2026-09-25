@@ -44,8 +44,6 @@ env | sort \
   | sed -E "s#^(HTTPS?_PROXY|https?_proxy)=http://moat:[^@]*@#\1=http://moat:REDACTED@#" \
   | sed -E "s#^(MOAT_SSH_TCP_ADDR)=.*#\1=REDACTED#" \
   | sed -E "s#^(SSH_AUTH_SOCK)=.*#\1=REDACTED#"
-echo "[gitconfig]"
-{ git config --system --list 2>/dev/null || echo none; } | sort
 echo "[tree]"
 for d in "$HOME/.claude" "$HOME/.codex" "$HOME/.gemini" "$HOME/.copilot" "$HOME/.config" /workspace; do
   if [ -e "$d" ]; then
@@ -181,6 +179,11 @@ func TestEntrypointBaseline(t *testing.T) {
 		m, logs, _ := runEntrypoint(t, "acc-baseline", run.Options{
 			Workspace: createTestWorkspace(t),
 			Cmd:       dumperCmd,
+			// A plain command alone does not trigger needsInit, so the image
+			// would have no entrypoint and the base image's USER line would
+			// satisfy assertBaseline without testing moat-init at all. Force
+			// the entrypoint in with a no-op pre_run hook.
+			Config: &config.Config{Hooks: config.HooksConfig{PreRun: "true"}},
 		})
 		if m == "" {
 			t.Fatalf("no manifest; logs:\n%s", logs)
