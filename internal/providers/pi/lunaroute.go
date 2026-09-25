@@ -30,7 +30,9 @@ const LunaRouteExtensionPackage = "npm:@lunaroute/pi-extension"
 //     RPC exit on its own rather than being killed mid-write.
 //   - A marker file records RPC exiting, so a crash ends the wait at once
 //     instead of after the 15s cap. (kill -0 can't tell: an unreaped child is
-//     a zombie and still "exists".)
+//     a zombie and still "exists".) If RPC outlives the 2s grace after its
+//     stdin closes, the script moves on and removes the temp dir, so that
+//     late touch is silenced rather than printing to the container's stderr.
 //
 // The fetch goes through the proxy like any other request, so the key is
 // injected there and never enters the container.
@@ -41,7 +43,7 @@ ready() {
 if ! ready; then
   tmp=$(mktemp -d)
   mkfifo "$tmp/in"
-  { pi --mode rpc <"$tmp/in" >/dev/null 2>&1; touch "$tmp/exited"; } &
+  { pi --mode rpc <"$tmp/in" >/dev/null 2>&1; touch "$tmp/exited" 2>/dev/null; } &
   exec 3>"$tmp/in"
   i=0
   while [ "$i" -lt 30 ] && [ ! -e "$tmp/exited" ] && ! ready; do sleep 0.5; i=$((i+1)); done
