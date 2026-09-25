@@ -47,12 +47,14 @@ env | sort \
 echo "[gitconfig]"
 { git config --system --list 2>/dev/null || echo none; } | sort
 echo "[tree]"
-for d in "$HOME/.claude" "$HOME/.codex" "$HOME/.gemini" "$HOME/.copilot" /workspace; do
+for d in "$HOME/.claude" "$HOME/.codex" "$HOME/.gemini" "$HOME/.copilot" "$HOME/.config" /workspace; do
   if [ -e "$d" ]; then
     echo "-- $d"
     find "$d" -printf "%y %M %u %g %P\n" 2>/dev/null | sort
   fi
 done
+echo "[home]"
+find "$HOME" -maxdepth 1 -printf "%y %M %u %g %P\n" 2>/dev/null | sort
 echo "[children]"
 for want in socat Xvfb dockerd; do
   found=absent
@@ -256,6 +258,13 @@ func TestEntrypointFeatureScenarios(t *testing.T) {
 			Workspace: createTestWorkspace(t),
 			Cmd:       dumperCmd,
 			Env:       []string{"MOAT_INIT_FILES=" + records},
+			// Passing MOAT_INIT_FILES in Env does NOT make the manager build
+			// the entrypoint image — NeedsInitFiles is derived from provider
+			// init files, not caller env. Force the entrypoint into the image
+			// with a no-op pre_run hook, or the command runs directly as root
+			// and the phase under test never executes (verified: this subtest
+			// silently asserted nothing before).
+			Config: &config.Config{Hooks: config.HooksConfig{PreRun: "true"}},
 		})
 		if m == "" {
 			t.Fatalf("no manifest; logs:\n%s", logs)
@@ -263,13 +272,18 @@ func TestEntrypointFeatureScenarios(t *testing.T) {
 		// The scrub is the load-bearing assertion here.
 		assertBaseline(t, m)
 		// Both secret files exist at 0600, owned by moatuser (visible in the
-		// home tree).
+		// home tree). The nested file is under .config (tree section); the
+		// home-root file is in the maxdepth-1 home section.
 		tree := section(m, "tree")
-		if !hasFileMode(tree, ".acc-initrc", "-rw-------") {
-			t.Errorf("init file .acc-initrc not at 0600:\n%v", tree)
-		}
 		if !hasFileMode(tree, "config.toml", "-rw-------") {
 			t.Errorf("nested init file not at 0600:\n%v", tree)
+		}
+		home := section(m, "home")
+		if !hasFileMode(home, ".acc-initrc", "-rw-------") {
+			t.Errorf("init file .acc-initrc not at 0600:\n%v", home)
+		}
+		if !hasFileOwned(home, ".acc-initrc", "moatuser") {
+			t.Errorf("init file .acc-initrc not owned by moatuser:\n%v", home)
 		}
 	})
 }
