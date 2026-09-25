@@ -532,7 +532,8 @@ func (r *DockerRuntime) VolumeExport(ctx context.Context, name, hostDir string) 
 		// undetected: the destination tar extracts the partial stream cleanly and
 		// the pipeline reports success, yielding a silently truncated snapshot.
 		// Capture the source tar's status via a temp file and require both ends
-		// to be 0 - the same guard the populate path uses (see moat-init.sh).
+		// to be 0 - the same guard the populate path uses (see the moat-init
+		// entrypoint).
 		// chmod stays best-effort (see the doc comment above).
 		Cmd: []string{"sh", "-c", `( cd /vol && tar -cf - . ; echo $? > /tmp/moat-export-rc ) | ( cd /out && tar --no-same-owner -xf - )
 dst_rc=$?

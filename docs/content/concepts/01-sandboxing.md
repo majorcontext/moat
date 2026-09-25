@@ -59,7 +59,7 @@ Every Moat container starts through the `moat-init` entrypoint (`/usr/local/bin/
 The entrypoint supports a dry-run: running `moat-init --plan` inside a container prints the ordered actions the entrypoint would take for the current environment — one line per decision — without performing any of them. This is useful when debugging why a feature did or did not activate:
 
 ```bash
-moat exec <agent> -- /usr/local/bin/moat-init --plan
+moat exec <run> -- /usr/local/bin/moat-init --plan
 ```
 
 ## Limitations

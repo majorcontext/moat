@@ -40,10 +40,6 @@ type Phase struct {
 // volume populate must precede setup_workspace_mcp_json (so moat's .mcp.json
 // wins over a user tree's copy) and the privilege drop (its chown needs
 // root); the exec dispatch is last and replaces the process image.
-//
-// Phase bodies are filled in incrementally (plan §9 commits 2–6); until the
-// exec dispatch phase lands, Run ends fail-closed rather than starting the
-// user command without the privilege-drop contract.
 func phases() []Phase {
 	return []Phase{
 		{Name: "extra-hosts", Run: extraHostsPhase},
