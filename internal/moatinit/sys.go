@@ -72,7 +72,6 @@ type Sys interface {
 
 	// Filesystem.
 	Stat(path string) (fs.FileInfo, error)
-	Lstat(path string) (fs.FileInfo, error)
 	MkdirAll(path string, perm fs.FileMode) error
 	Chmod(path string, perm fs.FileMode) error
 	Chown(path string, uid, gid int) error
@@ -176,8 +175,7 @@ func (s *OSSys) Environ() []string        { return os.Environ() }
 func (s *OSSys) Getpid() int              { return os.Getpid() }
 func (s *OSSys) Sleep(d time.Duration)    { time.Sleep(d) }
 
-func (s *OSSys) Stat(path string) (fs.FileInfo, error)  { return os.Stat(s.path(path)) }
-func (s *OSSys) Lstat(path string) (fs.FileInfo, error) { return os.Lstat(s.path(path)) }
+func (s *OSSys) Stat(path string) (fs.FileInfo, error) { return os.Stat(s.path(path)) }
 
 func (s *OSSys) MkdirAll(path string, perm fs.FileMode) error {
 	return os.MkdirAll(s.path(path), perm)

@@ -29,17 +29,6 @@ func TestStagingDir(t *testing.T) {
 	}
 }
 
-// TestExcludeFileContent covers WS-04/WS-06: the env value is written
-// verbatim (no trailing newline appended), empty stays empty.
-func TestExcludeFileContent(t *testing.T) {
-	if got := excludeFileContent("./node_modules\n./dist/sub"); got != "./node_modules\n./dist/sub" {
-		t.Errorf("excludeFileContent altered the value: %q", got)
-	}
-	if got := excludeFileContent(""); got != "" {
-		t.Errorf(`excludeFileContent("") = %q, want empty`, got)
-	}
-}
-
 // TestVolumeChownPaths covers the named-volume chown splitting: space
 // separated, glob characters kept literal (set -f semantics).
 func TestVolumeChownPaths(t *testing.T) {

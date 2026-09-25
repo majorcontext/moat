@@ -23,15 +23,6 @@ func stagingDir(staging string) string {
 	return staging
 }
 
-// excludeFileContent mirrors WS-04: the exclude file is created empty and,
-// when MOAT_WORKSPACE_EXCLUDES is non-empty, receives the value verbatim
-// (printf '%s' — no trailing newline appended). Patterns are
-// newline-delimited "./"-prefixed paths produced by run.workspaceExcludes;
-// an empty exclude file excludes nothing (WS-06).
-func excludeFileContent(excludes string) string {
-	return excludes
-}
-
 // volumeChownPaths mirrors the named-volume chown loop's word-splitting:
 // `set -f` disables glob expansion (a target containing [ ] * ? is treated
 // literally, never expanded against the filesystem), while word-splitting on
@@ -68,7 +59,10 @@ func populateWorkspaceVolumePhase(ctx *Context) error {
 
 	staging := stagingDir(cfg.WorkspaceStaging)
 	excludeFile := "/tmp/moat-excludes." + strconv.Itoa(sys.Getpid())
-	if err := sys.WriteFile(excludeFile, []byte(excludeFileContent(cfg.WorkspaceExcludes)), 0o644); err != nil {
+	// WS-04/WS-06: the exclude file is created empty and, when
+	// MOAT_WORKSPACE_EXCLUDES is non-empty, receives the value verbatim
+	// (printf '%s' — no trailing newline appended).
+	if err := sys.WriteFile(excludeFile, []byte(cfg.WorkspaceExcludes), 0o644); err != nil {
 		return fatalPhaseError(ctx, "writing exclude file", err)
 	}
 
