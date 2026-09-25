@@ -3,6 +3,7 @@ package moatinit
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -334,8 +335,23 @@ func TestCodexSubscriptionVersionGate(t *testing.T) {
 				if exit, ok := err.(exitError); !ok || exit.code != 1 {
 					t.Fatalf("err = %v, want exitError{1}", err)
 				}
-				if stderr.Len() == 0 {
-					t.Error("fatal version gate produced no stderr")
+				if tc.missing {
+					want := "Moat: the codex grant needs the codex-cli dependency; add 'codex-cli' to dependencies in moat.yaml\n"
+					if stderr.String() != want {
+						t.Errorf("missing-binary message = %q, want %q", stderr.String(), want)
+					}
+					return
+				}
+				parsed := ""
+				if f := strings.Fields(tc.version); len(f) >= 2 {
+					parsed = f[1]
+				}
+				want := "Moat: unsupported Codex CLI version " + parsed + " for subscription auth (supported: 0.146.x through 0.154.x); pin codex-cli@0.154.0 in moat.yaml dependencies or use 'moat grant openai'\n"
+				if parsed == "" {
+					want = "Moat: unsupported Codex CLI version unknown for subscription auth (supported: 0.146.x through 0.154.x); pin codex-cli@0.154.0 in moat.yaml dependencies or use 'moat grant openai'\n"
+				}
+				if stderr.String() != want {
+					t.Errorf("unsupported-version message = %q, want %q", stderr.String(), want)
 				}
 				return
 			}
