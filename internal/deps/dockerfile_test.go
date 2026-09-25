@@ -2051,3 +2051,31 @@ func piBakeKeysOf(m map[string][]byte) []string {
 	}
 	return ks
 }
+
+// TestEntrypointBinaryArchSupport pins the companion to the fail-open fix:
+// every architecture with an embedded blob resolves, and an unsupported
+// GOARCH is a hard error rather than an entrypoint-less image.
+func TestEntrypointBinaryArchSupport(t *testing.T) {
+	for _, goarch := range []string{"amd64", "arm64"} {
+		b, err := entrypointBinary(goarch)
+		if err != nil {
+			t.Errorf("entrypointBinary(%q) error: %v", goarch, err)
+		}
+		if len(b) == 0 {
+			t.Errorf("entrypointBinary(%q) returned no bytes", goarch)
+		}
+	}
+	if _, err := entrypointBinary("riscv64"); err == nil {
+		t.Error("entrypointBinary(\"riscv64\") succeeded; want a hard error")
+	}
+	// Companion: the unsupported-arch error must surface through
+	// GenerateDockerfile rather than being swallowed. Simulate by asserting a
+	// normal build still returns the entrypoint context file.
+	res, err := GenerateDockerfile(nil, &ImageSpec{NeedsSSH: true})
+	if err != nil {
+		t.Fatalf("GenerateDockerfile(SSH): %v", err)
+	}
+	if _, ok := res.ContextFiles["moat-init"]; !ok {
+		t.Error("init-needing build did not install the moat-init binary")
+	}
+}

@@ -3,6 +3,7 @@ package deps
 
 import (
 	"fmt"
+	"runtime"
 	"sort"
 	"strings"
 
@@ -27,7 +28,7 @@ type DockerfileResult struct {
 
 	// ContextFiles maps relative file paths to their contents.
 	// These files should be written to the build context directory
-	// alongside the Dockerfile (e.g., "moat-init.sh" → script content).
+	// alongside the Dockerfile (e.g., "moat-init" → entrypoint binary).
 	ContextFiles map[string][]byte
 }
 
@@ -270,7 +271,9 @@ func GenerateDockerfile(deps []Dependency, opts *ImageSpec) (*DockerfileResult, 
 	writeBuildHooks(&b, opts.Hooks)
 
 	// Finalize with entrypoint and user setup
-	writeEntrypoint(&b, opts, c.dockerMode, contextFiles)
+	if err := writeEntrypoint(&b, opts, c.dockerMode, contextFiles); err != nil {
+		return nil, err
+	}
 
 	return &DockerfileResult{
 		Dockerfile:   b.String(),
@@ -629,21 +632,37 @@ func formatHookCommand(cmd string) string {
 // everything is materialized from bytes in the moat host binary and COPY'd
 // from the local build context — zero network at image build time.
 //
-// The binary is arch-matched: run images are always built for the host's own
-// architecture, so the runtime.GOARCH blob from internal/initbin is the right
-// one. On architectures moat does not build run images for, Binary() is nil
-// and there is no entrypoint to install (such a host cannot run moat images).
-func writeEntrypoint(b *strings.Builder, opts *ImageSpec, dockerMode DockerMode, contextFiles map[string][]byte) {
+// The binary is arch-matched: run images are always built for linux/amd64 or
+// linux/arm64 (see container.dockerBuildManager), so the runtime.GOARCH blob
+// from internal/initbin is the right one. A host whose GOARCH has no embedded
+// blob cannot produce a correct entrypoint, and building an image without one
+// would run the base image's command as root with none of the entrypoint's
+// setup — so this fails the build instead of emitting an entrypoint-less image.
+func writeEntrypoint(b *strings.Builder, opts *ImageSpec, dockerMode DockerMode, contextFiles map[string][]byte) error {
 	if opts.needsInit(dockerMode) {
-		if goBin := initbin.Binary(); goBin != nil {
-			contextFiles["moat-init"] = goBin
-			b.WriteString("# Moat initialization entrypoint (privilege drop + feature setup)\n")
-			b.WriteString("COPY moat-init /usr/local/bin/moat-init\n")
-			b.WriteString("RUN chmod +x /usr/local/bin/moat-init\n")
-			b.WriteString("ENTRYPOINT [\"/usr/local/bin/moat-init\"]\n")
+		goBin, err := entrypointBinary(runtime.GOARCH)
+		if err != nil {
+			return err
 		}
+		contextFiles["moat-init"] = goBin
+		b.WriteString("# Moat initialization entrypoint (privilege drop + feature setup)\n")
+		b.WriteString("COPY moat-init /usr/local/bin/moat-init\n")
+		b.WriteString("RUN chmod +x /usr/local/bin/moat-init\n")
+		b.WriteString("ENTRYPOINT [\"/usr/local/bin/moat-init\"]\n")
 	} else {
 		b.WriteString(fmt.Sprintf("# Run as non-root user\nUSER %s\n", containerUser))
 	}
 	b.WriteString(fmt.Sprintf("WORKDIR /home/%s\n", containerUser))
+	return nil
+}
+
+// entrypointBinary resolves the embedded moat-init blob for a GOARCH or fails
+// when none exists. Split out from writeEntrypoint so the unsupported-arch
+// branch is unit-testable without cross-compiling the host.
+func entrypointBinary(goarch string) ([]byte, error) {
+	goBin := initbin.BinaryFor(goarch)
+	if goBin == nil {
+		return nil, fmt.Errorf("no moat-init entrypoint binary embedded for GOARCH %s; run images are only built for linux/amd64 and linux/arm64", goarch)
+	}
+	return goBin, nil
 }
