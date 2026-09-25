@@ -205,6 +205,7 @@ func (b *Broker) listen(runID string, a Approved, bindAddr string, port int) (*L
 	b.byDevice[key] = l
 	b.byRun[runID] = append(b.byRun[runID], key)
 
+	l.wg.Add(1) // released when serve returns; see listener.serve
 	go l.serve()
 
 	log.Debug("serial listener started", "run", runID, "device", a.Name,

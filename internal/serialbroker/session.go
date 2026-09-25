@@ -34,7 +34,13 @@ type listener struct {
 	closed bool
 }
 
+// serve accepts connections until the listener closes. The caller must
+// l.wg.Add(1) before starting it: that count, released when serve returns,
+// keeps the WaitGroup above zero for the whole accept loop, so the
+// per-connection Adds below never start from zero while close() is in Wait —
+// which sync.WaitGroup forbids. Same idiom as sshagent.Server.
 func (l *listener) serve() {
+	defer l.wg.Done()
 	var backoff time.Duration
 	for {
 		conn, err := l.ln.Accept()
@@ -61,19 +67,9 @@ func (l *listener) serve() {
 			continue
 		}
 		backoff = 0
-		// Add under l.mu, after checking closed: close() sets closed under the
-		// same lock before it calls wg.Wait, so every Add either happens-before
-		// that Wait or sees closed and drops the connection. Without the lock a
-		// connection accepted as the listener closes calls Add concurrently with
-		// Wait, which sync.WaitGroup forbids.
-		l.mu.Lock()
-		if l.closed {
-			l.mu.Unlock()
-			conn.Close()
-			return
-		}
+		// serve itself holds a wg count (see Broker.listen), so this Add never
+		// starts from zero and cannot race close()'s Wait.
 		l.wg.Add(1)
-		l.mu.Unlock()
 		go func() {
 			defer l.wg.Done()
 			l.handle(conn)

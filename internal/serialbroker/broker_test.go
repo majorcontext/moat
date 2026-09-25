@@ -2382,25 +2382,32 @@ func TestRevokeWaitsForTheDetachEvent(t *testing.T) {
 
 // A connection accepted just before the broker closes must not race the
 // listener's shutdown. serve() registers each accepted connection with a
-// WaitGroup that close() waits on, and a WaitGroup requires every Add from
-// zero to happen-before Wait. Dial and close back to back, many times, so
-// close() regularly runs before the connection's handler has touched any
-// shared state — the window where nothing else orders the two. Run with -race.
+// WaitGroup that close() waits on, and a WaitGroup forbids an Add from zero
+// concurrent with Wait. Dial and close back to back, many times, so close()
+// regularly runs before the connection's handler has touched any shared state
+// — the window where nothing else orders the two. Run with -race.
+//
+// Each iteration is a subtest so its fake port (a pty pair) and broker are
+// released before the next starts: fd-limited sandboxes would otherwise skip
+// part way through and quietly cover fewer iterations.
 func TestCloseRightAfterAcceptDoesNotRace(t *testing.T) {
 	for i := 0; i < 50; i++ {
-		fp := serialtest.NewFakePort(t)
-		b := serialbroker.New(serialbroker.Options{
-			OpenPort: func(string) (serialport.Port, error) { return fp, nil },
+		t.Run(strconv.Itoa(i), func(t *testing.T) {
+			fp := serialtest.NewFakePort(t)
+			b := serialbroker.New(serialbroker.Options{
+				OpenPort: func(string) (serialport.Port, error) { return fp, nil },
+			})
+			defer b.Close() // idempotent; covers a failed dial below
+			_, addr, err := b.Listen("run-a", serialbroker.Approved{Name: "esp32", Device: testDevice()}, "")
+			if err != nil {
+				t.Fatalf("Listen: %v", err)
+			}
+			c, err := net.DialTimeout("tcp", addr, 2*time.Second)
+			if err != nil {
+				t.Fatalf("dial: %v", err)
+			}
+			defer c.Close()
+			b.Close()
 		})
-		_, addr, err := b.Listen("run-a", serialbroker.Approved{Name: "esp32", Device: testDevice()}, "")
-		if err != nil {
-			t.Fatalf("Listen: %v", err)
-		}
-		c, err := net.DialTimeout("tcp", addr, 2*time.Second)
-		if err != nil {
-			t.Fatalf("dial: %v", err)
-		}
-		b.Close()
-		c.Close()
 	}
 }
