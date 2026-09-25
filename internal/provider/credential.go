@@ -70,6 +70,13 @@ type PrepareOpts struct {
 	CopilotModel           string
 	CopilotContext         string
 	CopilotReasoningEffort string
+
+	// PiModelCatalogSync lets Pi make startup network calls (it omits
+	// PI_OFFLINE). Set when the run holds the lunaroute grant: LunaRoute's
+	// Pi extension fetches its model catalog at startup, and under PI_OFFLINE
+	// a fresh container would list no LunaRoute models.
+	// Pi-specific; ignored by other agents.
+	PiModelCatalogSync bool
 }
 
 // MCPServerConfig defines a remote/relay MCP server configuration.

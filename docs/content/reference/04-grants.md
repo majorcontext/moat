@@ -2,7 +2,7 @@
 title: "Grants reference"
 navTitle: "Grants"
 description: "Complete reference for Moat grant types: supported providers, host matching, credential sources, and configuration."
-keywords: ["moat", "grants", "credentials", "github", "anthropic", "aws", "ssh", "openai", "npm", "graphite", "meta", "facebook", "instagram", "gitlab", "brave-search", "elevenlabs", "linear", "vercel", "sentry", "datadog"]
+keywords: ["moat", "grants", "credentials", "github", "anthropic", "aws", "ssh", "openai", "npm", "graphite", "lunaroute", "meta", "facebook", "instagram", "gitlab", "brave-search", "elevenlabs", "linear", "vercel", "sentry", "datadog"]
 ---
 
 # Grants reference
@@ -21,6 +21,7 @@ Store a credential with `moat grant <provider>`, then use it in runs with `--gra
 | `openai` | `api.openai.com`, `chatgpt.com`, `*.openai.com` | `Authorization: Bearer ...` | `OPENAI_API_KEY` or prompt |
 | `gemini` | `generativelanguage.googleapis.com` (API key) or `cloudcode-pa.googleapis.com` (OAuth) | `x-goog-api-key: ...` (API key) or `Authorization: Bearer ...` (OAuth) | Gemini CLI OAuth, `GEMINI_API_KEY`, or prompt |
 | `graphite` | `api.graphite.com`, `*.graphite.com` | `Authorization: token ...` | `GRAPHITE_TOKEN`, `GT_TOKEN`, or prompt |
+| `lunaroute` | `gw.lunaroute.com`, `mcp.lunaroute.com` | `Authorization: Bearer ...` (`gw`); `LUNAROUTE-API-KEY: ...` (`mcp`) | `LUNAROUTE_API_KEY` or prompt |
 | `meta` | `graph.facebook.com`, `graph.instagram.com` | `Authorization: Bearer ...` | `META_ACCESS_TOKEN` or prompt |
 | `npm` | Per-registry (e.g., `registry.npmjs.org`, `npm.company.com`) | `Authorization: Bearer ...` | `.npmrc`, `NPM_TOKEN`, or manual |
 | `aws` | All AWS service endpoints | AWS `credential_process` (STS temporary credentials) | IAM role assumption via STS |
@@ -485,6 +486,63 @@ Validating token...
 Token validated successfully
 
 $ moat run --grant graphite ./my-project
+```
+
+## LunaRoute
+
+### CLI command
+
+```bash
+moat grant lunaroute
+```
+
+No flags. Use `--profile` to keep the key separate from other credentials.
+
+### Credential sources
+
+1. **Environment variable** -- Uses `LUNAROUTE_API_KEY` if set
+2. **Interactive prompt** -- Prompts for a key
+
+The key must start with `lr_`. Moat validates it by listing models at `https://gw.lunaroute.com/v1/models`, and reports a rejected key separately from an unreachable gateway.
+
+### What it injects
+
+- `Authorization: Bearer <key>` for requests to `gw.lunaroute.com` (inference and the model list)
+- `LUNAROUTE-API-KEY: <key>` for requests to `mcp.lunaroute.com` (tools registered by LunaRoute's Pi extension)
+
+The key is not registered for any other host.
+
+The container receives `~/.pi/agent/auth.json` with a placeholder `lunaroute` login, so LunaRoute's Pi extension treats itself as signed in without seeing the real key.
+
+This grant is for [Pi](../guides/16-pi.md#lunaroute). Claude Code reaches LunaRoute through [`moat grant anthropic --base-url`](../guides/01-claude-code.md#an-anthropic-compatible-gateway) instead.
+
+### Implied dependencies
+
+None. `moat pi` adds Pi and LunaRoute's Pi extension.
+
+### Refresh behavior
+
+LunaRoute keys are static and do not refresh.
+
+### moat.yaml
+
+```yaml
+grants:
+  - lunaroute
+pi:
+  provider: lunaroute
+```
+
+### Example
+
+```bash
+$ export LUNAROUTE_API_KEY=lr_...
+$ moat grant lunaroute
+Using key from LUNAROUTE_API_KEY environment variable
+Validating key...
+Key validated successfully
+
+$ moat pi --provider lunaroute
 ```
 
 ## Meta

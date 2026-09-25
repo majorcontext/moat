@@ -42,6 +42,7 @@ var goProviderDescriptions = map[string]string{
 	"npm":       "npm registry credentials",
 	"graphite":  "Graphite API token for stacked PRs",
 	"meta":      "Meta Graph API access token",
+	"lunaroute": "LunaRoute API key (for moat pi)",
 	"oauth":     "OAuth for a catalog service ('moat grant oauth <name>')",
 }
 

@@ -10,7 +10,7 @@ import (
 // Provider implements provider.AgentProvider for the Pi coding agent.
 //
 // Pi has no credential of its own: it runs against whichever backend the user's
-// anthropic or openai grant provides, so credential injection is handled by
+// anthropic, openai, or lunaroute grant provides, so credential injection is handled by
 // those credential providers, not here. This provider is purely the runtime —
 // installing the CLI, staging the runtime context, and resolving which backend
 // to launch.
@@ -31,7 +31,7 @@ func init() {
 func (p *Provider) Name() string { return "pi" }
 
 // AgentOnly marks Pi as having no credential of its own: it runs on the
-// anthropic or openai grant, so credential listings exclude it.
+// anthropic, openai, or lunaroute grant, so credential listings exclude it.
 func (p *Provider) AgentOnly() {}
 
 // Grant always errors: Pi has no credential of its own. Users grant a model
@@ -40,11 +40,12 @@ func (p *Provider) Grant(ctx context.Context) (*provider.Credential, error) {
 	return nil, errors.New(
 		"pi has no credential of its own — grant a model backend instead:\n" +
 			"  Run: moat grant anthropic\n" +
-			"  or:  moat grant openai")
+			"  or:  moat grant openai\n" +
+			"  or:  moat grant lunaroute")
 }
 
 // ConfigureProxy is a no-op: credential injection is delegated to the
-// anthropic/openai credential providers for the resolved backend.
+// credential provider of the resolved backend.
 func (p *Provider) ConfigureProxy(proxy provider.ProxyConfigurer, cred *provider.Credential) {}
 
 // ContainerEnv is a no-op: the backend grant provider sets the placeholder

@@ -2,7 +2,7 @@
 #
 # Run the Pi coding agent in an isolated container with credential injection.
 # Pi has no credential of its own — it runs against your anthropic or openai
-# grant. Only those two backends are supported today.
+# grant here. For LunaRoute, see examples/agent-pi-lunaroute.
 #
 # Run with:
 #   moat pi examples/agent-pi
@@ -18,8 +18,8 @@ dependencies:
 grants:
   - anthropic
 
-# Backend is inferred from the single grant above. When both anthropic and
-# openai are granted, choose one explicitly:
+# Backend is inferred from the single grant above. When several backend
+# grants are configured, choose one explicitly:
 #   pi:
 #     provider: anthropic
 #     model: claude-opus-4-8

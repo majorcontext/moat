@@ -26,12 +26,14 @@ var (
 )
 
 // NetworkHosts lists the LLM API hosts Pi may need under a strict network
-// policy. Both backends are allowed so a run works regardless of the resolved
+// policy. Every backend is allowed so a run works regardless of the resolved
 // provider.
 func NetworkHosts() []string {
 	return []string{
 		"api.anthropic.com",
 		"api.openai.com",
+		"gw.lunaroute.com",
+		"mcp.lunaroute.com",
 	}
 }
 
@@ -47,10 +49,10 @@ func (p *Provider) RegisterCLI(root *cobra.Command) {
 		Short: "Run the Pi coding agent in an isolated container",
 		Long: `Run the Pi coding agent in an isolated container with automatic credential injection.
 
-Pi has no credential of its own — it runs against your anthropic or openai grant.
-If exactly one of those grants is configured it is used automatically; if both
-are configured, set pi.provider (or --provider) to choose. Only the anthropic and
-openai backends are supported today.
+Pi has no credential of its own — it runs against your anthropic, openai, or
+lunaroute grant. If exactly one of those grants is configured it is used
+automatically; if more than one is, set pi.provider (or --provider) to choose.
+The lunaroute backend installs LunaRoute's Pi extension into the image.
 
 Your workspace is mounted at /workspace inside the container. API credentials are
 injected transparently via the Moat proxy - Pi never sees raw tokens.
@@ -65,8 +67,11 @@ Examples:
   # Ask Pi to do something specific (non-interactive)
   moat pi -p "explain this codebase"
 
-  # Force the OpenAI backend (when both grants are configured)
+  # Force the OpenAI backend (when several grants are configured)
   moat pi --provider openai
+
+  # Use LunaRoute (after 'moat grant lunaroute')
+  moat pi --provider lunaroute
 
   # Add additional grants (e.g., for GitHub API access)
   moat pi --grant github
@@ -79,7 +84,7 @@ Use 'moat list' to see running and recent runs.`,
 	cli.AddExecFlags(piCmd, &piFlags)
 	piCmd.Flags().StringVarP(&piPromptFlag, "prompt", "p", "", "run with prompt (non-interactive mode)")
 	piCmd.Flags().StringSliceVar(&piAllowedHosts, "allow-host", nil, "additional hosts to allow network access to")
-	piCmd.Flags().StringVar(&piProviderFlag, "provider", "", "model backend: anthropic or openai (overrides pi.provider)")
+	piCmd.Flags().StringVar(&piProviderFlag, "provider", "", "model backend: anthropic, openai, or lunaroute (overrides pi.provider)")
 	piCmd.Flags().StringVar(&piModelFlag, "model", "", "model pattern to use (overrides pi.model)")
 	piCmd.Flags().StringVar(&piWtFlag, "worktree", "", "run in a git worktree for this branch")
 	piCmd.Flags().StringVar(&piWtFlag, "wt", "", "alias for --worktree")
@@ -112,6 +117,13 @@ func runPi(cmd *cobra.Command, args []string) error {
 			// makes the isPiRun guard in Create reliable.
 			cfg.Agent = "pi"
 
+			// The lunaroute backend only has models once LunaRoute's
+			// extension is installed; bake it rather than make every user
+			// list it under pi.packages.
+			if piResolvedProvider == backendLunaRoute {
+				cfg.Pi.Packages = withLunaRouteExtension(cfg.Pi.Packages)
+			}
+
 			// Pi config (baseUrl/streamSimple/extensions) can redirect model
 			// traffic to arbitrary hosts, so only the network policy actually
 			// contains egress. Warn when it isn't strict (empty == permissive).
@@ -139,13 +151,19 @@ func resolvePiPreflight(cfg *config.Config) error {
 		}
 	}
 
-	prov, model, err := resolvePiProvider(
-		providerOverride, modelOverride,
-		credentialConfigured(credential.ProviderAnthropic),
-		credentialConfigured(credential.ProviderOpenAI),
-	)
+	anthropicCred := loadCredential(credential.ProviderAnthropic)
+	prov, model, err := resolvePiProvider(providerOverride, modelOverride, piGrants{
+		Anthropic: anthropicCred != nil,
+		OpenAI:    loadCredential(credential.ProviderOpenAI) != nil,
+		LunaRoute: loadCredential(credential.ProviderLunaRoute) != nil,
+	})
 	if err != nil {
 		return err
+	}
+	if anthropicCred != nil {
+		if err := checkAnthropicGatewayKey(prov, anthropicCred.Metadata[credential.MetaKeyBaseURL]); err != nil {
+			return err
+		}
 	}
 	piResolvedProvider = prov
 	piResolvedModel = model
@@ -155,7 +173,7 @@ func resolvePiPreflight(cfg *config.Config) error {
 // buildPiCommand assembles the container command for Pi. Extracted from the
 // BuildCommand closure so it is unit-testable.
 func buildPiCommand(promptFlag, initialPrompt string) []string {
-	c := []string{"pi", "--provider", piResolvedProvider}
+	c := []string{"--provider", piResolvedProvider}
 	if piResolvedModel != "" {
 		c = append(c, "--model", piResolvedModel)
 	}
@@ -165,19 +183,27 @@ func buildPiCommand(promptFlag, initialPrompt string) []string {
 	} else if initialPrompt != "" {
 		c = append(c, initialPrompt)
 	}
-	return c
+	if piResolvedProvider == backendLunaRoute {
+		// $0 is "pi"; the args follow as "$@", so nothing is re-quoted.
+		return append([]string{"sh", "-c", lunaRouteLaunchScript, "pi"}, c...)
+	}
+	return append([]string{"pi"}, c...)
 }
 
-// credentialConfigured reports whether a credential for prov exists in the store.
-func credentialConfigured(prov credential.Provider) bool {
+// loadCredential returns the stored credential for prov, or nil if it is not
+// configured (or the store can't be read).
+func loadCredential(prov credential.Provider) *credential.Credential {
 	key, err := credential.DefaultEncryptionKey()
 	if err != nil {
-		return false
+		return nil
 	}
 	store, err := credential.NewFileStore(credential.DefaultStoreDir(), key)
 	if err != nil {
-		return false
+		return nil
 	}
-	_, err = store.Get(prov)
-	return err == nil
+	cred, err := store.Get(prov)
+	if err != nil {
+		return nil
+	}
+	return cred
 }

@@ -464,7 +464,7 @@ moat pi [workspace] [flags] [-- initial-prompt]
 
 In addition to the command-specific flags below, `moat pi` accepts all [common agent flags](#common-agent-flags).
 
-Pi has no credential of its own — it runs against your `anthropic` or `openai` grant. When exactly one of those grants is configured it is used automatically; when both are configured you must choose one with `--provider` (or `pi.provider` in moat.yaml). Only the `anthropic` and `openai` backends are supported today; any other value fails hard. If no supported grant is configured, `moat pi` exits before creating a container and tells you to run `moat grant anthropic` or `moat grant openai`.
+Pi has no credential of its own — it runs against your `anthropic`, `openai`, or `lunaroute` grant. When exactly one of those grants is configured it is used automatically; when more than one is configured you must choose one with `--provider` (or `pi.provider` in moat.yaml). Only the `anthropic`, `openai`, and `lunaroute` backends are supported today; any other value fails hard. If no supported grant is configured, `moat pi` exits before creating a container and tells you which grant to add. The `lunaroute` backend installs LunaRoute's Pi extension into the image; see [Running Pi](../guides/16-pi.md#lunaroute).
 
 ### Arguments
 
@@ -478,7 +478,7 @@ Pi has no credential of its own — it runs against your `anthropic` or `openai`
 | Flag | Description |
 |------|-------------|
 | `-p`, `--prompt TEXT` | Run non-interactive with prompt |
-| `--provider NAME` | Model backend: `anthropic` or `openai`. Overrides `pi.provider`; required when both grants are configured. |
+| `--provider NAME` | Model backend: `anthropic`, `openai`, or `lunaroute`. Overrides `pi.provider`; required when more than one of those grants is configured. |
 | `--model PATTERN` | Model pattern to use (overrides `pi.model`). When unset, Pi's per-provider default is used. |
 
 ### Examples
@@ -494,8 +494,12 @@ moat pi ./my-project
 # Non-interactive with prompt
 moat pi -p "explain this codebase"
 
-# Force the OpenAI backend (e.g. when both grants are configured)
+# Force the OpenAI backend (e.g. when several grants are configured)
 moat pi --provider openai
+
+# Use LunaRoute
+moat grant lunaroute
+moat pi --provider lunaroute
 
 # Pin a model
 moat pi --provider anthropic --model claude-opus-4-8
@@ -624,6 +628,7 @@ moat grant <provider>[:<scopes>]
 | `anthropic` | Anthropic API key |
 | `openai` | OpenAI (API key) |
 | `gemini` | Google Gemini (Gemini CLI OAuth or API key) |
+| `lunaroute` | LunaRoute API key (for `moat pi`) |
 | `npm` | npm registries (.npmrc, `NPM_TOKEN`, or manual) |
 | `aws` | AWS (IAM role assumption) |
 | `oauth` | OAuth 2.0 (authorization code flow with PKCE) |
@@ -715,6 +720,14 @@ If no Gemini CLI credentials are found, falls directly to the API key prompt.
 ```bash
 # Import from Gemini CLI or enter API key
 moat grant gemini
+```
+
+### moat grant lunaroute
+
+Stores a LunaRoute API key (`lr_...`) for [Pi](../guides/16-pi.md#lunaroute). Reads from the `LUNAROUTE_API_KEY` environment variable, or prompts interactively, then validates the key against `gw.lunaroute.com`.
+
+```bash
+moat grant lunaroute
 ```
 
 ### moat grant npm

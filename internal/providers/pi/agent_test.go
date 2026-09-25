@@ -91,3 +91,35 @@ func assertEnv(t *testing.T, env []string, want string) {
 	}
 	t.Errorf("env missing %q, got %v", want, env)
 }
+
+// LunaRoute's extension fetches its model catalog at startup; PI_OFFLINE
+// would leave it with no models, so it must be absent for those runs.
+func TestPrepareContainerPiOffline(t *testing.T) {
+	for _, tt := range []struct {
+		name        string
+		catalogSync bool
+		wantOffline bool
+	}{
+		{"default keeps PI_OFFLINE", false, true},
+		{"catalog sync drops PI_OFFLINE", true, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg, err := (&Provider{}).PrepareContainer(context.Background(), provider.PrepareOpts{
+				PiModelCatalogSync: tt.catalogSync,
+			})
+			if err != nil {
+				t.Fatalf("PrepareContainer: %v", err)
+			}
+			t.Cleanup(cfg.Cleanup)
+			hasOffline := false
+			for _, e := range cfg.Env {
+				if strings.HasPrefix(e, "PI_OFFLINE=") {
+					hasOffline = true
+				}
+			}
+			if hasOffline != tt.wantOffline {
+				t.Errorf("PI_OFFLINE present = %v, want %v (env %v)", hasOffline, tt.wantOffline, cfg.Env)
+			}
+		})
+	}
+}

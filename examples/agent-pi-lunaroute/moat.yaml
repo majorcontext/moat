@@ -1,0 +1,50 @@
+# Example: Pi against LunaRoute
+#
+# LunaRoute serves many models behind one key. Pi reaches it through
+# LunaRoute's own Pi extension (npm:@lunaroute/pi-extension), which registers a
+# "lunaroute" provider and loads the model list from the gateway. Moat keeps
+# the key on the host and injects it at the proxy; the container only holds a
+# placeholder login in ~/.pi/agent/auth.json.
+#
+# Traffic flow:
+#   Pi -> Moat proxy (Authorization: Bearer <key>)  -> gw.lunaroute.com
+#   Pi -> Moat proxy (LUNAROUTE-API-KEY: <key>)     -> mcp.lunaroute.com (web tools)
+#
+# Prerequisites:
+#   1. A LunaRoute API key (starts with lr_), from https://lunaroute.com
+#   2. Grant it:
+#        moat grant lunaroute
+#      (reads LUNAROUTE_API_KEY, or prompts)
+#
+# Run with:
+#   moat pi examples/agent-pi-lunaroute
+#   moat pi examples/agent-pi-lunaroute -p "fix the bug in main.py"
+#
+# `moat pi` installs the extension and loads LunaRoute's model list before Pi
+# starts, so there is no pi.packages entry to add. Pi uses the first model in
+# the list unless you pin one below; switch with /model inside Pi.
+#
+# Two things that look like they should work, but don't:
+#
+#   - `moat grant anthropic --base-url https://gw.lunaroute.com` is how Claude
+#     Code reaches LunaRoute. Pi's anthropic backend only talks to
+#     api.anthropic.com, where that key is never sent, so `moat pi` refuses to
+#     start on it. Use `moat grant lunaroute`; the same lr_ key works for both.
+#
+#   - `moat run` with a `pi` command. It skips the extension and the model
+#     list, so Pi fails with: Unknown provider "lunaroute". Use `moat pi`.
+
+name: pi-lunaroute
+
+dependencies:
+  - node@22
+  - pi-cli
+  - git
+
+grants:
+  - lunaroute
+
+pi:
+  provider: lunaroute
+  # Pin a model instead of taking the first one LunaRoute lists:
+  # model: glm-5.3
