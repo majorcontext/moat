@@ -336,3 +336,15 @@ func TestResolveImageNeedsCLIDepFallbackIsUniform(t *testing.T) {
 		})
 	}
 }
+
+// The lunaroute grant writes Pi's auth.json via init files, so the image must
+// bake the init-file step; without it the placeholder never reaches Pi.
+func TestResolveImageNeedsLunaRouteInitFiles(t *testing.T) {
+	if !resolveImageNeedsWithStore([]string{"lunaroute"}, nil, nil).initFiles {
+		t.Error("lunaroute grant should need init files")
+	}
+	// Companion: a Pi run on another backend does not.
+	if resolveImageNeedsWithStore([]string{"openai"}, nil, newMockStore()).initFiles {
+		t.Error("openai grant should not need init files")
+	}
+}

@@ -1844,7 +1844,7 @@ When `grant` is specified, the corresponding environment variable is set automat
 
 ## Pi
 
-The Pi coding agent has no credential of its own — it runs against your `anthropic` or `openai` grant. Only those two backends are supported today.
+The Pi coding agent has no credential of its own — it runs against your `anthropic`, `openai`, or `lunaroute` grant. Only those three backends are supported today.
 
 ### pi.provider
 
@@ -1855,10 +1855,12 @@ pi:
   provider: anthropic
 ```
 
-- Type: `string` (`anthropic` or `openai`)
+- Type: `string` (`anthropic`, `openai`, or `lunaroute`)
 - Default: inferred from the single configured grant
 
-When unset, the backend is inferred: if exactly one of the `anthropic` / `openai` grants is configured it is used; if both are configured, `pi.provider` (or the `--provider` flag) is required and the run fails hard otherwise. Any value other than `anthropic` or `openai` fails hard — other Pi backends are planned but not yet wired up.
+When unset, the backend is inferred: if exactly one of the `anthropic` / `openai` / `lunaroute` grants is configured it is used; if more than one is configured, `pi.provider` (or the `--provider` flag) is required and the run fails hard otherwise. Any other value fails hard — other Pi backends are planned but not yet wired up.
+
+With `lunaroute`, `moat pi` adds `npm:@lunaroute/pi-extension` to `pi.packages` automatically and loads LunaRoute's model list before Pi starts. Use `moat pi` rather than `moat run` for this backend. See [Running Pi](../guides/16-pi.md#lunaroute).
 
 ### pi.model
 

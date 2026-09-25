@@ -371,9 +371,11 @@ Or in a single project's `moat.yaml` under `env:`, which overrides the profile. 
 
 Claude Code assumes a 200k context window for a model it does not recognize. Set `CLAUDE_CODE_MAX_CONTEXT_TOKENS` to the real window if the gateway's model accepts more.
 
-A working example is in [`examples/lunaroute`](https://github.com/majorcontext/moat/tree/main/examples/lunaroute).
+A working example is in [`examples/agent-claude-lunaroute`](https://github.com/majorcontext/moat/tree/main/examples/agent-claude-lunaroute).
 
 To override the endpoint for one project, set `claude.base_url` — it wins over the credential's recorded endpoint.
+
+Pi uses LunaRoute through a separate `lunaroute` grant, not this one. See [Running Pi](./16-pi.md#lunaroute).
 
 ## LLM response policy
 

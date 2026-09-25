@@ -17,8 +17,8 @@
 #        moat grant anthropic --base-url https://gw.lunaroute.com --profile lunaroute
 #
 # Run with:
-#   moat run --profile lunaroute examples/lunaroute
-#   moat run --profile lunaroute examples/lunaroute -- claude -p "explain this directory"
+#   moat run --profile lunaroute examples/agent-claude-lunaroute
+#   moat run --profile lunaroute examples/agent-claude-lunaroute -- claude -p "explain this directory"
 #
 #   3. Optional: put the model names with the profile instead of here, so every
 #      project using the gateway inherits them. In ~/.moat/config.yaml:

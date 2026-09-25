@@ -36,6 +36,7 @@ A **grant** is a credential made available to a run. Each grant type targets spe
 | `openai` | `api.openai.com` | `Authorization: Bearer` header |
 | `gemini` | `cloudcode-pa.googleapis.com` (OAuth) or `generativelanguage.googleapis.com` (API key) | `Bearer` token or `x-goog-api-key` header |
 | `graphite` | `api.graphite.com`, `*.graphite.com` | `Authorization: token` header |
+| `lunaroute` | `gw.lunaroute.com`, `mcp.lunaroute.com` | `Authorization: Bearer` header (`gw`); `LUNAROUTE-API-KEY` header (`mcp`) |
 | `meta` | `graph.facebook.com`, `graph.instagram.com` | `Authorization: Bearer` header |
 | `npm` | Per-registry (e.g., `registry.npmjs.org`) | `Authorization: Bearer` header |
 | `aws` | `*.amazonaws.com` | `credential_process` via AWS SDK |

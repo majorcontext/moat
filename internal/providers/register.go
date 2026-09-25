@@ -6,18 +6,19 @@ package providers
 
 import (
 	// Import all providers to trigger their init() registration.
-	_ "github.com/majorcontext/moat/internal/providers/aws"      // registers AWS provider
-	_ "github.com/majorcontext/moat/internal/providers/claude"   // registers Claude/Anthropic provider
-	_ "github.com/majorcontext/moat/internal/providers/codex"    // registers Codex/OpenAI provider
-	_ "github.com/majorcontext/moat/internal/providers/copilot"  // registers GitHub Copilot CLI provider
-	_ "github.com/majorcontext/moat/internal/providers/gemini"   // registers Gemini/Google provider
-	_ "github.com/majorcontext/moat/internal/providers/github"   // registers GitHub provider
-	_ "github.com/majorcontext/moat/internal/providers/graphite" // registers Graphite provider
-	_ "github.com/majorcontext/moat/internal/providers/meta"     // registers Meta provider
-	_ "github.com/majorcontext/moat/internal/providers/npm"      // registers npm provider
-	_ "github.com/majorcontext/moat/internal/providers/oauth"    // registers OAuth provider
-	_ "github.com/majorcontext/moat/internal/providers/openai"   // registers OpenAI API-key provider
-	_ "github.com/majorcontext/moat/internal/providers/pi"       // registers Pi provider
+	_ "github.com/majorcontext/moat/internal/providers/aws"       // registers AWS provider
+	_ "github.com/majorcontext/moat/internal/providers/claude"    // registers Claude/Anthropic provider
+	_ "github.com/majorcontext/moat/internal/providers/codex"     // registers Codex/OpenAI provider
+	_ "github.com/majorcontext/moat/internal/providers/copilot"   // registers GitHub Copilot CLI provider
+	_ "github.com/majorcontext/moat/internal/providers/gemini"    // registers Gemini/Google provider
+	_ "github.com/majorcontext/moat/internal/providers/github"    // registers GitHub provider
+	_ "github.com/majorcontext/moat/internal/providers/graphite"  // registers Graphite provider
+	_ "github.com/majorcontext/moat/internal/providers/lunaroute" // registers LunaRoute provider
+	_ "github.com/majorcontext/moat/internal/providers/meta"      // registers Meta provider
+	_ "github.com/majorcontext/moat/internal/providers/npm"       // registers npm provider
+	_ "github.com/majorcontext/moat/internal/providers/oauth"     // registers OAuth provider
+	_ "github.com/majorcontext/moat/internal/providers/openai"    // registers OpenAI API-key provider
+	_ "github.com/majorcontext/moat/internal/providers/pi"        // registers Pi provider
 
 	"github.com/majorcontext/moat/internal/providers/configprovider"
 )

@@ -1,0 +1,70 @@
+# Example: Pi against LunaRoute
+#
+# LunaRoute serves many models behind one key. Pi reaches it through
+# LunaRoute's own Pi extension (npm:@lunaroute/pi-extension), which registers a
+# "lunaroute" provider and loads the model list from the gateway. Moat keeps
+# the key on the host and injects it at the proxy; the container only holds a
+# placeholder login in ~/.pi/agent/auth.json.
+#
+# Traffic flow:
+#   Pi -> Moat proxy (Authorization: Bearer <key>)  -> gw.lunaroute.com
+#   Pi -> Moat proxy (LUNAROUTE-API-KEY: <key>)     -> mcp.lunaroute.com (web tools)
+#
+# Prerequisites:
+#   1. A LunaRoute API key (starts with lr_), from https://lunaroute.com
+#   2. Grant it:
+#        moat grant lunaroute
+#      (reads LUNAROUTE_API_KEY, or prompts)
+#
+# Run with:
+#   moat pi examples/agent-pi-lunaroute
+#   moat pi examples/agent-pi-lunaroute -p "fix the bug in main.py"
+#
+# `moat pi` installs the extension and loads LunaRoute's model list before Pi
+# starts, so the extension does not need to be listed. Pi uses the first model
+# in the list unless you pin one below; switch with /model inside Pi.
+#
+# Two things that look like they should work, but don't:
+#
+#   - `moat grant anthropic --base-url https://gw.lunaroute.com` is how Claude
+#     Code reaches LunaRoute. Pi's anthropic backend only talks to
+#     api.anthropic.com, where that key is never sent, so `moat pi` refuses to
+#     start on it. Use `moat grant lunaroute`; the same lr_ key works for both.
+#
+#   - `moat run` with a `pi` command. It skips the extension and the model
+#     list, so Pi fails with: Unknown provider "lunaroute". Use `moat pi`.
+
+name: pi-lunaroute
+
+dependencies:
+  - node@22
+  - pi-cli
+  - git
+
+grants:
+  - lunaroute
+
+pi:
+  provider: lunaroute
+  # Pin a model instead of taking the first one LunaRoute lists:
+  # model: glm-5.3
+
+  # Pi packages recommended by the LunaRoute team (September 2026). None are
+  # required; delete any you don't want. They are third-party code that runs
+  # inside Pi, so review them before use. Together they add a few seconds to
+  # startup, since each extension also loads during the model-list step.
+  #
+  # The LunaRoute extension is listed only to pin the version this example was
+  # tested with; `moat pi` adds it (unpinned) when it is absent. The team's
+  # list had 0.11.1.
+  packages:
+    - "npm:@lunaroute/pi-extension@0.12.1"
+    - "npm:@dietrichgebert/ponytail@4.10.0"
+    - "npm:@ff-labs/pi-fff@0.11.0"
+    - "npm:@narumitw/pi-btw@0.61.0"
+    - "npm:pi-context-view@0.6.0"
+    - "npm:pi-extmgr@0.3.0"
+    - "npm:pi-footer-display@0.2.1"
+    - "npm:pi-subagents@0.71.0"
+    - "npm:pi-token-speed@0.10.1"
+    - "git:github.com/obra/superpowers@v6.4.1"

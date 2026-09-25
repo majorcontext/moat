@@ -35,6 +35,7 @@ const (
 	ProviderNpm               Provider = "npm"
 	ProviderGraphite          Provider = "graphite"
 	ProviderMeta              Provider = "meta"
+	ProviderLunaRoute         Provider = "lunaroute"
 )
 
 // StoreKeyForGrant maps a user-facing grant name to the key its credential is
@@ -88,7 +89,7 @@ func RegisterDynamicProvider(p Provider) {
 
 // KnownProviders returns a list of all known credential providers.
 func KnownProviders() []Provider {
-	base := []Provider{ProviderGitHub, ProviderAWS, ProviderAnthropic, ProviderClaude, ProviderCodex, ProviderOpenAI, ProviderGemini, ProviderNpm, ProviderGraphite, ProviderMeta}
+	base := []Provider{ProviderGitHub, ProviderAWS, ProviderAnthropic, ProviderClaude, ProviderCodex, ProviderOpenAI, ProviderGemini, ProviderNpm, ProviderGraphite, ProviderMeta, ProviderLunaRoute}
 	known := make([]Provider, 0, len(base)+len(dynamicProviders))
 	known = append(known, base...)
 	return append(known, dynamicProviders...)
@@ -97,7 +98,7 @@ func KnownProviders() []Provider {
 // IsKnownProvider returns true if the provider is a known credential provider.
 func IsKnownProvider(p Provider) bool {
 	switch p {
-	case ProviderGitHub, ProviderAWS, ProviderAnthropic, ProviderClaude, ProviderCodex, ProviderOpenAI, ProviderGemini, ProviderNpm, ProviderGraphite, ProviderMeta:
+	case ProviderGitHub, ProviderAWS, ProviderAnthropic, ProviderClaude, ProviderCodex, ProviderOpenAI, ProviderGemini, ProviderNpm, ProviderGraphite, ProviderMeta, ProviderLunaRoute:
 		return true
 	default:
 		for _, dp := range dynamicProviders {

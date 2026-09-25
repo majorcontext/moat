@@ -2,7 +2,7 @@
 
 Run the [Pi coding agent](https://github.com/earendil-works/pi) in an isolated container with automatic API key injection.
 
-Pi has no credential of its own — it runs against your `anthropic` or `openai` grant. Only those two backends are supported today.
+Pi has no credential of its own — it runs against your `anthropic` or `openai` grant (this example), or a `lunaroute` grant (see [`agent-pi-lunaroute`](../agent-pi-lunaroute/)).
 
 ## Prerequisites
 
@@ -27,8 +27,8 @@ This validates the key and stores it encrypted. The key is never passed to the c
 
 ## Choosing a backend
 
-- If exactly **one** of the `anthropic` / `openai` grants is configured, Pi uses it automatically.
-- If **both** are configured, choose one with `--provider` or `pi.provider`:
+- If exactly **one** of the `anthropic` / `openai` / `lunaroute` grants is configured, Pi uses it automatically.
+- If **more than one** is configured, choose one with `--provider` or `pi.provider`:
 
   ```bash
   moat pi examples/agent-pi --provider openai
