@@ -1,9 +1,14 @@
 package pi
 
 import (
+	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/majorcontext/moat/internal/config"
+	"github.com/majorcontext/moat/internal/credential"
 )
 
 func TestDefaultDependenciesAndHosts(t *testing.T) {
@@ -50,11 +55,105 @@ func TestBuildPiCommand(t *testing.T) {
 	})
 }
 
-func TestNetworkHostsIncludeLunaRoute(t *testing.T) {
-	for _, h := range []string{"gw.lunaroute.com", "mcp.lunaroute.com"} {
-		if !slices.Contains(NetworkHosts(), h) {
-			t.Errorf("NetworkHosts missing %s: %v", h, NetworkHosts())
+func TestConfigurePiBackend(t *testing.T) {
+	hosts := func(cfg *config.Config) []string {
+		out := make([]string, 0, len(cfg.Network.Rules))
+		for _, r := range cfg.Network.Rules {
+			out = append(out, r.Host)
 		}
+		return out
+	}
+
+	t.Run("lunaroute", func(t *testing.T) {
+		cfg := &config.Config{}
+		configurePiBackend(cfg, "lunaroute")
+		if cfg.Pi.Provider != "lunaroute" {
+			t.Errorf("Pi.Provider = %q, want lunaroute", cfg.Pi.Provider)
+		}
+		if !HasLunaRouteExtension(cfg.Pi.Packages) {
+			t.Errorf("extension not added: %v", cfg.Pi.Packages)
+		}
+		for _, h := range []string{"gw.lunaroute.com", "mcp.lunaroute.com"} {
+			if !slices.Contains(hosts(cfg), h) {
+				t.Errorf("network rules missing %s: %v", h, hosts(cfg))
+			}
+		}
+	})
+
+	// Companion: other backends get neither the extension nor LunaRoute's
+	// hosts, so a strict run can't reach the gateway.
+	for _, backend := range []string{"anthropic", "openai"} {
+		t.Run(backend, func(t *testing.T) {
+			cfg := &config.Config{}
+			configurePiBackend(cfg, backend)
+			if cfg.Pi.Provider != backend {
+				t.Errorf("Pi.Provider = %q, want %s", cfg.Pi.Provider, backend)
+			}
+			if len(cfg.Pi.Packages) != 0 {
+				t.Errorf("packages = %v, want none", cfg.Pi.Packages)
+			}
+			for _, h := range hosts(cfg) {
+				if strings.Contains(h, "lunaroute") {
+					t.Errorf("LunaRoute host %s allowed for the %s backend", h, backend)
+				}
+			}
+		})
+	}
+	for _, h := range NetworkHosts() {
+		if strings.Contains(h, "lunaroute") {
+			t.Errorf("NetworkHosts (every backend) includes %s", h)
+		}
+	}
+}
+
+func TestPiGrantsFromStore(t *testing.T) {
+	store := func(creds map[credential.Provider]*credential.Credential, failOn credential.Provider) func(credential.Provider) (*credential.Credential, error) {
+		return func(p credential.Provider) (*credential.Credential, error) {
+			if p == failOn {
+				return nil, errors.New("cipher: message authentication failed")
+			}
+			if c, ok := creds[p]; ok {
+				return c, nil
+			}
+			return nil, fmt.Errorf("%w: %s", credential.ErrNotFound, p)
+		}
+	}
+
+	t.Run("none configured", func(t *testing.T) {
+		g, err := piGrantsFromStore(store(nil, ""))
+		if err != nil || g != (piGrants{}) {
+			t.Errorf("got %+v, %v; want empty grants, nil", g, err)
+		}
+	})
+	t.Run("all configured", func(t *testing.T) {
+		g, err := piGrantsFromStore(store(map[credential.Provider]*credential.Credential{
+			credential.ProviderAnthropic: {},
+			credential.ProviderOpenAI:    {},
+			credential.ProviderLunaRoute: {},
+		}, ""))
+		want := piGrants{Anthropic: true, OpenAI: true, LunaRoute: true}
+		if err != nil || g != want {
+			t.Errorf("got %+v, %v; want %+v", g, err, want)
+		}
+	})
+	t.Run("gateway anthropic key is not a plain anthropic key", func(t *testing.T) {
+		g, err := piGrantsFromStore(store(map[credential.Provider]*credential.Credential{
+			credential.ProviderAnthropic: {Metadata: map[string]string{credential.MetaKeyBaseURL: "https://gw.lunaroute.com"}},
+		}, ""))
+		want := piGrants{AnthropicGatewayURL: "https://gw.lunaroute.com"}
+		if err != nil || g != want {
+			t.Errorf("got %+v, %v; want %+v", g, err, want)
+		}
+	})
+	// A credential that exists but can't be read must not look "not
+	// configured" — that would tell the user to grant a key they already have.
+	for _, p := range []credential.Provider{credential.ProviderAnthropic, credential.ProviderOpenAI, credential.ProviderLunaRoute} {
+		t.Run("read failure on "+string(p), func(t *testing.T) {
+			_, err := piGrantsFromStore(store(nil, p))
+			if err == nil || !strings.Contains(err.Error(), "authentication failed") || !strings.Contains(err.Error(), string(p)) {
+				t.Errorf("err = %v, want the %s read failure", err, p)
+			}
+		})
 	}
 }
 
@@ -140,17 +239,20 @@ func TestHasLunaRouteExtension(t *testing.T) {
 	}
 }
 
-func TestCheckAnthropicGatewayKey(t *testing.T) {
-	if err := checkAnthropicGatewayKey("anthropic", "https://gw.lunaroute.com"); err == nil {
-		t.Error("gateway anthropic key with the anthropic backend: want error")
-	} else if !strings.Contains(err.Error(), "moat grant lunaroute") {
-		t.Errorf("error should point at moat grant lunaroute: %v", err)
+func TestAnthropicGatewayErr(t *testing.T) {
+	for _, u := range []string{"https://gw.lunaroute.com", "https://GW.LunaRoute.com/", "https://lunaroute.com"} {
+		if err := anthropicGatewayErr(u); !strings.Contains(err.Error(), "moat grant lunaroute\n  Then: moat pi --provider lunaroute") {
+			t.Errorf("%s: want LunaRoute advice, got:\n%v", u, err)
+		}
 	}
-	// Companions: a plain Anthropic key, and a gateway key on another backend.
-	if err := checkAnthropicGatewayKey("anthropic", ""); err != nil {
-		t.Errorf("plain anthropic key: unexpected error %v", err)
-	}
-	if err := checkAnthropicGatewayKey("lunaroute", "https://gw.lunaroute.com"); err != nil {
-		t.Errorf("lunaroute backend: unexpected error %v", err)
+	// Companion: any other gateway must not be sent to LunaRoute.
+	for _, u := range []string{"https://gateway.example.com", "https://lunaroute.com.evil.example", "https://notlunaroute.com", "::bad"} {
+		err := anthropicGatewayErr(u)
+		if strings.Contains(err.Error(), "--provider lunaroute") {
+			t.Errorf("%s: non-LunaRoute gateway got LunaRoute advice:\n%v", u, err)
+		}
+		if !strings.Contains(err.Error(), "without --base-url") {
+			t.Errorf("%s: want the generic backend list, got:\n%v", u, err)
+		}
 	}
 }

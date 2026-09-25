@@ -3,6 +3,7 @@ package lunaroute
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -191,5 +192,40 @@ func TestCreateCredentialAcceptsValidKey(t *testing.T) {
 	}
 	if cred.Metadata[provider.MetaKeyTokenSource] != SourceEnv {
 		t.Errorf("token source = %q, want %q", cred.Metadata[provider.MetaKeyTokenSource], SourceEnv)
+	}
+}
+
+// Each failure kind gets its own guidance: only a rejected key should send the
+// user off to get a new one.
+func TestValidationHint(t *testing.T) {
+	rejected := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusUnauthorized) }))
+	defer rejected.Close()
+	broken := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusBadGateway) }))
+	defer broken.Close()
+	down := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	downURL := down.URL
+	down.Close()
+
+	for _, tt := range []struct {
+		name, url, want string
+	}{
+		{"rejected key", rejected.URL, keyHint},
+		{"gateway error", broken.URL, unexpectedHint},
+		{"unreachable", downURL, unreachableHint},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			prev := modelsURL
+			modelsURL = tt.url + "/v1/models"
+			defer func() { modelsURL = prev }()
+
+			_, err := (&Provider{}).createCredential(context.Background(), "lr_abc", SourceManual)
+			var gerr *provider.GrantError
+			if !errors.As(err, &gerr) {
+				t.Fatalf("err = %v, want *provider.GrantError", err)
+			}
+			if gerr.Hint != tt.want {
+				t.Errorf("hint = %q, want %q", gerr.Hint, tt.want)
+			}
+		})
 	}
 }

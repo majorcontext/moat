@@ -17,9 +17,16 @@ var supportedBackends = []string{backendAnthropic, backendOpenAI, backendLunaRou
 
 // piGrants reports which backend grants are configured in the credential store.
 type piGrants struct {
+	// Anthropic is a plain Anthropic API key. A gateway key is not counted
+	// here: it is never sent to api.anthropic.com, so Pi can't use it.
 	Anthropic bool
 	OpenAI    bool
 	LunaRoute bool
+
+	// AnthropicGatewayURL is the endpoint recorded on an anthropic gateway key
+	// (`moat grant anthropic --base-url`), or "". It only shapes the error
+	// when that key is what the user was reaching for.
+	AnthropicGatewayURL string
 }
 
 func (g piGrants) has(backend string) bool {
@@ -53,6 +60,9 @@ func resolvePiProvider(providerOverride, modelOverride string, grants piGrants) 
 				providerOverride, strings.Join(supportedBackends, ", "))
 		}
 		if !grants.has(providerOverride) {
+			if providerOverride == backendAnthropic && grants.AnthropicGatewayURL != "" {
+				return "", "", anthropicGatewayErr(grants.AnthropicGatewayURL)
+			}
 			return "", "", missingGrantErr(providerOverride)
 		}
 		return providerOverride, modelOverride, nil
@@ -69,6 +79,9 @@ func resolvePiProvider(providerOverride, modelOverride string, grants piGrants) 
 	case 1:
 		return configured[0], modelOverride, nil
 	case 0:
+		if grants.AnthropicGatewayURL != "" {
+			return "", "", anthropicGatewayErr(grants.AnthropicGatewayURL)
+		}
 		var b strings.Builder
 		b.WriteString("pi requires a model backend, but no supported grant is configured:\n")
 		for _, name := range supportedBackends {

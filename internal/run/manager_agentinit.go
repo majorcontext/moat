@@ -157,12 +157,13 @@ func (m *Manager) setupGeminiStaging(ctx context.Context, geminiProvider provide
 // setupPiStaging builds the Pi container config (runtime context) via the
 // provider interface. Pi has no credential of its own; the backend credential
 // is injected by the backend's grant provider, so no credential is resolved or
-// passed here. grants only decides whether Pi may sync models at startup.
-func (m *Manager) setupPiStaging(ctx context.Context, piProvider provider.AgentProvider, containerHome, renderedContext string, grants []string) (*provider.ContainerConfig, error) {
+// passed here. piBackend (pi.provider, which `moat pi` sets to the resolved
+// backend) only decides whether Pi may sync models at startup.
+func (m *Manager) setupPiStaging(ctx context.Context, piProvider provider.AgentProvider, containerHome, renderedContext, piBackend string) (*provider.ContainerConfig, error) {
 	piConfig, prepErr := piProvider.PrepareContainer(ctx, provider.PrepareOpts{
 		ContainerHome:      containerHome,
 		RuntimeContext:     renderedContext,
-		PiModelCatalogSync: hasGrant(grants, string(credential.ProviderLunaRoute)),
+		PiModelCatalogSync: piBackend == string(credential.ProviderLunaRoute),
 	})
 	if prepErr != nil {
 		return nil, fmt.Errorf("preparing Pi container config: %w", prepErr)

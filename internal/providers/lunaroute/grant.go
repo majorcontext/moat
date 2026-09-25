@@ -2,6 +2,7 @@ package lunaroute
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -22,7 +23,19 @@ const (
 // point it at a local server.
 var modelsURL = "https://" + GatewayHost + "/v1/models"
 
-const keyHint = "Get a key from the LunaRoute dashboard (https://app.lunaroute.com) or with 'npx @lunaroute/cli login', then run 'moat grant lunaroute'"
+// Hints for each way validation can fail. Only a rejected key means the user
+// needs a new one; the others mean the key was never checked.
+const (
+	keyHint         = "Get a key from the LunaRoute dashboard (https://app.lunaroute.com) or with 'npx @lunaroute/cli login', then run 'moat grant lunaroute'"
+	unreachableHint = "Check that this machine can reach https://" + GatewayHost + " (proxy, VPN, or firewall), then run 'moat grant lunaroute' again"
+	unexpectedHint  = "LunaRoute could not check the key right now. Try 'moat grant lunaroute' again in a moment"
+)
+
+// Validation failure kinds, so createCredential can pick the right hint.
+var (
+	errKeyRejected      = errors.New("key rejected")
+	errGatewayUnreached = errors.New("gateway unreachable")
+)
 
 // Grant acquires a LunaRoute API key from LUNAROUTE_API_KEY or an interactive
 // prompt, and validates it against the gateway.
@@ -63,7 +76,7 @@ func (p *Provider) createCredential(ctx context.Context, key, source string) (*p
 
 	fmt.Println("Validating key...")
 	if err := validateKey(ctx, modelsURL, key); err != nil {
-		return nil, &provider.GrantError{Provider: "lunaroute", Cause: err, Hint: keyHint}
+		return nil, &provider.GrantError{Provider: "lunaroute", Cause: err, Hint: validationHint(err)}
 	}
 	fmt.Println("Key validated successfully")
 
@@ -73,6 +86,18 @@ func (p *Provider) createCredential(ctx context.Context, key, source string) (*p
 		CreatedAt: time.Now(),
 		Metadata:  map[string]string{provider.MetaKeyTokenSource: source},
 	}, nil
+}
+
+// validationHint picks the hint for a validateKey failure.
+func validationHint(err error) string {
+	switch {
+	case errors.Is(err, errKeyRejected):
+		return keyHint
+	case errors.Is(err, errGatewayUnreached):
+		return unreachableHint
+	default:
+		return unexpectedHint
+	}
 }
 
 // validateKey lists models with the key. A rejected key, an unexpected status,
@@ -91,7 +116,7 @@ func validateKey(ctx context.Context, url, key string) error {
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("could not reach LunaRoute to validate the key: %w", err)
+		return fmt.Errorf("%w: could not reach LunaRoute to validate the key: %w", errGatewayUnreached, err)
 	}
 	defer func() {
 		io.Copy(io.Discard, resp.Body) //nolint:errcheck // drain for connection reuse
@@ -102,7 +127,7 @@ func validateKey(ctx context.Context, url, key string) error {
 	case http.StatusOK:
 		return nil
 	case http.StatusUnauthorized, http.StatusForbidden:
-		return fmt.Errorf("LunaRoute rejected the key (HTTP %d) — it may be revoked or mistyped", resp.StatusCode)
+		return fmt.Errorf("%w: LunaRoute rejected the key (HTTP %d) — it may be revoked or mistyped", errKeyRejected, resp.StatusCode)
 	default:
 		return fmt.Errorf("unexpected status %d validating the key against %s", resp.StatusCode, url)
 	}

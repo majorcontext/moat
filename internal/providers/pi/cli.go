@@ -1,11 +1,15 @@
 package pi
 
 import (
+	"errors"
+	"fmt"
+
 	"github.com/spf13/cobra"
 
 	"github.com/majorcontext/moat/internal/cli"
 	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/credential"
+	"github.com/majorcontext/moat/internal/netrules"
 	"github.com/majorcontext/moat/internal/ui"
 )
 
@@ -26,14 +30,38 @@ var (
 )
 
 // NetworkHosts lists the LLM API hosts Pi may need under a strict network
-// policy. Every backend is allowed so a run works regardless of the resolved
-// provider.
+// policy. Both built-in backends are allowed so a run works regardless of the
+// resolved provider. LunaRoute's hosts are added only for that backend (see
+// configurePiBackend): it is a gateway to arbitrary models, so a strict run on
+// another backend should not be able to reach it.
 func NetworkHosts() []string {
 	return []string{
 		"api.anthropic.com",
 		"api.openai.com",
-		"gw.lunaroute.com",
-		"mcp.lunaroute.com",
+	}
+}
+
+// lunaRouteHosts are the hosts the lunaroute backend needs: inference and the
+// model catalog, and the extension's tools.
+var lunaRouteHosts = []string{"gw.lunaroute.com", "mcp.lunaroute.com"}
+
+// configurePiBackend records the resolved backend on cfg and applies what that
+// backend needs.
+//
+// cfg.Pi.Provider is written back so the run manager can tell which backend a
+// `moat pi` run uses (Pi's PrepareContainer receives no credential): the
+// lunaroute backend drops PI_OFFLINE, and only it warrants the
+// missing-extension warning.
+func configurePiBackend(cfg *config.Config, backend string) {
+	cfg.Pi.Provider = backend
+	if backend != backendLunaRoute {
+		return
+	}
+	// The lunaroute backend only has models once LunaRoute's extension is
+	// installed; bake it rather than make every user list it under pi.packages.
+	cfg.Pi.Packages = withLunaRouteExtension(cfg.Pi.Packages)
+	for _, host := range lunaRouteHosts {
+		cfg.Network.Rules = append(cfg.Network.Rules, netrules.NetworkRuleEntry{HostRules: netrules.HostRules{Host: host}})
 	}
 }
 
@@ -120,9 +148,7 @@ func runPi(cmd *cobra.Command, args []string) error {
 			// The lunaroute backend only has models once LunaRoute's
 			// extension is installed; bake it rather than make every user
 			// list it under pi.packages.
-			if piResolvedProvider == backendLunaRoute {
-				cfg.Pi.Packages = withLunaRouteExtension(cfg.Pi.Packages)
-			}
+			configurePiBackend(cfg, piResolvedProvider)
 
 			// Pi config (baseUrl/streamSimple/extensions) can redirect model
 			// traffic to arbitrary hosts, so only the network policy actually
@@ -151,19 +177,13 @@ func resolvePiPreflight(cfg *config.Config) error {
 		}
 	}
 
-	anthropicCred := loadCredential(credential.ProviderAnthropic)
-	prov, model, err := resolvePiProvider(providerOverride, modelOverride, piGrants{
-		Anthropic: anthropicCred != nil,
-		OpenAI:    loadCredential(credential.ProviderOpenAI) != nil,
-		LunaRoute: loadCredential(credential.ProviderLunaRoute) != nil,
-	})
+	grants, err := loadPiGrants()
 	if err != nil {
 		return err
 	}
-	if anthropicCred != nil {
-		if err := checkAnthropicGatewayKey(prov, anthropicCred.Metadata[credential.MetaKeyBaseURL]); err != nil {
-			return err
-		}
+	prov, model, err := resolvePiProvider(providerOverride, modelOverride, grants)
+	if err != nil {
+		return err
 	}
 	piResolvedProvider = prov
 	piResolvedModel = model
@@ -190,20 +210,57 @@ func buildPiCommand(promptFlag, initialPrompt string) []string {
 	return append([]string{"pi"}, c...)
 }
 
-// loadCredential returns the stored credential for prov, or nil if it is not
-// configured (or the store can't be read).
-func loadCredential(prov credential.Provider) *credential.Credential {
+// loadPiGrants opens the credential store once and reports which backend
+// grants it holds.
+func loadPiGrants() (piGrants, error) {
 	key, err := credential.DefaultEncryptionKey()
 	if err != nil {
-		return nil
+		return piGrants{}, fmt.Errorf("pi: reading the credential encryption key: %w", err)
 	}
 	store, err := credential.NewFileStore(credential.DefaultStoreDir(), key)
 	if err != nil {
-		return nil
+		return piGrants{}, fmt.Errorf("pi: opening the credential store: %w", err)
 	}
-	cred, err := store.Get(prov)
+	return piGrantsFromStore(store.Get)
+}
+
+// piGrantsFromStore classifies each backend credential. Only a missing
+// credential means "not configured": any other failure (unreadable file,
+// failed decryption) is returned as-is, so the user is not told to grant a key
+// they already have.
+func piGrantsFromStore(get func(credential.Provider) (*credential.Credential, error)) (piGrants, error) {
+	lookup := func(prov credential.Provider) (*credential.Credential, error) {
+		cred, err := get(prov)
+		if errors.Is(err, credential.ErrNotFound) {
+			return nil, nil
+		}
+		if err != nil {
+			return nil, fmt.Errorf("pi: reading the %s credential: %w", prov, err)
+		}
+		return cred, nil
+	}
+
+	var g piGrants
+	anthropic, err := lookup(credential.ProviderAnthropic)
 	if err != nil {
-		return nil
+		return piGrants{}, err
 	}
-	return cred
+	if anthropic != nil {
+		if baseURL := anthropic.Metadata[credential.MetaKeyBaseURL]; baseURL != "" {
+			g.AnthropicGatewayURL = baseURL
+		} else {
+			g.Anthropic = true
+		}
+	}
+	openai, err := lookup(credential.ProviderOpenAI)
+	if err != nil {
+		return piGrants{}, err
+	}
+	g.OpenAI = openai != nil
+	lunaroute, err := lookup(credential.ProviderLunaRoute)
+	if err != nil {
+		return piGrants{}, err
+	}
+	g.LunaRoute = lunaroute != nil
+	return g, nil
 }

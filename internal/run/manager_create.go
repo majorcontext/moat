@@ -1320,8 +1320,10 @@ region = %s
 	// (covered by TestProvider_ImpliedDependencies + TestImageSpecNeedsInit's
 	// GitIdentity case).
 	var piPackages []string
+	var piBackend string // pi.provider; `moat pi` sets it to the resolved backend
 	if opts.Config != nil {
 		piPackages = opts.Config.Pi.Packages
+		piBackend = opts.Config.Pi.Provider
 	}
 	// pi.packages is only baked when pi-cli is actually installed (the bake runs
 	// `pi install`). `moat pi` always adds pi-cli; a bare `moat run --agent pi`
@@ -1330,7 +1332,7 @@ region = %s
 		ui.Warn("pi.packages is set but pi-cli is not a dependency — the packages will not be installed. " +
 			"Add pi-cli to dependencies, or run with `moat pi`.")
 	}
-	if missingLunaRouteExtension(hasDep(installableDeps, "pi-cli"), opts.Grants, piPackages) {
+	if missingLunaRouteExtension(hasDep(installableDeps, "pi-cli"), opts.Grants, piBackend, piPackages) {
 		ui.Warn("the lunaroute grant is set but LunaRoute's Pi extension (" + piprov.LunaRouteExtensionPackage + ") is not installed, so Pi will have no LunaRoute models.\n" +
 			"  Run Pi with `moat pi` instead: it installs the extension and loads LunaRoute's model list before Pi starts")
 	}
@@ -1738,7 +1740,7 @@ region = %s
 			return nil, fmt.Errorf("pi provider not registered")
 		}
 
-		cfg, stageErr := m.setupPiStaging(ctx, piProvider, containerHome, renderedContext, opts.Grants)
+		cfg, stageErr := m.setupPiStaging(ctx, piProvider, containerHome, renderedContext, piBackend)
 		if stageErr != nil {
 			cleanupDaemonRun()
 			cleanupSSH(sshServer)

@@ -7,6 +7,7 @@ import (
 
 func TestResolvePiProvider(t *testing.T) {
 	all := piGrants{Anthropic: true, OpenAI: true, LunaRoute: true}
+	const gw = "https://gw.lunaroute.com"
 	tests := []struct {
 		name         string
 		provOverride string
@@ -33,6 +34,14 @@ func TestResolvePiProvider(t *testing.T) {
 		{name: "override lunaroute but not granted", provOverride: "lunaroute", grants: piGrants{Anthropic: true}, wantErr: "moat grant lunaroute"},
 		{name: "override picks from all three", provOverride: "lunaroute", grants: all, wantProvider: "lunaroute"},
 		{name: "unsupported backend fails hard", provOverride: "gemini", grants: piGrants{Anthropic: true}, wantErr: "anthropic, openai, lunaroute"},
+
+		// An anthropic gateway key (`moat grant anthropic --base-url`) is never
+		// sent to api.anthropic.com, so Pi's anthropic backend can't use it.
+		{name: "gateway key alone points at lunaroute", grants: piGrants{AnthropicGatewayURL: gw}, wantErr: "moat grant lunaroute"},
+		{name: "gateway key with explicit anthropic points at lunaroute", provOverride: "anthropic", grants: piGrants{AnthropicGatewayURL: gw}, wantErr: "moat grant lunaroute"},
+		{name: "gateway key does not make lunaroute ambiguous", grants: piGrants{AnthropicGatewayURL: gw, LunaRoute: true}, wantProvider: "lunaroute"},
+		{name: "gateway key does not make openai ambiguous", grants: piGrants{AnthropicGatewayURL: gw, OpenAI: true}, wantProvider: "openai"},
+		{name: "gateway key with explicit lunaroute", provOverride: "lunaroute", grants: piGrants{AnthropicGatewayURL: gw, LunaRoute: true}, wantProvider: "lunaroute"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

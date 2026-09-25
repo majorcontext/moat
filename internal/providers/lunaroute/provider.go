@@ -55,6 +55,11 @@ func (p *Provider) ContainerEnv(cred *provider.Credential) []string { return nil
 // and Pi does not resolve an "api_key" entry for it (measured on Pi 0.87.1 —
 // "No API key found"). expires is far in the future so Pi never tries to
 // refresh a login that has no refresh token.
+//
+// moat-init writes init files whole, so this replaces any auth.json already in
+// the container. That only matters if ~/.pi is kept across runs on a volume
+// and holds other logins made inside the container; Moat's own backends don't
+// store anything else there. Merging would need a new moat-init mode.
 func (p *Provider) ContainerInitFiles(cred *provider.Credential, containerHome string) map[string]string {
 	path := filepath.Join(containerHome, ".pi", "agent", "auth.json")
 	return map[string]string{
