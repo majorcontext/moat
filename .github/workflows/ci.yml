@@ -123,6 +123,12 @@ jobs:
 
       - name: Pre-build moat binary and test binary
         run: |
+          # Generate the embedded moat-init entrypoint binaries before
+          # compiling. Without this the committed fail-closed stubs are
+          # embedded, the new entrypoint acceptance tests skip, and every
+          # init-dependent e2e test runs a stub as PID 1.
+          go generate ./internal/initbin
+          go run ./internal/initbin/gate
           # Build the moat binary ahead of time so TestMain doesn't need to
           # compile it (which produces no output and can appear to hang).
           mkdir -p /tmp/moat-e2e-bin
