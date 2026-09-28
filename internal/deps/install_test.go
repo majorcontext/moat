@@ -230,17 +230,23 @@ func TestGetGoInstallCommands(t *testing.T) {
 		GoPackage: "golang.org/x/vuln/cmd/govulncheck",
 	}
 
-	cmds := getGoInstallCommands(spec)
-	if len(cmds.Commands) != 1 {
-		t.Fatalf("expected 1 command, got %d", len(cmds.Commands))
-	}
-
-	cmd := cmds.Commands[0]
-	if !strings.Contains(cmd, "GOBIN=/usr/local/bin") {
-		t.Error("missing GOBIN setting")
-	}
-	if !strings.Contains(cmd, "go install golang.org/x/vuln/cmd/govulncheck@latest") {
-		t.Error("incorrect go install command")
+	// Companion cases: empty version falls back to @latest, an explicit pin is
+	// emitted verbatim.
+	for _, tt := range []struct{ version, want string }{
+		{"", "go install golang.org/x/vuln/cmd/govulncheck@latest"},
+		{"v1.7.0", "go install golang.org/x/vuln/cmd/govulncheck@v1.7.0"},
+	} {
+		cmds := getGoInstallCommands(spec, tt.version)
+		if len(cmds.Commands) != 1 {
+			t.Fatalf("version %q: expected 1 command, got %d", tt.version, len(cmds.Commands))
+		}
+		cmd := cmds.Commands[0]
+		if !strings.Contains(cmd, "GOBIN=/usr/local/bin") {
+			t.Errorf("version %q: missing GOBIN setting", tt.version)
+		}
+		if !strings.Contains(cmd, tt.want) {
+			t.Errorf("version %q: command = %q, want it to contain %q", tt.version, cmd, tt.want)
+		}
 	}
 }
 

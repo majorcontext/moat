@@ -121,7 +121,11 @@ func GenerateInstallScript(deps []Dependency) (string, error) {
 		b.WriteString("# go install packages\n")
 		for _, dep := range goInstallPkgs {
 			spec, _ := GetSpec(dep.Name)
-			b.WriteString(getGoInstallCommands(spec).FormatForScript())
+			version := dep.Version
+			if version == "" {
+				version = spec.Default
+			}
+			b.WriteString(getGoInstallCommands(spec, version).FormatForScript())
 		}
 		b.WriteString("\n")
 	}

@@ -297,12 +297,22 @@ gopls:
   description: Go language server (LSP + MCP support)
   type: go-install
   go-package: golang.org/x/tools/gopls
+  # Pinned: gopls newest (v0.22.0+) requires a Go toolchain newer than the
+  # go dependency installs, and images build with GOTOOLCHAIN=local, so
+  # `@latest` fails the image build. Bump deliberately alongside the go pin;
+  # override per project with `gopls@<version>` in dependencies.
+  default: "v0.21.0"
   requires: [go]
 
 govulncheck:
   description: Go vulnerability scanner
   type: go-install
   go-package: golang.org/x/vuln/cmd/govulncheck
+  # Pinned: golang.org/x/vuln v1.8.0 requires Go >= 1.26.0, which the image Go
+  # (GOTOOLCHAIN=local) cannot satisfy, so `@latest` fails the image build.
+  # Bump deliberately alongside the go pin; override per project with
+  # `govulncheck@<version>` in dependencies.
+  default: "v1.7.0"
   requires: [go]
 
 goreleaser:

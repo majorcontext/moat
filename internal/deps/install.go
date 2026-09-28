@@ -13,7 +13,7 @@ import (
 // This prevents shell injection while allowing:
 // - Scoped npm packages: @org/pkg, @org/pkg@1.0.0
 // - Python packages with version: pkg==1.0.0, pkg>=1.0.0
-// - Go packages: golang.org/x/tools/gopls@latest
+// - Go packages: golang.org/x/tools/gopls@<version> (registry default or deps override)
 // - Cargo packages: pkg@1.0.0
 //
 // The version separator can be @ (npm/go/cargo) or comparison operators (pip: ==, >=, <=, ~=).
@@ -312,10 +312,19 @@ func buildArchDetectCommand(name string, amd64, arm64 archBinarySpec, atype arch
 
 // getGoInstallCommands returns install commands for go-install dependencies.
 // Uses GOBIN=/usr/local/bin to ensure binaries are in PATH.
-func getGoInstallCommands(spec DepSpec) InstallCommands {
+//
+// version is the resolved pin: an explicit `name@version` from moat.yaml, else
+// the registry default, else "latest". A pinned version is load-bearing: a
+// go-install tool that bumps its module's `go` directive past the image's Go
+// toolchain (GOTOOLCHAIN=local) fails the build, so the registry pins tools
+// whose `@latest` outruns the image Go.
+func getGoInstallCommands(spec DepSpec, version string) InstallCommands {
+	if version == "" {
+		version = "latest"
+	}
 	return InstallCommands{
 		Commands: []string{
-			fmt.Sprintf("GOBIN=/usr/local/bin go install %s@latest", spec.GoPackage),
+			fmt.Sprintf("GOBIN=/usr/local/bin go install %s@%s", spec.GoPackage, version),
 		},
 	}
 }

@@ -647,8 +647,10 @@ func TestGenerateDockerfileUvToolPackages(t *testing.T) {
 func TestGenerateDockerfileGoInstallPackages(t *testing.T) {
 	deps := []Dependency{
 		{Name: "go", Version: "1.22"},
-		{Name: "govulncheck"},
-		{Name: "mockgen"},
+		{Name: "govulncheck"},                       // registry default pin
+		{Name: "gopls"},                             // registry default pin
+		{Name: "mockgen"},                           // unpinned registry entry -> @latest
+		{Name: "protoc-gen-go", Version: "v1.36.0"}, // explicit override
 	}
 	result, err := GenerateDockerfile(deps, nil)
 	if err != nil {
@@ -660,12 +662,22 @@ func TestGenerateDockerfileGoInstallPackages(t *testing.T) {
 		t.Error("Dockerfile should have go install packages section")
 	}
 
-	// Should use GOBIN for installation
-	if !strings.Contains(result.Dockerfile, "GOBIN=/usr/local/bin go install golang.org/x/vuln/cmd/govulncheck@latest") {
-		t.Error("Dockerfile should install govulncheck with GOBIN")
+	// Registry pins must be honored: these tools' @latest outran the image Go.
+	for _, want := range []string{
+		"GOBIN=/usr/local/bin go install golang.org/x/vuln/cmd/govulncheck@v1.7.0",
+		"GOBIN=/usr/local/bin go install golang.org/x/tools/gopls@v0.21.0",
+	} {
+		if !strings.Contains(result.Dockerfile, want) {
+			t.Errorf("Dockerfile missing pinned go-install command %q\n%s", want, result.Dockerfile)
+		}
 	}
+	// An explicit name@version in dependencies wins over the registry pin.
+	if !strings.Contains(result.Dockerfile, "GOBIN=/usr/local/bin go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.0") {
+		t.Errorf("explicit go-install version not honored\n%s", result.Dockerfile)
+	}
+	// An unpinned registry entry still resolves to @latest.
 	if !strings.Contains(result.Dockerfile, "GOBIN=/usr/local/bin go install go.uber.org/mock/mockgen@latest") {
-		t.Error("Dockerfile should install mockgen with GOBIN")
+		t.Error("Dockerfile should install an unpinned go-install dep with @latest")
 	}
 }
 

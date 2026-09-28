@@ -462,7 +462,11 @@ func writeGoInstallPackages(b *strings.Builder, deps []Dependency) {
 	b.WriteString("# go install packages\n")
 	for _, dep := range deps {
 		spec, _ := GetSpec(dep.Name)
-		b.WriteString(getGoInstallCommands(spec).FormatForDockerfile())
+		version := dep.Version
+		if version == "" {
+			version = spec.Default
+		}
+		b.WriteString(getGoInstallCommands(spec, version).FormatForDockerfile())
 	}
 	b.WriteString("\n")
 }
