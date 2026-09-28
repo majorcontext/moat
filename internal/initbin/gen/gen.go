@@ -5,11 +5,16 @@
 //
 // Build flags: CGO_ENABLED=0 for a static binary that runs on any base image
 // (no dynamic loader / glibc dependency), -trimpath and -ldflags "-s -w" for
-// reproducible, minimal blobs. The checksums are committed alongside the
-// stubs; a unit test hashes the embedded bytes against checksums.txt to
-// catch a stale or hand-edited blob. Note the checksums pin the Go
-// toolchain: a toolchain upgrade changes the -trimpath output and fails the
-// checksum test until regenerated.
+// reproducible, minimal blobs, and -buildvcs=false so the bytes do not embed
+// the moat repo's git revision/dirty state. Without -buildvcs=false, building
+// the entrypoint from a dirty tree (which `go generate` itself creates by
+// rewriting embed/*) bakes vcs.modified=true into the blob; since
+// builder.initHashComponent hashes these bytes into the image cache key, two
+// builds of identical entrypoint source could then re-key cached images. The
+// checksums are committed alongside the stubs; a unit test hashes the embedded
+// bytes against checksums.txt to catch a stale or hand-edited blob. Note the
+// checksums still pin the Go toolchain: a toolchain upgrade changes the
+// -trimpath output and fails the checksum test until regenerated.
 package main
 
 import (
@@ -34,7 +39,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "initbin gen: removing %s: %v\n", out, err)
 			os.Exit(1)
 		}
-		cmd := exec.Command("go", "build", "-trimpath", "-ldflags", "-s -w", "-o", out, target)
+		cmd := exec.Command("go", "build", "-trimpath", "-buildvcs=false", "-ldflags", "-s -w", "-o", out, target)
 		cmd.Env = append(os.Environ(), "CGO_ENABLED=0", "GOOS=linux", "GOARCH="+arch)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
