@@ -1,6 +1,18 @@
-# Moat
+```text
+███╗   ███╗ ██████╗  █████╗ ████████╗
+████╗ ████║██╔═══██╗██╔══██╗╚══██╔══╝
+██╔████╔██║██║   ██║███████║   ██║   
+██║╚██╔╝██║██║   ██║██╔══██║   ██║   
+██║ ╚═╝ ██║╚██████╔╝██║  ██║   ██║   
+╚═╝     ╚═╝ ╚═════╝ ╚═╝  ╚═╝   ╚═╝   
+                                     
+```
 
-> **Early Release:** This project is in active development. APIs and configuration formats may change.
+Run agents in containers with credential injection and full observability.
+
+[![CI](https://github.com/majorcontext/moat/actions/workflows/ci.yml/badge.svg)](https://github.com/majorcontext/moat/actions/workflows/ci.yml) [![Go Reference](https://pkg.go.dev/badge/github.com/majorcontext/moat.svg)](https://pkg.go.dev/github.com/majorcontext/moat) [![Release](https://img.shields.io/github/v/release/majorcontext/moat)](https://github.com/majorcontext/moat/releases) [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
+> **Early release:** APIs and configuration may change.
 
 Run agents in containers with credential injection and full observability.
 
@@ -231,6 +243,10 @@ sudo cp ~/.moat/proxy/ca/ca.crt /usr/local/share/ca-certificates/moat.crt && sud
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, testing, and architecture details.
 
-## License
+---
 
-MIT
+Part of [Major Context](https://majorcontext.com).
+
+**Moat** · [Keep](https://github.com/majorcontext/keep) · [Gatekeeper](https://github.com/majorcontext/gatekeeper) · [Bailey](https://github.com/majorcontext/bailey) · [Harness](https://github.com/majorcontext/harness)
+
+MIT licensed. See [LICENSE](LICENSE).
