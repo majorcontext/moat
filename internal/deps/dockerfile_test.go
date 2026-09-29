@@ -2091,3 +2091,25 @@ func TestEntrypointBinaryArchSupport(t *testing.T) {
 		t.Error("init-needing build did not install the moat-init binary")
 	}
 }
+
+// TestGenerateDockerfileClaudeCodeInstallsZstd pins the compressed-download
+// optimization: the Claude Code installer only uses its ~84 MB .zst blob when
+// `zstd` is on PATH; otherwise it fetches the ~240 MB raw binary. The companion
+// asserts zstd is not dragged into unrelated images.
+func TestGenerateDockerfileClaudeCodeInstallsZstd(t *testing.T) {
+	withClaude, err := GenerateDockerfile([]Dependency{{Name: "claude-code"}}, nil)
+	if err != nil {
+		t.Fatalf("GenerateDockerfile(claude-code): %v", err)
+	}
+	if !strings.Contains(withClaude.Dockerfile, "zstd") {
+		t.Error("claude-code build must install zstd so the installer takes its compressed path")
+	}
+
+	without, err := GenerateDockerfile([]Dependency{{Name: "node", Version: "22"}}, nil)
+	if err != nil {
+		t.Fatalf("GenerateDockerfile(node): %v", err)
+	}
+	if strings.Contains(without.Dockerfile, "zstd") {
+		t.Error("zstd should only be added for claude-code")
+	}
+}

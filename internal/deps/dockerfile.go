@@ -4,6 +4,7 @@ package deps
 import (
 	"fmt"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 
@@ -142,6 +143,13 @@ func categorizeDeps(deps []Dependency) categorizedDeps {
 			c.uvToolPkgs = append(c.uvToolPkgs, dep)
 		case TypeCustom:
 			if spec.UserInstall {
+				// The Claude Code native installer downloads a ~240 MB binary
+				// uncompressed, or ~84 MB through its zstd path — but it only
+				// takes the zstd path when `zstd` is on PATH. Install it in the
+				// root apt layer so claude-code builds fetch the smaller blob.
+				if dep.Name == "claude-code" && !slices.Contains(c.aptPkgs, "zstd") {
+					c.aptPkgs = append(c.aptPkgs, "zstd")
+				}
 				c.userCustomDeps = append(c.userCustomDeps, dep)
 			} else {
 				c.customDeps = append(c.customDeps, dep)
