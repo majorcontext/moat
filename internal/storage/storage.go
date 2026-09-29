@@ -107,12 +107,40 @@ func (s *RunStore) Remove() error {
 }
 
 // SaveMetadata writes the metadata to metadata.json in the run directory.
+//
+// The write is atomic (unique temp file + rename): a crash or interrupt
+// mid-write used to leave a truncated/empty metadata.json, which LoadMetadata
+// then failed to parse ("unexpected end of JSON input") and the run was
+// silently dropped from listings. Readers do not take a lock, so the rename is
+// what makes a concurrent read see either the old file or the new one, never a
+// partial write.
 func (s *RunStore) SaveMetadata(m Metadata) error {
 	data, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(s.dir, "metadata.json"), data, 0o600)
+	path := filepath.Join(s.dir, "metadata.json")
+	tmp, err := os.CreateTemp(s.dir, ".metadata-*.json.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	cleanup := func() { _ = os.Remove(tmpName) }
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		cleanup()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		cleanup()
+		return err
+	}
+	// CreateTemp defaults to 0600, matching the previous metadata.json mode.
+	if err := os.Rename(tmpName, path); err != nil {
+		cleanup()
+		return err
+	}
+	return nil
 }
 
 // LoadMetadata reads the metadata from metadata.json in the run directory.
