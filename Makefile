@@ -1,7 +1,7 @@
 .PHONY: all help build build-cli generate-init restore-init-stubs test test-unit test-e2e test-bats lint fix clean coverage snapshot
 
-# Default target - running "make" shows help
-all: help
+# Default target - build the CLI binary
+all: build
 
 help: ## Show this help message
 	@echo "Available targets:"
@@ -9,6 +9,7 @@ help: ## Show this help message
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 	@echo ""
 	@echo "Examples:"
+	@echo "  make build                   # Build the CLI binary ./moat"
 	@echo "  make test                    # Run all tests"
 	@echo "  make test-unit               # Run only unit tests"
 	@echo "  make test-e2e                # Run only E2E tests"
@@ -24,14 +25,13 @@ help: ## Show this help message
 # compile time — reverting the embed files does not change what was built.
 INIT_STUBS := internal/initbin/embed internal/initbin/checksums.txt
 
-build: ## Build the project (regenerates the embedded moat-init binaries, then restores the committed stubs)
-	@go generate ./internal/initbin && go build ./...; rc=$$?; \
-	git checkout -- $(INIT_STUBS); exit $$rc
-
-build-cli: ## Build the CLI binary ./moat (regenerates the embedded moat-init binaries, then restores the committed stubs)
+build: ## Build the CLI binary ./moat (regenerates the embedded moat-init binaries, then restores the committed stubs)
 	@go generate ./internal/initbin && \
 	go build -ldflags "-s -w -X github.com/majorcontext/moat/cmd/moat/cli.version=dev -X github.com/majorcontext/moat/cmd/moat/cli.commit=$$(git rev-parse --short HEAD) -X github.com/majorcontext/moat/cmd/moat/cli.date=$$(date -u +%Y-%m-%dT%H:%M:%SZ)" -o moat ./cmd/moat; rc=$$?; \
 	git checkout -- $(INIT_STUBS); exit $$rc
+
+# Kept as an alias: docs, examples, and scripts predate 'build' producing the binary.
+build-cli: build ## Alias for 'build'
 
 generate-init: ## Cross-compile cmd/moat-init into internal/initbin/embed (over the committed stubs; run 'make restore-init-stubs' before committing)
 	go generate ./internal/initbin

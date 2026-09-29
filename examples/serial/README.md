@@ -12,7 +12,7 @@ for how approval and pinning work.
 Build and install the CLI, then plug the board in and find its USB ID:
 
 ```bash
-make build-cli && install -m 0755 moat /usr/local/bin/moat
+make build && install -m 0755 moat /usr/local/bin/moat
 moat proxy restart                            # the broker runs inside the proxy daemon
 moat device list
 ```
