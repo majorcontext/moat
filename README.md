@@ -1,15 +1,5 @@
 # Moat
 
-```text
-███╗   ███╗ ██████╗  █████╗ ████████╗
-████╗ ████║██╔═══██╗██╔══██╗╚══██╔══╝
-██╔████╔██║██║   ██║███████║   ██║   
-██║╚██╔╝██║██║   ██║██╔══██║   ██║   
-██║ ╚═╝ ██║╚██████╔╝██║  ██║   ██║   
-╚═╝     ╚═╝ ╚═════╝ ╚═╝  ╚═╝   ╚═╝   
-                                     
-```
-
 Run agents in containers with credential injection and full observability.
 
 [![CI](https://github.com/majorcontext/moat/actions/workflows/ci.yml/badge.svg)](https://github.com/majorcontext/moat/actions/workflows/ci.yml) [![Go Reference](https://pkg.go.dev/badge/github.com/majorcontext/moat.svg)](https://pkg.go.dev/github.com/majorcontext/moat) [![Release](https://img.shields.io/github/v/release/majorcontext/moat)](https://github.com/majorcontext/moat/releases) [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
