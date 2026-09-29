@@ -24,6 +24,6 @@ dependencies:
   - go-extras         # Meta: gofumpt, govulncheck, goreleaser
   - golangci-lint     # Linter aggregator
   - git               # Version control
-  - go:golang.org/x/tools/gopls  # Dynamic: language server
+  - go:golang.org/x/tools/gopls@0.21.0  # Dynamic: language server (v0.22.0+ needs Go 1.26; pin <= the go dep)
 
 command: ["sh", "/workspace/demo.sh"]
