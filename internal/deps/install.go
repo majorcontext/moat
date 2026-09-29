@@ -403,7 +403,11 @@ func getCustomCommands(name, version string) InstallCommands {
 		if version != "" {
 			bashArgs = " -s -- " + version
 		}
-		installCmd := "mkdir -p /tmp/moat-curlrc && " +
+		// The installer's own curl is silent, so a slow download produces no
+		// build output for minutes and reads as a hang. Print an explicit note
+		// first (zstd makes it ~85 MB; it is ~240 MB without zstd).
+		notice := `echo 'Downloading Claude Code CLI (~85 MB via zstd); this can take a few minutes on a slow connection...' && `
+		installCmd := notice + "mkdir -p /tmp/moat-curlrc && " +
 			`printf 'retry = 3\nretry-delay = 2\nconnect-timeout = 15\nspeed-limit = 1024\nspeed-time = 30\n' > /tmp/moat-curlrc/.curlrc && ` +
 			"curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 15 https://claude.ai/install.sh | " +
 			"CURL_HOME=/tmp/moat-curlrc bash" + bashArgs

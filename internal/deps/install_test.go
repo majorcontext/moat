@@ -329,6 +329,11 @@ func TestGetCustomCommandsClaudeCodeVersion(t *testing.T) {
 			if !strings.HasSuffix(cmd, tt.wantSuffix) {
 				t.Errorf("install command = %q, want it to end with %q", cmd, tt.wantSuffix)
 			}
+			// The installer's curl is silent; without a preceding notice a slow
+			// download produces no output for minutes and reads as a hang.
+			if !strings.Contains(cmd, "Downloading Claude Code") {
+				t.Errorf("install command missing the download notice: %q", cmd)
+			}
 			// The installer's own curl reads this curlrc via CURL_HOME; without
 			// the retry/speed guard a stalled download hangs the build forever.
 			for _, want := range []string{"--retry 3", "speed-time = 30", "speed-limit = 1024"} {
