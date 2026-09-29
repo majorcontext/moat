@@ -399,18 +399,22 @@ func getCustomCommands(name, version string) InstallCommands {
 		// failures and abort a transfer that stalls below 1 KB/s for 30s — and
 		// give the outer fetch explicit retry/connect-timeout flags. CURL_HOME is
 		// scoped to this RUN so nothing else in the image is affected.
-		bashArgs := ""
+		versionArg := ""
 		if version != "" {
-			bashArgs = " -s -- " + version
+			versionArg = " " + version
 		}
-		// The installer's own curl is silent, so a slow download produces no
-		// build output for minutes and reads as a hang. Print an explicit note
-		// first (zstd makes it ~85 MB; it is ~240 MB without zstd).
+		// Download the installer to a file rather than `curl | bash`: Docker's
+		// /bin/sh has no pipefail, so a failed outer fetch would be masked by
+		// bash's exit status and the RUN could report success while installing
+		// nothing. `&&` makes the outer fetch failure fail the build loudly;
+		// the installer's own `set -e` already makes the inner download failure
+		// loud. The notice is because the installer's curl is silent, so a slow
+		// download produces no output for minutes (zstd makes it ~85 MB).
 		notice := `echo 'Downloading Claude Code CLI (~85 MB via zstd); this can take a few minutes on a slow connection...' && `
 		installCmd := notice + "mkdir -p /tmp/moat-curlrc && " +
 			`printf 'retry = 3\nretry-delay = 2\nconnect-timeout = 15\nspeed-limit = 1024\nspeed-time = 30\n' > /tmp/moat-curlrc/.curlrc && ` +
-			"curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 15 https://claude.ai/install.sh | " +
-			"CURL_HOME=/tmp/moat-curlrc bash" + bashArgs
+			"curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 15 -o /tmp/moat-claude-install.sh https://claude.ai/install.sh && " +
+			"CURL_HOME=/tmp/moat-curlrc bash /tmp/moat-claude-install.sh" + versionArg
 		return InstallCommands{
 			Commands: []string{installCmd},
 			EnvVars: map[string]string{

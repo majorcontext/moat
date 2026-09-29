@@ -300,13 +300,13 @@ func TestGetCustomCommandsClaudeCodeVersion(t *testing.T) {
 		{
 			name:       "pinned version",
 			version:    "2.1.139",
-			wantSuffix: "CURL_HOME=/tmp/moat-curlrc bash -s -- 2.1.139",
+			wantSuffix: "CURL_HOME=/tmp/moat-curlrc bash /tmp/moat-claude-install.sh 2.1.139",
 			wantPATH:   "/home/moatuser/.claude/local/bin",
 		},
 		{
 			name:       "no version installs latest",
 			version:    "",
-			wantSuffix: "CURL_HOME=/tmp/moat-curlrc bash",
+			wantSuffix: "CURL_HOME=/tmp/moat-curlrc bash /tmp/moat-claude-install.sh",
 			wantPATH:   "/home/moatuser/.claude/local/bin",
 		},
 		{
@@ -314,7 +314,7 @@ func TestGetCustomCommandsClaudeCodeVersion(t *testing.T) {
 			// keep the "--" separator so a future refactor can't drop it.
 			name:       "symbolic target stable",
 			version:    "stable",
-			wantSuffix: "CURL_HOME=/tmp/moat-curlrc bash -s -- stable",
+			wantSuffix: "CURL_HOME=/tmp/moat-curlrc bash /tmp/moat-claude-install.sh stable",
 			wantPATH:   "/home/moatuser/.claude/local/bin",
 		},
 	}
@@ -328,6 +328,12 @@ func TestGetCustomCommandsClaudeCodeVersion(t *testing.T) {
 			cmd := cmds.Commands[0]
 			if !strings.HasSuffix(cmd, tt.wantSuffix) {
 				t.Errorf("install command = %q, want it to end with %q", cmd, tt.wantSuffix)
+			}
+			// Downloading to a file (not `curl | bash`) is what makes an outer
+			// fetch failure loud: the pipeline has no pipefail under Docker's
+			// /bin/sh, so `| bash` would mask it.
+			if !strings.Contains(cmd, "-o /tmp/moat-claude-install.sh") || strings.Contains(cmd, "| bash") || strings.Contains(cmd, "| CURL_HOME") {
+				t.Errorf("install command must download-then-run, not pipe to bash: %q", cmd)
 			}
 			// The installer's curl is silent; without a preceding notice a slow
 			// download produces no output for minutes and reads as a hang.
