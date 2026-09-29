@@ -192,6 +192,13 @@ func (m *Manager) Create(ctx context.Context, opts Options) (resRun *Run, retErr
 	if err := os.MkdirAll(runDir, 0o700); err != nil {
 		return nil, fmt.Errorf("creating run directory: %w", err)
 	}
+
+	// Surface the ID before any image build/network/container work, so a long
+	// or wedged create is still diagnosable (the build happens further down).
+	log.Info("allocated run", "id", r.ID, "name", r.Name)
+	if opts.OnRunIDAssigned != nil {
+		opts.OnRunIDAssigned(r.ID, r.Name)
+	}
 	// Remove the empty run dir if Create fails before successfully returning —
 	// otherwise we'd leak `~/.moat/runs/<id>/` directories with no metadata.json
 	// that don't surface in `moat list` or `moat clean`. Set to false on

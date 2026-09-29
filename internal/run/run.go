@@ -186,6 +186,12 @@ type Options struct {
 	Clipboard     bool           // Enable host clipboard bridging
 	// WorkspaceMode is the resolved workspace mode (bind|volume). Empty == bind.
 	WorkspaceMode config.WorkspaceMode
+
+	// OnRunIDAssigned, if set, is called as soon as the run ID is allocated —
+	// before image build and container work. Callers use it to surface the ID
+	// early, so a long or wedged create (e.g. a slow image build) can still be
+	// correlated with `moat list`/`moat logs`.
+	OnRunIDAssigned func(id, name string)
 }
 
 // generateID creates a unique run identifier.

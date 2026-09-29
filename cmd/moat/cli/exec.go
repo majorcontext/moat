@@ -304,6 +304,13 @@ func ExecuteRun(ctx context.Context, opts intcli.ExecOptions) (*run.Run, error) 
 		WorkspaceMode: wsMode,
 	}
 
+	// Print the run ID as soon as it is allocated, before the image build.
+	// Without this, a slow/wedged build shows only "Initializing..." and the
+	// run cannot be correlated with `moat list`/`moat logs` until it starts.
+	runOpts.OnRunIDAssigned = func(id, name string) {
+		fmt.Printf("%s %s (%s)\n", ui.Dim("Run"), id, name)
+	}
+
 	// Pre-flight: on an interactive terminal, offer to grant any missing
 	// credentials inline rather than failing. Whatever remains unresolved is
 	// still caught by manager.Create's validation below (today's behavior),
