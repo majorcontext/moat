@@ -97,7 +97,7 @@ func extraHostsPhase(ctx *Context) error {
 				sys.Sleep(200 * time.Millisecond)
 			}
 			if ip == "" {
-				fmt.Fprintf(ctx.Stderr, "Error: moat-init.sh could not resolve '%s' for /etc/hosts entry '%s'.\n", hostname, e.name)
+				fmt.Fprintf(ctx.Stderr, "Error: moat-init could not resolve '%s' for /etc/hosts entry '%s'.\n", hostname, e.name)
 				fmt.Fprintln(ctx.Stderr, "The container's DNS should answer this name. On Docker Desktop, verify that")
 				fmt.Fprintf(ctx.Stderr, "'getent hosts %s' works inside this container.\n", hostname)
 				return exitError{code: 1}
@@ -118,9 +118,9 @@ func extraHostsPhase(ctx *Context) error {
 		// (HOSTS-10) — typically the entrypoint is not root and lacks
 		// permission.
 		if err := sys.AppendFile("/etc/hosts", []byte(ip+" "+e.name+"\n")); err != nil {
-			fmt.Fprintf(ctx.Stderr, "Error: moat-init.sh cannot write %s to /etc/hosts (required for moat proxy resolution).\n", e.name)
+			fmt.Fprintf(ctx.Stderr, "Error: moat-init cannot write %s to /etc/hosts (required for moat proxy resolution).\n", e.name)
 			fmt.Fprintf(ctx.Stderr, "The container user (UID %d) lacks permission to modify /etc/hosts.\n", sys.Geteuid())
-			fmt.Fprintln(ctx.Stderr, "Rebuild the base image so moat-init.sh runs as root, or grant CAP_DAC_OVERRIDE.")
+			fmt.Fprintln(ctx.Stderr, "Rebuild the base image so moat-init runs as root, or grant CAP_DAC_OVERRIDE.")
 			return exitError{code: 1}
 		}
 	}

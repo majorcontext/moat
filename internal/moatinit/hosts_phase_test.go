@@ -120,7 +120,7 @@ func TestExtraHostsPhaseResolveFailureFailsClosed(t *testing.T) {
 		t.Fatalf("err = %v, want exitError{1}", err)
 	}
 	// HOSTS-08: exact three-line error.
-	want := "Error: moat-init.sh could not resolve 'nope.invalid' for /etc/hosts entry 'moat-proxy'.\n" +
+	want := "Error: moat-init could not resolve 'nope.invalid' for /etc/hosts entry 'moat-proxy'.\n" +
 		"The container's DNS should answer this name. On Docker Desktop, verify that\n" +
 		"'getent hosts nope.invalid' works inside this container.\n"
 	if stderr.String() != want {
@@ -148,9 +148,9 @@ func TestExtraHostsPhaseWriteFailureFailsClosed(t *testing.T) {
 		t.Fatalf("err = %v, want exitError{1}", err)
 	}
 	// HOSTS-10: exact three-line error, UID interpolated.
-	want := "Error: moat-init.sh cannot write moat-proxy to /etc/hosts (required for moat proxy resolution).\n" +
+	want := "Error: moat-init cannot write moat-proxy to /etc/hosts (required for moat proxy resolution).\n" +
 		"The container user (UID 1000) lacks permission to modify /etc/hosts.\n" +
-		"Rebuild the base image so moat-init.sh runs as root, or grant CAP_DAC_OVERRIDE.\n"
+		"Rebuild the base image so moat-init runs as root, or grant CAP_DAC_OVERRIDE.\n"
 	if stderr.String() != want {
 		t.Errorf("stderr = %q, want %q", stderr.String(), want)
 	}

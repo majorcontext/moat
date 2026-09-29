@@ -1,11 +1,11 @@
 == unresolvable extra host (exit 1) ==
-Error: moat-init.sh could not resolve 'nope.invalid' for /etc/hosts entry 'moat-proxy'.
+Error: moat-init could not resolve 'nope.invalid' for /etc/hosts entry 'moat-proxy'.
 The container's DNS should answer this name. On Docker Desktop, verify that
 'getent hosts nope.invalid' works inside this container.
 == unwritable /etc/hosts (exit 1) ==
-Error: moat-init.sh cannot write moat-proxy to /etc/hosts (required for moat proxy resolution).
+Error: moat-init cannot write moat-proxy to /etc/hosts (required for moat proxy resolution).
 The container user (UID 1000) lacks permission to modify /etc/hosts.
-Rebuild the base image so moat-init.sh runs as root, or grant CAP_DAC_OVERRIDE.
+Rebuild the base image so moat-init runs as root, or grant CAP_DAC_OVERRIDE.
 == docker mutex (exit 1) ==
 Error: MOAT_DOCKER_DIND and MOAT_DOCKER_GID are mutually exclusive
 Use MOAT_DOCKER_GID when mounting host's docker socket
