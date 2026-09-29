@@ -390,10 +390,23 @@ func getCustomCommands(name, version string) InstallCommands {
 		// The "--" terminates bash's own option processing so a version that
 		// happens to start with "-" (e.g. "-n") is passed to the script as a
 		// positional arg rather than interpreted as a bash flag.
-		installCmd := "curl -fsSL https://claude.ai/install.sh | bash"
+		//
+		// Resilience: the installer fetches a large native binary from
+		// downloads.claude.ai with plain `curl` and no timeout, so a stalled
+		// connection hangs the image build indefinitely (curl waits, bash waits
+		// on the pipe, and there is no build deadline). Seed a .curlrc that the
+		// installer's own curl calls pick up via CURL_HOME — retry transient
+		// failures and abort a transfer that stalls below 1 KB/s for 30s — and
+		// give the outer fetch explicit retry/connect-timeout flags. CURL_HOME is
+		// scoped to this RUN so nothing else in the image is affected.
+		bashArgs := ""
 		if version != "" {
-			installCmd = fmt.Sprintf("%s -s -- %s", installCmd, version)
+			bashArgs = " -s -- " + version
 		}
+		installCmd := "mkdir -p /tmp/moat-curlrc && " +
+			`printf 'retry = 3\nretry-delay = 2\nconnect-timeout = 15\nspeed-limit = 1024\nspeed-time = 30\n' > /tmp/moat-curlrc/.curlrc && ` +
+			"curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 15 https://claude.ai/install.sh | " +
+			"CURL_HOME=/tmp/moat-curlrc bash" + bashArgs
 		return InstallCommands{
 			Commands: []string{installCmd},
 			EnvVars: map[string]string{

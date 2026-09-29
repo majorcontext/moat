@@ -763,7 +763,7 @@ func TestGenerateDockerfileClaudeCodeNativeInstall(t *testing.T) {
 	}
 
 	// Should use native installer
-	if !strings.Contains(result.Dockerfile, "curl -fsSL https://claude.ai/install.sh | bash") {
+	if !strings.Contains(result.Dockerfile, "https://claude.ai/install.sh") {
 		t.Error("Dockerfile should use native Claude installer")
 	}
 

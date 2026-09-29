@@ -292,30 +292,30 @@ func TestGetCustomCommands(t *testing.T) {
 
 func TestGetCustomCommandsClaudeCodeVersion(t *testing.T) {
 	tests := []struct {
-		name     string
-		version  string
-		wantCmd  string
-		wantPATH string
+		name       string
+		version    string
+		wantSuffix string
+		wantPATH   string
 	}{
 		{
-			name:     "pinned version",
-			version:  "2.1.139",
-			wantCmd:  "curl -fsSL https://claude.ai/install.sh | bash -s -- 2.1.139",
-			wantPATH: "/home/moatuser/.claude/local/bin",
+			name:       "pinned version",
+			version:    "2.1.139",
+			wantSuffix: "CURL_HOME=/tmp/moat-curlrc bash -s -- 2.1.139",
+			wantPATH:   "/home/moatuser/.claude/local/bin",
 		},
 		{
-			name:     "no version installs latest",
-			version:  "",
-			wantCmd:  "curl -fsSL https://claude.ai/install.sh | bash",
-			wantPATH: "/home/moatuser/.claude/local/bin",
+			name:       "no version installs latest",
+			version:    "",
+			wantSuffix: "CURL_HOME=/tmp/moat-curlrc bash",
+			wantPATH:   "/home/moatuser/.claude/local/bin",
 		},
 		{
 			// Symbolic targets (stable|latest) are valid installer args and must
 			// keep the "--" separator so a future refactor can't drop it.
-			name:     "symbolic target stable",
-			version:  "stable",
-			wantCmd:  "curl -fsSL https://claude.ai/install.sh | bash -s -- stable",
-			wantPATH: "/home/moatuser/.claude/local/bin",
+			name:       "symbolic target stable",
+			version:    "stable",
+			wantSuffix: "CURL_HOME=/tmp/moat-curlrc bash -s -- stable",
+			wantPATH:   "/home/moatuser/.claude/local/bin",
 		},
 	}
 
@@ -325,8 +325,16 @@ func TestGetCustomCommandsClaudeCodeVersion(t *testing.T) {
 			if len(cmds.Commands) != 1 {
 				t.Fatalf("expected 1 command, got %d: %v", len(cmds.Commands), cmds.Commands)
 			}
-			if cmds.Commands[0] != tt.wantCmd {
-				t.Errorf("install command = %q, want %q", cmds.Commands[0], tt.wantCmd)
+			cmd := cmds.Commands[0]
+			if !strings.HasSuffix(cmd, tt.wantSuffix) {
+				t.Errorf("install command = %q, want it to end with %q", cmd, tt.wantSuffix)
+			}
+			// The installer's own curl reads this curlrc via CURL_HOME; without
+			// the retry/speed guard a stalled download hangs the build forever.
+			for _, want := range []string{"--retry 3", "speed-time = 30", "speed-limit = 1024"} {
+				if !strings.Contains(cmd, want) {
+					t.Errorf("install command missing resilience clause %q: %q", want, cmd)
+				}
 			}
 			if path := cmds.EnvVars["PATH"]; !strings.Contains(path, tt.wantPATH) {
 				t.Errorf("PATH = %q, want it to contain %q", path, tt.wantPATH)
