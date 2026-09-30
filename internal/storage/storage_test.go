@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -46,6 +47,73 @@ func TestRunStoreMetadata(t *testing.T) {
 	}
 	if loaded.Name != meta.Name {
 		t.Errorf("Name = %q, want %q", loaded.Name, meta.Name)
+	}
+}
+
+// TestSaveMetadataIsAtomic pins the temp-file+rename write: a save must never
+// leave a truncated/empty metadata.json that LoadMetadata cannot parse, even
+// while a concurrent reader is loading. The previous os.WriteFile truncates
+// first, so a reader racing a save could observe 0 bytes.
+func TestSaveMetadataIsAtomic(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := NewRunStore(dir, "run_atomic1")
+
+	// Seed a valid file so a racing reader always has something to read.
+	if err := s.SaveMetadata(Metadata{Name: "seed", State: "running"}); err != nil {
+		t.Fatalf("seed SaveMetadata: %v", err)
+	}
+
+	const iterations = 300
+	errCh := make(chan error, 4)
+	done := make(chan struct{})
+
+	// Readers: every read must parse (never empty/partial).
+	var wg sync.WaitGroup
+	for r := 0; r < 3; r++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-done:
+					return
+				default:
+				}
+				if _, err := s.LoadMetadata(); err != nil {
+					errCh <- fmt.Errorf("LoadMetadata during concurrent save: %w", err)
+					return
+				}
+			}
+		}()
+	}
+
+	for i := 0; i < iterations; i++ {
+		if err := s.SaveMetadata(Metadata{Name: fmt.Sprintf("run-%d", i), State: "running"}); err != nil {
+			t.Fatalf("SaveMetadata: %v", err)
+		}
+	}
+	close(done)
+	// Wait for the readers to exit so a late error can't slip past the check.
+	wg.Wait()
+
+	select {
+	case err := <-errCh:
+		t.Fatal(err)
+	default:
+	}
+
+	// The final file is complete, and no temp files are left behind.
+	if _, err := s.LoadMetadata(); err != nil {
+		t.Fatalf("final LoadMetadata: %v", err)
+	}
+	entries, err := os.ReadDir(s.Dir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".tmp") {
+			t.Errorf("leftover temp file after SaveMetadata: %s", e.Name())
+		}
 	}
 }
 
