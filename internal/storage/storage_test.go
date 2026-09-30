@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -67,8 +68,11 @@ func TestSaveMetadataIsAtomic(t *testing.T) {
 	done := make(chan struct{})
 
 	// Readers: every read must parse (never empty/partial).
+	var wg sync.WaitGroup
 	for r := 0; r < 3; r++ {
+		wg.Add(1)
 		go func() {
+			defer wg.Done()
 			for {
 				select {
 				case <-done:
@@ -89,6 +93,8 @@ func TestSaveMetadataIsAtomic(t *testing.T) {
 		}
 	}
 	close(done)
+	// Wait for the readers to exit so a late error can't slip past the check.
+	wg.Wait()
 
 	select {
 	case err := <-errCh:

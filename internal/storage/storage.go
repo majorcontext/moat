@@ -131,6 +131,15 @@ func (s *RunStore) SaveMetadata(m Metadata) error {
 		cleanup()
 		return err
 	}
+	// Sync before rename: rename is atomic against interrupts and crashes, but
+	// without an fsync a power loss or kernel panic could persist the rename
+	// before the data blocks, leaving the 0-byte metadata.json this fix is
+	// about. Matches internal/daemon/persist.go.
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		cleanup()
+		return err
+	}
 	if err := tmp.Close(); err != nil {
 		cleanup()
 		return err
