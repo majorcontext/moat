@@ -7,6 +7,7 @@ container:
   cpus: 16
 
 dependencies:
+  - pi-cli
   - go@1.25.6
   - go-extras
   - cli-essentials
@@ -14,7 +15,7 @@ dependencies:
   - gh
   - make
   - claude-code
-  - node@20
+  - node@22
   - python
   - bats
   - docker:dind
@@ -23,3 +24,16 @@ grants:
   - github
   - ssh:github.com
 
+pi:
+  provider: lunaroute
+  packages:
+    - "npm:@lunaroute/pi-extension@0.12.1"
+    - "npm:@dietrichgebert/ponytail@4.10.0"
+    - "npm:@ff-labs/pi-fff@0.11.0"
+    - "npm:@narumitw/pi-btw@0.61.0"
+    - "npm:pi-context-view@0.6.0"
+    - "npm:pi-extmgr@0.3.0"
+    - "npm:pi-footer-display@0.2.1"
+    - "npm:pi-subagents@0.71.0"
+    - "npm:pi-token-speed@0.10.1"
+    - "git:github.com/obra/superpowers@v6.4.1"
