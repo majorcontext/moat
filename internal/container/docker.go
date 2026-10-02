@@ -236,9 +236,9 @@ func volumeOwnershipPlan(cfg Config) (helperMounts []mount.Mount, cmd []string, 
 
 // volumeOwnershipHelperConfig builds the container config for the ownership helper.
 //
-// The chown command goes in Entrypoint, NOT Cmd. moat-built images set
-// ENTRYPOINT ["/usr/local/bin/moat-init"], which (running as root) drops to moatuser
-// via gosu before exec'ing its arguments — so a Cmd-only helper would run chown as
+// The chown command goes in Entrypoint, NOT Cmd. moat-built images set the
+// moat-init entrypoint, which (running as root) drops to moatuser via gosu
+// before exec'ing its arguments — so a Cmd-only helper would run chown as
 // moatuser (uid 5000), which lacks CAP_CHOWN, and fail with EPERM. Overriding
 // Entrypoint runs chown directly as the root container user. cfg.Image is the run
 // image (already pulled by CreateContainer's ensureImage) and has chown.
@@ -532,7 +532,8 @@ func (r *DockerRuntime) VolumeExport(ctx context.Context, name, hostDir string) 
 		// undetected: the destination tar extracts the partial stream cleanly and
 		// the pipeline reports success, yielding a silently truncated snapshot.
 		// Capture the source tar's status via a temp file and require both ends
-		// to be 0 - the same guard the populate path uses (see moat-init.sh).
+		// to be 0 - the same guard the populate path uses (see the moat-init
+		// entrypoint).
 		// chmod stays best-effort (see the doc comment above).
 		Cmd: []string{"sh", "-c", `( cd /vol && tar -cf - . ; echo $? > /tmp/moat-export-rc ) | ( cd /out && tar --no-same-owner -xf - )
 dst_rc=$?

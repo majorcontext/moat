@@ -3,9 +3,12 @@ package deps
 
 import (
 	"fmt"
+	"runtime"
+	"slices"
 	"sort"
 	"strings"
 
+	"github.com/majorcontext/moat/internal/initbin"
 	"github.com/majorcontext/moat/internal/providers/claude"
 	"github.com/majorcontext/moat/internal/providers/pi"
 )
@@ -26,7 +29,7 @@ type DockerfileResult struct {
 
 	// ContextFiles maps relative file paths to their contents.
 	// These files should be written to the build context directory
-	// alongside the Dockerfile (e.g., "moat-init.sh" → script content).
+	// alongside the Dockerfile (e.g., "moat-init" → entrypoint binary).
 	ContextFiles map[string][]byte
 }
 
@@ -140,6 +143,13 @@ func categorizeDeps(deps []Dependency) categorizedDeps {
 			c.uvToolPkgs = append(c.uvToolPkgs, dep)
 		case TypeCustom:
 			if spec.UserInstall {
+				// The Claude Code native installer downloads a ~240 MB binary
+				// uncompressed, or ~84 MB through its zstd path — but it only
+				// takes the zstd path when `zstd` is on PATH. Install it in the
+				// root apt layer so claude-code builds fetch the smaller blob.
+				if dep.Name == "claude-code" && !slices.Contains(c.aptPkgs, "zstd") {
+					c.aptPkgs = append(c.aptPkgs, "zstd")
+				}
 				c.userCustomDeps = append(c.userCustomDeps, dep)
 			} else {
 				c.customDeps = append(c.customDeps, dep)
@@ -269,7 +279,9 @@ func GenerateDockerfile(deps []Dependency, opts *ImageSpec) (*DockerfileResult, 
 	writeBuildHooks(&b, opts.Hooks)
 
 	// Finalize with entrypoint and user setup
-	writeEntrypoint(&b, opts, c.dockerMode, contextFiles)
+	if err := writeEntrypoint(&b, opts, c.dockerMode, contextFiles); err != nil {
+		return nil, err
+	}
 
 	return &DockerfileResult{
 		Dockerfile:   b.String(),
@@ -458,7 +470,11 @@ func writeGoInstallPackages(b *strings.Builder, deps []Dependency) {
 	b.WriteString("# go install packages\n")
 	for _, dep := range deps {
 		spec, _ := GetSpec(dep.Name)
-		b.WriteString(getGoInstallCommands(spec).FormatForDockerfile())
+		version := dep.Version
+		if version == "" {
+			version = spec.Default
+		}
+		b.WriteString(getGoInstallCommands(spec, version).FormatForDockerfile())
 	}
 	b.WriteString("\n")
 }
@@ -620,18 +636,45 @@ func formatHookCommand(cmd string) string {
 }
 
 // writeEntrypoint writes the entrypoint configuration and working directory.
-// When the init script is needed, it is added as a context file and COPYed
-// into the image. This avoids embedding a large base64 blob inline in a RUN
-// command, which triggers gRPC transport errors in Apple's container builder.
-func writeEntrypoint(b *strings.Builder, opts *ImageSpec, dockerMode DockerMode, contextFiles map[string][]byte) {
+// When the init entrypoint is needed, the compiled moat-init binary
+// (cmd/moat-init, embedded in internal/initbin) is added as a context file
+// and COPYed to /usr/local/bin/moat-init as the image ENTRYPOINT. Copying a
+// prebuilt binary rather than embedding a large base64 blob inline in a RUN
+// command avoids the gRPC transport errors Apple's container builder hits;
+// everything is materialized from bytes in the moat host binary and COPY'd
+// from the local build context — zero network at image build time.
+//
+// The binary is arch-matched: run images are always built for linux/amd64 or
+// linux/arm64 (see container.dockerBuildManager), so the runtime.GOARCH blob
+// from internal/initbin is the right one. A host whose GOARCH has no embedded
+// blob cannot produce a correct entrypoint, and building an image without one
+// would run the base image's command as root with none of the entrypoint's
+// setup — so this fails the build instead of emitting an entrypoint-less image.
+func writeEntrypoint(b *strings.Builder, opts *ImageSpec, dockerMode DockerMode, contextFiles map[string][]byte) error {
 	if opts.needsInit(dockerMode) {
-		contextFiles["moat-init.sh"] = []byte(MoatInitScript)
-		b.WriteString("# Moat initialization script (privilege drop + feature setup)\n")
-		b.WriteString("COPY moat-init.sh /usr/local/bin/moat-init\n")
+		goBin, err := entrypointBinary(runtime.GOARCH)
+		if err != nil {
+			return err
+		}
+		contextFiles["moat-init"] = goBin
+		b.WriteString("# Moat initialization entrypoint (privilege drop + feature setup)\n")
+		b.WriteString("COPY moat-init /usr/local/bin/moat-init\n")
 		b.WriteString("RUN chmod +x /usr/local/bin/moat-init\n")
 		b.WriteString("ENTRYPOINT [\"/usr/local/bin/moat-init\"]\n")
 	} else {
 		b.WriteString(fmt.Sprintf("# Run as non-root user\nUSER %s\n", containerUser))
 	}
 	b.WriteString(fmt.Sprintf("WORKDIR /home/%s\n", containerUser))
+	return nil
+}
+
+// entrypointBinary resolves the embedded moat-init blob for a GOARCH or fails
+// when none exists. Split out from writeEntrypoint so the unsupported-arch
+// branch is unit-testable without cross-compiling the host.
+func entrypointBinary(goarch string) ([]byte, error) {
+	goBin := initbin.BinaryFor(goarch)
+	if goBin == nil {
+		return nil, fmt.Errorf("no moat-init entrypoint binary embedded for GOARCH %s; run images are only built for linux/amd64 and linux/arm64", goarch)
+	}
+	return goBin, nil
 }

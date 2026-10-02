@@ -294,7 +294,7 @@ func TestGoInstallDependencies(t *testing.T) {
 	dockerfile := result.Dockerfile
 
 	// Should contain go install commands with GOBIN set for PATH access
-	if !strings.Contains(dockerfile, "GOBIN=/usr/local/bin go install golang.org/x/vuln/cmd/govulncheck@latest") {
+	if !strings.Contains(dockerfile, "GOBIN=/usr/local/bin go install golang.org/x/vuln/cmd/govulncheck@v1.7.0") {
 		t.Error("Dockerfile missing govulncheck go install with GOBIN")
 	}
 	if !strings.Contains(dockerfile, "GOBIN=/usr/local/bin go install go.uber.org/mock/mockgen@latest") {
@@ -307,7 +307,7 @@ func TestGoInstallDependencies(t *testing.T) {
 	}
 
 	// Script should also contain go install commands with GOBIN set
-	if !strings.Contains(script, "GOBIN=/usr/local/bin go install golang.org/x/vuln/cmd/govulncheck@latest") {
+	if !strings.Contains(script, "GOBIN=/usr/local/bin go install golang.org/x/vuln/cmd/govulncheck@v1.7.0") {
 		t.Error("Script missing govulncheck go install with GOBIN")
 	}
 	if !strings.Contains(script, "GOBIN=/usr/local/bin go install go.uber.org/mock/mockgen@latest") {

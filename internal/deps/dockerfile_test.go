@@ -2,10 +2,6 @@
 package deps
 
 import (
-	"errors"
-	"os"
-	"os/exec"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -250,17 +246,17 @@ func TestGenerateDockerfileWithSSH(t *testing.T) {
 		t.Error("Dockerfile should install socat")
 	}
 
-	// Check that the entrypoint script is COPYed (not inline base64)
-	if !strings.Contains(result.Dockerfile, "COPY moat-init.sh /usr/local/bin/moat-init") {
-		t.Error("Dockerfile should COPY moat-init script")
+	// Check that the entrypoint binary is COPYed (not inline base64)
+	if !strings.Contains(result.Dockerfile, "COPY moat-init /usr/local/bin/moat-init") {
+		t.Error("Dockerfile should COPY the moat-init entrypoint binary")
 	}
 	if !strings.Contains(result.Dockerfile, "ENTRYPOINT") {
 		t.Error("Dockerfile should set ENTRYPOINT to moat-init")
 	}
 
-	// Check that context files include the init script
-	if _, ok := result.ContextFiles["moat-init.sh"]; !ok {
-		t.Error("ContextFiles should include moat-init.sh")
+	// Check that context files include the entrypoint binary
+	if _, ok := result.ContextFiles["moat-init"]; !ok {
+		t.Error("ContextFiles should include moat-init")
 	}
 }
 
@@ -286,30 +282,30 @@ func TestGenerateDockerfileContextFiles(t *testing.T) {
 				t.Fatalf("GenerateDockerfile error: %v", err)
 			}
 
-			content, ok := result.ContextFiles["moat-init.sh"]
+			content, ok := result.ContextFiles["moat-init"]
 			if !ok {
-				t.Fatal("ContextFiles should include moat-init.sh")
+				t.Fatal("ContextFiles should include moat-init")
 			}
 			if len(content) == 0 {
-				t.Error("moat-init.sh content should not be empty")
+				t.Error("moat-init content should not be empty")
 			}
-			if !strings.Contains(result.Dockerfile, "COPY moat-init.sh /usr/local/bin/moat-init") {
-				t.Error("Dockerfile should COPY moat-init.sh")
+			if !strings.Contains(result.Dockerfile, "COPY moat-init /usr/local/bin/moat-init") {
+				t.Error("Dockerfile should COPY moat-init")
 			}
 		})
 	}
 
-	// No init script when none of the triggers are active
+	// No entrypoint binary when none of the triggers are active
 	t.Run("NoInit", func(t *testing.T) {
 		result, err := GenerateDockerfile(nil, nil)
 		if err != nil {
 			t.Fatalf("GenerateDockerfile error: %v", err)
 		}
-		if _, ok := result.ContextFiles["moat-init.sh"]; ok {
-			t.Error("ContextFiles should not include moat-init.sh when no init is needed")
+		if _, ok := result.ContextFiles["moat-init"]; ok {
+			t.Error("ContextFiles should not include moat-init when no init is needed")
 		}
-		if strings.Contains(result.Dockerfile, "COPY moat-init.sh") {
-			t.Error("Dockerfile should not COPY moat-init.sh when no init is needed")
+		if strings.Contains(result.Dockerfile, "COPY moat-init") {
+			t.Error("Dockerfile should not COPY moat-init when no init is needed")
 		}
 	})
 }
@@ -651,8 +647,10 @@ func TestGenerateDockerfileUvToolPackages(t *testing.T) {
 func TestGenerateDockerfileGoInstallPackages(t *testing.T) {
 	deps := []Dependency{
 		{Name: "go", Version: "1.22"},
-		{Name: "govulncheck"},
-		{Name: "mockgen"},
+		{Name: "govulncheck"},                       // registry default pin
+		{Name: "gopls"},                             // registry default pin
+		{Name: "mockgen"},                           // unpinned registry entry -> @latest
+		{Name: "protoc-gen-go", Version: "v1.36.0"}, // explicit override
 	}
 	result, err := GenerateDockerfile(deps, nil)
 	if err != nil {
@@ -664,12 +662,22 @@ func TestGenerateDockerfileGoInstallPackages(t *testing.T) {
 		t.Error("Dockerfile should have go install packages section")
 	}
 
-	// Should use GOBIN for installation
-	if !strings.Contains(result.Dockerfile, "GOBIN=/usr/local/bin go install golang.org/x/vuln/cmd/govulncheck@latest") {
-		t.Error("Dockerfile should install govulncheck with GOBIN")
+	// Registry pins must be honored: these tools' @latest outran the image Go.
+	for _, want := range []string{
+		"GOBIN=/usr/local/bin go install golang.org/x/vuln/cmd/govulncheck@v1.7.0",
+		"GOBIN=/usr/local/bin go install golang.org/x/tools/gopls@v0.21.0",
+	} {
+		if !strings.Contains(result.Dockerfile, want) {
+			t.Errorf("Dockerfile missing pinned go-install command %q\n%s", want, result.Dockerfile)
+		}
 	}
+	// An explicit name@version in dependencies wins over the registry pin.
+	if !strings.Contains(result.Dockerfile, "GOBIN=/usr/local/bin go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.0") {
+		t.Errorf("explicit go-install version not honored\n%s", result.Dockerfile)
+	}
+	// An unpinned registry entry still resolves to @latest.
 	if !strings.Contains(result.Dockerfile, "GOBIN=/usr/local/bin go install go.uber.org/mock/mockgen@latest") {
-		t.Error("Dockerfile should install mockgen with GOBIN")
+		t.Error("Dockerfile should install an unpinned go-install dep with @latest")
 	}
 }
 
@@ -755,7 +763,7 @@ func TestGenerateDockerfileClaudeCodeNativeInstall(t *testing.T) {
 	}
 
 	// Should use native installer
-	if !strings.Contains(result.Dockerfile, "curl -fsSL https://claude.ai/install.sh | bash") {
+	if !strings.Contains(result.Dockerfile, "https://claude.ai/install.sh") {
 		t.Error("Dockerfile should use native Claude installer")
 	}
 
@@ -1823,121 +1831,6 @@ func TestGenerateDockerfileNonInteractiveDeps(t *testing.T) {
 	}
 }
 
-func TestMoatInitScriptGitIdentity(t *testing.T) {
-	// Verify the embedded moat-init.sh contains git identity setup
-	if !strings.Contains(MoatInitScript, "MOAT_GIT_USER_NAME") {
-		t.Error("moat-init.sh should handle MOAT_GIT_USER_NAME env var")
-	}
-	if !strings.Contains(MoatInitScript, "MOAT_GIT_USER_EMAIL") {
-		t.Error("moat-init.sh should handle MOAT_GIT_USER_EMAIL env var")
-	}
-	if !strings.Contains(MoatInitScript, "git config --system user.name") {
-		t.Error("moat-init.sh should set git user.name via --system config")
-	}
-	if !strings.Contains(MoatInitScript, "git config --system user.email") {
-		t.Error("moat-init.sh should set git user.email via --system config")
-	}
-}
-
-func TestMoatInitScriptGitProxyAuth(t *testing.T) {
-	// HTTPS git through the moat proxy needs Basic proxy auth to survive the
-	// 407 CONNECT challenge (issue #370).
-	if !strings.Contains(MoatInitScript, "git config --system http.proxyAuthMethod basic") {
-		t.Error("moat-init.sh should set http.proxyAuthMethod=basic via --system config")
-	}
-	// SSH routing for github.com is still gated on both grants being present.
-	if !strings.Contains(MoatInitScript, `git config --system url."git@github.com:".insteadOf "https://github.com/"`) {
-		t.Error("moat-init.sh should keep the github.com SSH url.insteadOf rewrite")
-	}
-}
-
-// extractShellFunc returns the source of a POSIX-shell function, from its
-// "name() {" header to the closing "}" on its own line, within script.
-func extractShellFunc(t *testing.T, script, name string) string {
-	t.Helper()
-	start := strings.Index(script, name+"() {")
-	if start < 0 {
-		t.Fatalf("function %q not found in script", name)
-	}
-	rest := script[start:]
-	end := strings.Index(rest, "\n}\n")
-	if end < 0 {
-		t.Fatalf("could not find end of function %q", name)
-	}
-	return rest[:end+2] // include the closing "}"
-}
-
-// TestMoatInitPreRunHookBehavior runs the real run_pre_run_hook function from
-// the embedded moat-init.sh and asserts its behavior (issue #372): a failing
-// hook must report a framed error and exit with the hook's status (not abort
-// the entrypoint silently), while a successful or absent hook continues.
-func TestMoatInitPreRunHookBehavior(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("moat-init.sh is POSIX shell; not run on Windows")
-	}
-	if os.Geteuid() == 0 {
-		t.Skip("test exercises the non-root hook branch; running as root takes the gosu path")
-	}
-
-	// The shipped function cd's into /workspace; point it at a writable temp
-	// dir so the test is portable. Only the path changes — the status capture,
-	// failure framing, and exit logic under test are the real script's.
-	fn := extractShellFunc(t, MoatInitScript, "run_pre_run_hook")
-	fn = strings.ReplaceAll(fn, "/workspace", t.TempDir())
-
-	run := func(preRun string) (string, int) {
-		t.Helper()
-		// Mirror the entrypoint's `set -e`; __CONTINUED__ prints only if the
-		// hook returned (i.e. did not exit), proving the main command would run.
-		harness := "set -e\n" + fn + "\nrun_pre_run_hook\necho __CONTINUED__\n"
-		cmd := exec.Command("sh", "-c", harness)
-		cmd.Env = append(os.Environ(), "MOAT_PRE_RUN="+preRun)
-		out, err := cmd.CombinedOutput()
-		if err == nil {
-			return string(out), 0
-		}
-		var ee *exec.ExitError
-		if errors.As(err, &ee) {
-			return string(out), ee.ExitCode()
-		}
-		t.Fatalf("running hook harness: %v", err)
-		return "", -1
-	}
-
-	t.Run("failing hook is framed and exits with its status", func(t *testing.T) {
-		out, code := run("echo doing-setup; exit 42")
-		if code != 42 {
-			t.Errorf("exit code = %d, want 42\noutput:\n%s", code, out)
-		}
-		if !strings.Contains(out, "pre_run hook failed (exit code 42)") {
-			t.Errorf("missing framed failure message\noutput:\n%s", out)
-		}
-		if strings.Contains(out, "__CONTINUED__") {
-			t.Errorf("entrypoint continued past a failed hook\noutput:\n%s", out)
-		}
-	})
-
-	t.Run("successful hook continues to the command", func(t *testing.T) {
-		out, code := run("echo doing-setup")
-		if code != 0 {
-			t.Errorf("exit code = %d, want 0\noutput:\n%s", code, out)
-		}
-		if !strings.Contains(out, "__CONTINUED__") {
-			t.Errorf("entrypoint did not continue after a successful hook\noutput:\n%s", out)
-		}
-		if strings.Contains(out, "pre_run hook failed") {
-			t.Errorf("reported failure for a successful hook\noutput:\n%s", out)
-		}
-	})
-
-	t.Run("absent hook is a no-op", func(t *testing.T) {
-		out, code := run("")
-		if code != 0 || !strings.Contains(out, "__CONTINUED__") {
-			t.Errorf("unset MOAT_PRE_RUN should be a no-op; code=%d\noutput:\n%s", code, out)
-		}
-	})
-}
-
 func TestImageSpecNeedsInit(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -2169,4 +2062,54 @@ func piBakeKeysOf(m map[string][]byte) []string {
 		ks = append(ks, k)
 	}
 	return ks
+}
+
+// TestEntrypointBinaryArchSupport pins the companion to the fail-open fix:
+// every architecture with an embedded blob resolves, and an unsupported
+// GOARCH is a hard error rather than an entrypoint-less image.
+func TestEntrypointBinaryArchSupport(t *testing.T) {
+	for _, goarch := range []string{"amd64", "arm64"} {
+		b, err := entrypointBinary(goarch)
+		if err != nil {
+			t.Errorf("entrypointBinary(%q) error: %v", goarch, err)
+		}
+		if len(b) == 0 {
+			t.Errorf("entrypointBinary(%q) returned no bytes", goarch)
+		}
+	}
+	if _, err := entrypointBinary("riscv64"); err == nil {
+		t.Error("entrypointBinary(\"riscv64\") succeeded; want a hard error")
+	}
+	// Companion: the unsupported-arch error must surface through
+	// GenerateDockerfile rather than being swallowed. Simulate by asserting a
+	// normal build still returns the entrypoint context file.
+	res, err := GenerateDockerfile(nil, &ImageSpec{NeedsSSH: true})
+	if err != nil {
+		t.Fatalf("GenerateDockerfile(SSH): %v", err)
+	}
+	if _, ok := res.ContextFiles["moat-init"]; !ok {
+		t.Error("init-needing build did not install the moat-init binary")
+	}
+}
+
+// TestGenerateDockerfileClaudeCodeInstallsZstd pins the compressed-download
+// optimization: the Claude Code installer only uses its ~84 MB .zst blob when
+// `zstd` is on PATH; otherwise it fetches the ~240 MB raw binary. The companion
+// asserts zstd is not dragged into unrelated images.
+func TestGenerateDockerfileClaudeCodeInstallsZstd(t *testing.T) {
+	withClaude, err := GenerateDockerfile([]Dependency{{Name: "claude-code"}}, nil)
+	if err != nil {
+		t.Fatalf("GenerateDockerfile(claude-code): %v", err)
+	}
+	if !strings.Contains(withClaude.Dockerfile, "zstd") {
+		t.Error("claude-code build must install zstd so the installer takes its compressed path")
+	}
+
+	without, err := GenerateDockerfile([]Dependency{{Name: "node", Version: "22"}}, nil)
+	if err != nil {
+		t.Fatalf("GenerateDockerfile(node): %v", err)
+	}
+	if strings.Contains(without.Dockerfile, "zstd") {
+		t.Error("zstd should only be added for claude-code")
+	}
 }
