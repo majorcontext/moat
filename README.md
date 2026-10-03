@@ -86,7 +86,7 @@ $ moat trace --network
 ### Claude Code
 
 ```bash
-moat grant anthropic   # One-time: imports your Claude Code credentials
+moat grant claude      # One-time: imports your Claude Code login (or: moat grant anthropic for an API key)
 moat claude            # Interactive mode
 moat claude -p "fix the failing tests"  # Non-interactive
 ```
@@ -120,7 +120,7 @@ moat gemini            # Interactive mode
 ### Pi
 
 ```bash
-moat grant anthropic   # Or: moat grant openai — Pi runs on whichever you grant
+moat grant anthropic   # Or: moat grant openai / moat grant lunaroute — Pi runs on whichever you grant
 moat pi                # Interactive mode
 ```
 
@@ -168,9 +168,9 @@ See the [moat.yaml reference](docs/content/reference/02-moat-yaml.md) for all op
 | `moat gemini [workspace]` | Run Gemini CLI |
 | `moat pi [workspace]` | Run the Pi coding agent |
 | `moat run [path] [-- cmd]` | Run an agent |
-| `moat join <run> <agent>` | Run another agent in a running container |
+| `moat join [run] <agent>` | Run another agent in a running container |
 | `moat open [agent] [endpoint]` | Open an agent's endpoint in your browser |
-| `moat grant <provider>` | Store credentials (github, anthropic, openai, aws, ssh) |
+| `moat grant <provider>` | Store credentials (github, claude, anthropic, codex, openai, aws, ssh, …) |
 | `moat grant list` | List stored credentials |
 | `moat revoke <provider>` | Remove credentials |
 | `moat list` | List all runs |
@@ -181,6 +181,7 @@ See the [moat.yaml reference](docs/content/reference/02-moat-yaml.md) for all op
 | `moat stop [run-id]` | Stop a run |
 | `moat destroy [run-id]` | Remove a run and its artifacts |
 | `moat deps list/info` | Browse available dependencies |
+| `moat device list/forget/rename` | Manage approved serial devices |
 
 Common flags:
 

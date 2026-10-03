@@ -24,7 +24,7 @@
 - [Running Claude Code](./content/guides/01-claude-code.md) — Use Claude Code in isolated containers
 - [Running Codex](./content/guides/02-codex.md) — Use OpenAI Codex CLI in isolated containers
 - [Running Gemini](./content/guides/03-gemini.md) — Use Google Gemini CLI in isolated containers
-- [Running Pi](./content/guides/16-pi.md) — Use the Pi coding agent with an existing Anthropic or OpenAI grant
+- [Running Pi](./content/guides/16-pi.md) — Use the Pi coding agent with an existing Anthropic, OpenAI, or LunaRoute grant
 - [Running GitHub Copilot CLI](./content/guides/17-copilot.md) — Use Copilot CLI with the GitHub grant
 - [SSH Access](./content/guides/04-ssh.md) — Grant SSH access without exposing private keys
 - [Secrets Management](./content/guides/05-secrets.md) — Pull secrets from 1Password and AWS SSM
@@ -38,6 +38,7 @@
 - [Workspace Sharing](./content/guides/13-workspace-sharing.md) — Isolate platform-specific dependency directories with mount excludes
 - [Volume-Mode Workspaces](./content/guides/15-volume-workspaces.md) — Run against an isolated copy of the workspace in an ephemeral Docker volume
 - [Multi-Agent Sessions](./content/guides/14-multi-agent.md) — Run a second agent inside a running container with `moat join`
+- [Serial Devices](./content/guides/18-serial-devices.md) — Give an agent an approved USB serial device over RFC2217
 - [Recipes](./content/guides/13-recipes.md) — Complete `moat.yaml` examples for common project types
 
 ### Reference
