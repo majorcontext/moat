@@ -6,7 +6,11 @@ Moat is pre-1.0. The CLI interface and `moat.yaml` schema may change between min
 
 ## v0.8.0 — 2026-10-03
 
-Adds serial device access (`devices:`), multi-agent containers (`agents:`), Codex on a ChatGPT subscription (`moat grant codex`), Anthropic-compatible gateway keys (`moat grant anthropic --base-url`), and LunaRoute as a Pi backend. It also realigns the Codex integration with Codex CLI 0.146–0.154 and fixes `claude.base_url`, `moat join`, the routing proxy dropping running agents, and terminal handling under Codex. The container entrypoint is now a Go binary, so cached run images rebuild once. **Breaking:** `moat grant codex` now runs a ChatGPT login; use `moat grant openai` for an API key.
+Adds serial device access (`devices:`), multi-agent containers (`agents:`), Codex on a ChatGPT subscription (`moat grant codex`), Anthropic-compatible gateway keys (`moat grant anthropic --base-url`), and LunaRoute as a Pi backend.
+
+It also realigns the Codex integration with Codex CLI 0.146–0.154 and fixes `claude.base_url`, `moat join`, the routing proxy dropping running agents, and terminal handling under Codex. The container entrypoint is now a Go binary, so cached run images rebuild once.
+
+**Breaking:** `moat grant codex` now runs a ChatGPT login; use `moat grant openai` for an API key.
 
 ### Added
 

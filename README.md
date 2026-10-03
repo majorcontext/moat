@@ -170,7 +170,7 @@ See the [moat.yaml reference](docs/content/reference/02-moat-yaml.md) for all op
 | `moat run [path] [-- cmd]` | Run an agent |
 | `moat join [run] <agent>` | Run another agent in a running container |
 | `moat open [agent] [endpoint]` | Open an agent's endpoint in your browser |
-| `moat grant <provider>` | Store credentials (github, claude, anthropic, codex, openai, aws, ssh, …) |
+| `moat grant <provider>` | Store credentials (`moat grant providers` lists them all) |
 | `moat grant list` | List stored credentials |
 | `moat revoke <provider>` | Remove credentials |
 | `moat list` | List all runs |
