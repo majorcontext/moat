@@ -10,7 +10,7 @@ Adds serial device access (`devices:`), multi-agent containers (`agents:`), Code
 
 It also realigns the Codex integration with Codex CLI 0.146–0.154 and fixes `claude.base_url`, `moat join`, the routing proxy dropping running agents, and terminal handling under Codex. The container entrypoint is now a Go binary, so cached run images rebuild once.
 
-**Breaking:** `moat grant codex` now runs a ChatGPT login; use `moat grant openai` for an API key.
+**Breaking:** `moat grant codex` now runs a ChatGPT login (use `moat grant openai` for an API key), and `agents: [codex]` no longer implies the `openai` grant. See **Breaking** below for the full list and migration steps.
 
 ### Added
 
