@@ -4,7 +4,9 @@ Moat runs AI coding agents in isolated containers with credential injection, net
 
 Moat is pre-1.0. The CLI interface and `moat.yaml` schema may change between minor versions. Breaking changes are listed under **Breaking** headings below.
 
-## Unreleased
+## v0.8.1 — 2026-10-06
+
+Fixes `moat grant codex` and Codex subscription runs failing on any Codex CLI newer than 0.154. Codex releases newer than the verified range now produce a warning instead of an error, and the default `codex-cli` image version moves to 0.160.1, so cached Codex images rebuild once.
 
 ### Fixed
 
