@@ -91,13 +91,14 @@ codex-cli:
   # doctor`) rather than letting every image build pick up a new major.
   # Override per project with `codex-cli@<version>` in moat.yaml dependencies.
   #
-  # 0.154.0 matches what `npm i -g @openai/codex` installs today, so the host
-  # CLI that `moat grant codex` drives and the one in the container are the
-  # same version by default rather than two minors apart on an auth schema
-  # that moves. Verified on 0.154.0: `--strict-config doctor` loads both
-  # generated configs, and `login status` reports "Logged in using ChatGPT"
-  # from the synthetic auth file (also confirmed on 0.146.0).
-  default: "0.154.0"
+  # Keep this at the newest release verified for subscription auth, so the host
+  # CLI that `moat grant codex` drives and the one in the container are close
+  # by default. It must equal codex.LatestVerifiedCodexVersion
+  # (TestCodexRegistryDefaultIsLatestVerified). Verified on 0.146.0, 0.154.0,
+  # and every minor 0.155–0.160: `--strict-config doctor` loads both generated
+  # configs, and `login status` reports "Logged in using ChatGPT" from the
+  # synthetic auth file.
+  default: "0.160.1"
   requires: [node]
 
 copilot-cli:

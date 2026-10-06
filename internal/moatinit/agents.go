@@ -67,10 +67,23 @@ func codexSubscriptionGateRan(cfg *Config, sys Sys) bool {
 	return cfg.CodexSubscriptionAuth == "1" && cfg.CodexInit != "" && isDir(sys, cfg.CodexInit)
 }
 
-// codexSubscriptionVersionGate mirrors the shell's subscription-auth guard:
-// the synthetic auth.json is only known to work on Codex CLI 0.146.x–0.154.x,
-// so when the subscription grant is active the executable actually installed is
-// re-checked. Every other mode stages files any Codex version can read and must
+// Verified Codex CLI range for subscription auth. These duplicate
+// codex.MinVerifiedCodexMinor/MaxVerifiedCodexMinor/LatestVerifiedCodexVersion
+// rather than importing internal/providers/codex, whose dependency tree would
+// bloat the moat-init binary; TestCodexVersionRangeMatchesValidator keeps them
+// in step.
+const (
+	minVerifiedCodexMinor      = 146
+	maxVerifiedCodexMinor      = 160
+	latestVerifiedCodexVersion = "0.160.1"
+)
+
+// codexSubscriptionVersionGate re-checks the Codex CLI actually installed when
+// the subscription grant is active. An unreadable version, or one older than
+// the verified range, is fatal. A newer one only warns: Codex ships a minor
+// release every few days, and an auth schema change fails loudly (Codex
+// rejects a synthetic auth.json it does not understand) rather than leaking
+// anything. Every other mode stages files any Codex version can read and must
 // not be blocked.
 func codexSubscriptionVersionGate(ctx *Context) error {
 	if !codexSubscriptionGateRan(ctx.Cfg, ctx.Sys) {
@@ -84,15 +97,34 @@ func codexSubscriptionVersionGate(ctx *Context) error {
 	var out strings.Builder
 	_, _ = sys.Run(Cmd{Argv: []string{"codex", "--version"}, Stdout: &out})
 	version := secondField(out.String())
-	if !supportedCodexVersion(version) {
+	minor, ok := codexMinor(version)
+	if !ok || minor < minVerifiedCodexMinor {
 		v := version
 		if v == "" {
 			v = "unknown"
 		}
-		fmt.Fprintf(ctx.Stderr, "Moat: unsupported Codex CLI version %s for subscription auth (supported: 0.146.x through 0.154.x); pin codex-cli@0.154.0 in moat.yaml dependencies or use 'moat grant openai'\n", v)
+		fmt.Fprintf(ctx.Stderr, "Moat: unsupported Codex CLI version %s for subscription auth (supported: 0.%d.x or newer); pin codex-cli@%s in moat.yaml dependencies or use 'moat grant openai'\n", v, minVerifiedCodexMinor, latestVerifiedCodexVersion)
 		return exitError{code: 1}
 	}
+	if minor > maxVerifiedCodexMinor {
+		fmt.Fprintf(ctx.Stderr, "Moat: Codex CLI %s is newer than the versions Moat has verified for subscription auth (0.%d.x through 0.%d.x); continuing. If Codex reports it is not logged in, pin codex-cli@%s in moat.yaml dependencies\n", version, minVerifiedCodexMinor, maxVerifiedCodexMinor, latestVerifiedCodexVersion)
+	}
 	return nil
+}
+
+// codexMinor returns N for a "0.N.<patch>" version. Any other shape — empty,
+// "unknown", a 1.x release — is reported as unreadable, so a major-version
+// jump fails closed in the container instead of being silently accepted.
+func codexMinor(v string) (int, bool) {
+	parts := strings.SplitN(v, ".", 3)
+	if len(parts) != 3 || parts[0] != "0" || parts[2] == "" {
+		return 0, false
+	}
+	minor, err := strconv.Atoi(parts[1])
+	if err != nil || minor < 0 {
+		return 0, false
+	}
+	return minor, true
 }
 
 // secondField mirrors `awk '{print $2}'` on the version line.
@@ -102,16 +134,6 @@ func secondField(s string) string {
 		return ""
 	}
 	return fields[1]
-}
-
-// supportedCodexVersion mirrors the shell case arms 0.146.* .. 0.154.*.
-func supportedCodexVersion(v string) bool {
-	for minor := 146; minor <= 154; minor++ {
-		if strings.HasPrefix(v, "0."+strconv.Itoa(minor)+".") {
-			return true
-		}
-	}
-	return false
 }
 
 // geminiStagingPhase mirrors the Gemini CLI setup block. Note settings.json

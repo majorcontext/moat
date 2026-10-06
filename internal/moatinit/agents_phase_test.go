@@ -3,7 +3,6 @@ package moatinit
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -297,18 +296,34 @@ func TestCodexStagingOpenAIEnvFile(t *testing.T) {
 }
 
 func TestCodexSubscriptionVersionGate(t *testing.T) {
+	const newerWarning = "Moat: Codex CLI 0.161.0 is newer than the versions Moat has verified for subscription auth (0.146.x through 0.160.x); continuing. If Codex reports it is not logged in, pin codex-cli@0.160.1 in moat.yaml dependencies\n"
 	cases := []struct {
-		name    string
-		version string
-		missing bool
-		wantErr bool
+		name       string
+		version    string
+		missing    bool
+		wantErr    bool
+		wantStderr string
 	}{
 		{name: "supported floor", version: "codex-cli 0.146.0"},
-		{name: "supported ceiling", version: "codex-cli 0.154.0"},
-		{name: "unsupported high", version: "codex-cli 0.155.0", wantErr: true},
-		{name: "unsupported low", version: "codex-cli 0.145.9", wantErr: true},
-		{name: "unknown output", version: "", wantErr: true},
-		{name: "binary missing", missing: true, wantErr: true},
+		{name: "previous ceiling", version: "codex-cli 0.155.1"},
+		{name: "verified ceiling", version: "codex-cli 0.160.1"},
+		{name: "newer than verified warns", version: "codex-cli 0.161.0", wantStderr: newerWarning},
+		{
+			name: "unsupported low", version: "codex-cli 0.145.9", wantErr: true,
+			wantStderr: "Moat: unsupported Codex CLI version 0.145.9 for subscription auth (supported: 0.146.x or newer); pin codex-cli@0.160.1 in moat.yaml dependencies or use 'moat grant openai'\n",
+		},
+		{
+			name: "new major", version: "codex-cli 1.0.0", wantErr: true,
+			wantStderr: "Moat: unsupported Codex CLI version 1.0.0 for subscription auth (supported: 0.146.x or newer); pin codex-cli@0.160.1 in moat.yaml dependencies or use 'moat grant openai'\n",
+		},
+		{
+			name: "unknown output", version: "", wantErr: true,
+			wantStderr: "Moat: unsupported Codex CLI version unknown for subscription auth (supported: 0.146.x or newer); pin codex-cli@0.160.1 in moat.yaml dependencies or use 'moat grant openai'\n",
+		},
+		{
+			name: "binary missing", missing: true, wantErr: true,
+			wantStderr: "Moat: the codex grant needs the codex-cli dependency; add 'codex-cli' to dependencies in moat.yaml\n",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -331,27 +346,15 @@ func TestCodexSubscriptionVersionGate(t *testing.T) {
 				Home:                  "/root",
 			})
 			err := codexStagingPhase(ctx)
+			if stderr.String() != tc.wantStderr {
+				t.Errorf("stderr = %q, want %q", stderr.String(), tc.wantStderr)
+			}
 			if tc.wantErr {
 				if exit, ok := err.(exitError); !ok || exit.code != 1 {
 					t.Fatalf("err = %v, want exitError{1}", err)
 				}
-				if tc.missing {
-					want := "Moat: the codex grant needs the codex-cli dependency; add 'codex-cli' to dependencies in moat.yaml\n"
-					if stderr.String() != want {
-						t.Errorf("missing-binary message = %q, want %q", stderr.String(), want)
-					}
-					return
-				}
-				parsed := ""
-				if f := strings.Fields(tc.version); len(f) >= 2 {
-					parsed = f[1]
-				}
-				want := "Moat: unsupported Codex CLI version " + parsed + " for subscription auth (supported: 0.146.x through 0.154.x); pin codex-cli@0.154.0 in moat.yaml dependencies or use 'moat grant openai'\n"
-				if parsed == "" {
-					want = "Moat: unsupported Codex CLI version unknown for subscription auth (supported: 0.146.x through 0.154.x); pin codex-cli@0.154.0 in moat.yaml dependencies or use 'moat grant openai'\n"
-				}
-				if stderr.String() != want {
-					t.Errorf("unsupported-version message = %q, want %q", stderr.String(), want)
+				if exists(ts, "/home/moatuser/.codex/config.toml") {
+					t.Error("rejected version still staged config.toml")
 				}
 				return
 			}
@@ -359,7 +362,7 @@ func TestCodexSubscriptionVersionGate(t *testing.T) {
 				t.Fatalf("version %q rejected: %v", tc.version, err)
 			}
 			if !exists(ts, "/home/moatuser/.codex/config.toml") {
-				t.Error("supported version did not stage config.toml")
+				t.Error("accepted version did not stage config.toml")
 			}
 		})
 	}

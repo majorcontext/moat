@@ -43,28 +43,52 @@ func TestCodexDefaultDependencyPassesTheSubscriptionVersionGate(t *testing.T) {
 	}
 }
 
-// Companion: a project that pins a version outside the verified range must
-// still be rejected, or the gate is not doing anything.
+// Companion: a project that pins a version the adapter is known not to work
+// with must still be rejected, or the gate is not doing anything.
 func TestCodexPinnedUnsupportedVersionIsRejected(t *testing.T) {
-	parsed, err := deps.ParseAll([]string{"codex-cli@0.160.0"})
+	for _, pin := range []string{"codex-cli@0.145.0", "codex-cli@1.0.0"} {
+		parsed, err := deps.ParseAll([]string{pin})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := codexprov.ValidateVersion(effectiveCodexVersion(parsed[0])); err == nil {
+			t.Errorf("%s should be rejected for subscription auth", pin)
+		}
+	}
+}
+
+// A pin newer than the verified range is accepted with a warning rather than
+// failing the run: Codex releases faster than Moat re-verifies.
+func TestCodexPinnedNewerVersionWarns(t *testing.T) {
+	parsed, err := deps.ParseAll([]string{"codex-cli@0.999.0"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := codexprov.ValidateVersion(effectiveCodexVersion(parsed[0])); err == nil {
-		t.Fatal("codex-cli@0.160.0 should be rejected for subscription auth")
+	version := effectiveCodexVersion(parsed[0])
+	if err := codexprov.ValidateVersion(version); err != nil {
+		t.Fatalf("codex-cli@0.999.0 rejected: %v", err)
+	}
+	if codexprov.UnverifiedVersionWarning(version) == "" {
+		t.Error("codex-cli@0.999.0 accepted silently, want an unverified-version warning")
 	}
 }
 
 // The registry default is what GenerateDockerfile installs for an unpinned dep,
-// so the adapter's supported range has to include it. If someone bumps the
-// registry past the verified range this fails instead of shipping a broken run.
-func TestCodexRegistryDefaultIsWithinSupportedRange(t *testing.T) {
+// so it must be the latest verified release: inside the range, and producing
+// no warning on every default run.
+func TestCodexRegistryDefaultIsLatestVerified(t *testing.T) {
 	spec, ok := deps.GetSpec("codex-cli")
 	if !ok {
 		t.Fatal("codex-cli missing from the dependency registry")
 	}
+	if spec.Default != codexprov.LatestVerifiedCodexVersion {
+		t.Fatalf("registry default %q != codex.LatestVerifiedCodexVersion %q; re-verify and bump both together", spec.Default, codexprov.LatestVerifiedCodexVersion)
+	}
 	if err := codexprov.ValidateVersion(spec.Default); err != nil {
-		t.Fatalf("registry default %q is outside the supported adapter range: %v", spec.Default, err)
+		t.Fatalf("registry default %q is rejected by the adapter: %v", spec.Default, err)
+	}
+	if w := codexprov.UnverifiedVersionWarning(spec.Default); w != "" {
+		t.Fatalf("registry default %q warns: %s", spec.Default, w)
 	}
 }
 

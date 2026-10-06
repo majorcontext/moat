@@ -4,7 +4,7 @@ extra-hosts: skip malformed entry "bad:"
 ssh-agent-bridge: start socat /run/moat/ssh/agent.sock (0660) <-> TCP:192.168.65.2:5522 as a long-lived child
 claude-staging: copy allowlisted files from /mnt/claude-init into /home/moatuser/.claude (credential files forced 0600)
 codex-staging: copy allowlisted files from /mnt/codex-init into /home/moatuser/.codex (credential files forced 0600)
-codex-staging: verify the installed codex --version is 0.146.x–0.154.x for subscription auth — fatal otherwise
+codex-staging: verify the installed codex --version for subscription auth — fatal below 0.146 or on a new major, warn above 0.160 (verified range 0.146.x–0.160.x)
 gemini-staging: copy allowlisted files from /mnt/gemini-init into /home/moatuser/.gemini (credential files forced 0600)
 copilot-staging: skip (staging var unset)
 init-files: write 1 file(s) at 0600 (parents 0755), then scrub MOAT_INIT_FILES from the environment
