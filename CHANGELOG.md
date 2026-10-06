@@ -8,7 +8,7 @@ Moat is pre-1.0. The CLI interface and `moat.yaml` schema may change between min
 
 ### Fixed
 
-- Fix `moat grant codex` failing on any Codex CLI newer than 0.154 — previously, the subscription-auth version check was a hard ceiling, so updating Codex (0.155.1 is what `npm i -g @openai/codex` installed days after v0.8.0) made `moat grant codex` fail with `unsupported Codex CLI version`, and runs failed the same check in the container. Moat has now verified 0.146 through 0.160, and a newer 0.x release is allowed with a warning instead of an error, because an incompatible Codex fails visibly (it reports it is not logged in) rather than exposing the credential. A version older than 0.146 or a 1.x release is still rejected. The default `codex-cli` image version moves from 0.154.0 to 0.160.1. ([#NNN](https://github.com/majorcontext/moat/pull/NNN))
+- Fix `moat grant codex` failing on any Codex CLI newer than 0.154 — previously, the subscription-auth version check was a hard ceiling, so updating Codex (0.155.1 is what `npm i -g @openai/codex` installed days after v0.8.0) made `moat grant codex` fail with `unsupported Codex CLI version`, and runs failed the same check in the container. Moat has now verified 0.146 through 0.160, and a newer 0.x release is allowed with a warning instead of an error, because an incompatible Codex fails visibly (it reports it is not logged in) rather than exposing the credential. A version older than 0.146 or a 1.x release is still rejected. The default `codex-cli` image version moves from 0.154.0 to 0.160.1. ([#476](https://github.com/majorcontext/moat/pull/476))
 
 ## v0.8.0 — 2026-10-03
 
