@@ -326,7 +326,7 @@ func TestApplyFramingSetsTermiosBits(t *testing.T) {
 		// other — and `go vet` on Linux never sees the Darwin failure.
 		for bits, want := range map[uint8]uint64{5: unix.CS5, 6: unix.CS6, 7: unix.CS7, 8: unix.CS8} {
 			tio := bit(Settings{DataBits: bits})
-			if got := uint64(tio.Cflag & unix.CSIZE); got != want {
+			if got := uint64(tio.Cflag & unix.CSIZE); got != want { //nolint:unconvert // Cflag is uint32 on Linux, uint64 on Darwin.
 				t.Errorf("DataBits %d -> CSIZE %#x, want %#x", bits, got, want)
 			}
 		}

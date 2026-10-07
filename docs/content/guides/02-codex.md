@@ -58,7 +58,11 @@ as it normally would.
 
 The container gets a wholly synthetic `~/.codex/auth.json`. Moat's daemon loads
 the real encrypted credential and atomically replaces the synthetic bearer and
-account headers only for TLS requests to `https://chatgpt.com/backend-api/codex/**`.
+account headers only for TLS requests to `https://chatgpt.com/backend-api/codex/**`
+and `/backend-api/wham/accounts/check` on the same origin. Codex 0.160 and newer
+use the latter endpoint during startup to discover workspace routing. Moat maps
+the selected account ID in that response back to the synthetic identity, while
+preserving the server's backend origin and routing constraints.
 The real access token, refresh token, and account ID are never mounted or sent
 in the container environment. Subscription auth currently supports only the
 default ChatGPT origin and Codex CLI 0.146.x or newer. Moat has verified 0.146.x

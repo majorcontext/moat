@@ -4,6 +4,16 @@ Moat runs AI coding agents in isolated containers with credential injection, net
 
 Moat is pre-1.0. The CLI interface and `moat.yaml` schema may change between minor versions. Breaking changes are listed under **Breaking** headings below.
 
+## v0.8.2 — 2026-10-07
+
+Restores Codex 0.160.1 subscription startup and inference by supporting workspace routing discovery with Moat's synthetic account identity. Adds process-inspection tools to run images and rejects development builds that still embed the placeholder container entrypoint; cached run images rebuild once, and an already-running proxy needs `moat proxy restart` after upgrading.
+
+### Fixed
+
+- Fix `moat codex` failing during workspace routing discovery — previously, the discovery endpoint received placeholder credentials, and allowing that endpoint alone still left the real response account ID inconsistent with the synthetic identity in the container. Moat now injects the credential pair on the ChatGPT discovery endpoint and maps the selected response identity back to its placeholder, preserving the server's routing constraints and error responses. ([#477](https://github.com/majorcontext/moat/pull/477))
+- Fix agent process inspection failing with `ps: command not found` — previously, base run images and generated install scripts omitted `procps`. Both now install it, and base package changes invalidate cached run images. ([#477](https://github.com/majorcontext/moat/pull/477))
+- Fix development builds attempting to start containers with the embedded `moat-init` stub — previously, building without generating the Linux entrypoint binaries could fail only after container startup. Moat now rejects the stub before building or reusing an image and directs developers to `make build`. ([#477](https://github.com/majorcontext/moat/pull/477))
+
 ## v0.8.1 — 2026-10-07
 
 Fixes `moat grant codex` and Codex subscription runs failing on any Codex CLI newer than 0.154. Codex releases newer than the verified range now produce a warning instead of an error, and the default `codex-cli` image version moves to 0.160.1, so cached Codex images rebuild once.

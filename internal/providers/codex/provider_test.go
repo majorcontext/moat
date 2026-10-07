@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
@@ -15,16 +16,18 @@ import (
 
 // mockProxyConfigurer implements provider.ProxyConfigurer for testing.
 type mockProxyConfigurer struct {
-	credentials map[string]string
-	headers     map[string]map[string]string
-	bundles     map[string]credential.Bundle
+	credentials  map[string]string
+	headers      map[string]map[string]string
+	bundles      map[string]credential.Bundle
+	transformers map[string][]provider.ResponseTransformer
 }
 
 func newMockProxyConfigurer() *mockProxyConfigurer {
 	return &mockProxyConfigurer{
-		credentials: make(map[string]string),
-		headers:     make(map[string]map[string]string),
-		bundles:     make(map[string]credential.Bundle),
+		credentials:  make(map[string]string),
+		headers:      make(map[string]map[string]string),
+		bundles:      make(map[string]credential.Bundle),
+		transformers: make(map[string][]provider.ResponseTransformer),
 	}
 }
 
@@ -54,7 +57,7 @@ func (m *mockProxyConfigurer) AddExtraHeader(host, headerName, headerValue strin
 }
 
 func (m *mockProxyConfigurer) AddResponseTransformer(host string, transformer provider.ResponseTransformer) {
-	// Not used in these tests
+	m.transformers[host] = append(m.transformers[host], transformer)
 }
 
 func (m *mockProxyConfigurer) RemoveRequestHeader(host, header string) {}
@@ -91,6 +94,15 @@ func TestProvider_ConfigureProxy(t *testing.T) {
 	}
 	if got := bundle.Replacements[0].Value; got != "Bearer real-access" {
 		t.Errorf("Authorization replacement = %q", got)
+	}
+	if !bundle.Scope.RequireTLS || !reflect.DeepEqual(bundle.Scope.Origins, []string{"https://chatgpt.com"}) {
+		t.Fatalf("subscription credentials must stay scoped to HTTPS ChatGPT: %+v", bundle.Scope)
+	}
+	if want := []string{"/backend-api/codex", "/backend-api/wham/accounts/check"}; !reflect.DeepEqual(bundle.Scope.PathPrefixes, want) {
+		t.Fatalf("credential paths = %v, want %v", bundle.Scope.PathPrefixes, want)
+	}
+	if len(proxy.transformers[subscriptionHost]) != 1 {
+		t.Fatal("workspace discovery response transformer missing")
 	}
 }
 

@@ -63,6 +63,7 @@ func GenerateInstallScript(deps []Dependency) (string, error) {
 	b.WriteString("    curl \\\n")
 	b.WriteString("    ca-certificates \\\n")
 	b.WriteString("    gnupg \\\n")
+	b.WriteString("    procps \\\n")
 	b.WriteString("    unzip \\\n")
 	b.WriteString("    iptables\n\n")
 
