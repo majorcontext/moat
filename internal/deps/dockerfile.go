@@ -33,6 +33,15 @@ type DockerfileResult struct {
 	ContextFiles map[string][]byte
 }
 
+// ValidateEntrypoint rejects development placeholders before building or using
+// a cached image. Dockerfile generation remains available for inspection.
+func (r *DockerfileResult) ValidateEntrypoint() error {
+	if initbin.IsStub(r.ContextFiles["moat-init"]) {
+		return fmt.Errorf("moat-init stub embedded — rebuild moat via 'make build' (runs go generate ./internal/initbin)")
+	}
+	return nil
+}
+
 const defaultBaseImage = "debian:bookworm-slim"
 
 // knownSSHHostKeys maps hostnames to their SSH public keys.
@@ -319,7 +328,8 @@ func selectBaseImage(runtimes []Dependency) (string, *Dependency) {
 
 // baseAptPackages are always installed regardless of user configuration.
 // iptables is NOT included here; it is added conditionally via NeedsFirewall.
-var baseAptPackages = []string{"ca-certificates", "curl", "gnupg", "gosu", "unzip"}
+// procps provides ps, required by agents that track background server processes.
+var baseAptPackages = []string{"ca-certificates", "curl", "gnupg", "gosu", "procps", "unzip"}
 
 // writeAllAptPackages writes a single apt-get install layer combining base and user packages.
 // Uses BuildKit cache mounts for apt to speed up rebuilds when useBuildKit is true.

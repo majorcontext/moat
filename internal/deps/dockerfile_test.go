@@ -8,6 +8,29 @@ import (
 	"github.com/majorcontext/moat/internal/providers/claude"
 )
 
+func TestDockerfileResultValidateEntrypoint(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		binary  []byte
+		wantErr bool
+	}{
+		{"no entrypoint", nil, false},
+		{"compiled entrypoint", []byte("\x7fELF"), false},
+		{"stub", []byte("#!/bin/sh\n# moat-init-stub\nexit 1\n"), true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			result := DockerfileResult{ContextFiles: map[string][]byte{"moat-init": tt.binary}}
+			err := result.ValidateEntrypoint()
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("ValidateEntrypoint() = %v, want error %v", err, tt.wantErr)
+			}
+			if err != nil && !strings.Contains(err.Error(), "make build") {
+				t.Fatalf("error should explain how to rebuild: %v", err)
+			}
+		})
+	}
+}
+
 func TestGenerateDockerfile(t *testing.T) {
 	deps := []Dependency{
 		{Name: "node", Version: "22"},

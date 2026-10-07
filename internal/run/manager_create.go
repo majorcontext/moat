@@ -1417,6 +1417,10 @@ region = %s
 			return nil, fmt.Errorf("generating Dockerfile: %w", err)
 		}
 		generatedDockerfile = result.Dockerfile
+		if entrypointErr := result.ValidateEntrypoint(); entrypointErr != nil {
+			cleanupDaemonRun()
+			return nil, entrypointErr
+		}
 
 		exists, err := m.defaultRuntime().BuildManager().ImageExists(ctx, containerImage)
 		if err != nil {
@@ -2967,6 +2971,12 @@ func buildRegisterRequest(rc *daemon.RunContext, grants []string) daemon.Registe
 	// - Hosts with token substitutions use "response-scrub" (token redaction)
 	// - Hosts without use "oauth-endpoint-workaround" (403 graceful degradation)
 	for host := range rc.ResponseTransformers {
+		// Bundle providers are reconstructed from credential refs in the daemon,
+		// including their response transformers. Never misclassify them as Claude
+		// OAuth workarounds or serialize account-specific transformation state.
+		if len(rc.CredentialBundles[host]) > 0 {
+			continue
+		}
 		kind := "oauth-endpoint-workaround"
 		if _, hasTS := rc.TokenSubstitutions[host]; hasTS {
 			kind = "response-scrub"

@@ -108,7 +108,7 @@ func TestStagedAccessTokenMatchesTheBundlePlaceholder(t *testing.T) {
 	}
 	readAuthFile(t, dir, &auth)
 
-	rec := &bundleRecorder{}
+	rec := &bundleRecorder{ProxyConfigurer: newMockProxyConfigurer()}
 	(&Provider{}).ConfigureProxy(rec, cred)
 	if rec.bundle.ID == "" {
 		t.Fatal("ConfigureProxy installed no bundle")

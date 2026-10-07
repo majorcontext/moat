@@ -36,6 +36,8 @@ func ImageTag(deps []Dependency, opts *ImageSpec) string {
 
 	// Build the hash input
 	hashInput := strings.Join(sorted, ",")
+	// Base package changes must invalidate images even when dependencies stay the same.
+	hashInput += ",base-packages:" + strings.Join(baseAptPackages, ",")
 	if opts.BaseImage != "" {
 		hashInput += ",base:" + opts.BaseImage
 	}

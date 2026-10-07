@@ -13,6 +13,7 @@ const (
 	subscriptionHost       = "chatgpt.com"
 	subscriptionOrigin     = "https://chatgpt.com"
 	subscriptionPathPrefix = "/backend-api/codex"
+	workspaceDiscoveryPath = "/backend-api/wham/accounts/check"
 	syntheticAccountID     = "moat-proxy-codex-account"
 )
 
@@ -52,10 +53,11 @@ func (p *Provider) ConfigureProxy(proxyConfig provider.ProxyConfigurer, cred *pr
 		ID:    string(credential.ProviderCodexSubscription),
 		Grant: "codex",
 		Scope: credential.Scope{
-			RequireTLS:   true,
-			Origins:      []string{subscriptionOrigin},
-			Methods:      []string{"GET", "POST"},
-			PathPrefixes: []string{subscriptionPathPrefix},
+			RequireTLS: true,
+			Origins:    []string{subscriptionOrigin},
+			Methods:    []string{"GET", "POST"},
+			// Codex 0.160.x discovers workspace routing before TUI startup.
+			PathPrefixes: []string{subscriptionPathPrefix, workspaceDiscoveryPath},
 		},
 		RequireAll: true,
 		Replacements: []credential.HeaderReplacement{
@@ -63,6 +65,7 @@ func (p *Provider) ConfigureProxy(proxyConfig provider.ProxyConfigurer, cred *pr
 			{Name: "ChatGPT-Account-ID", Placeholder: syntheticAccountID, Value: auth.AccountID},
 		},
 	})
+	proxyConfig.AddResponseTransformer(subscriptionHost, workspaceDiscoveryTransformer(auth.AccountID))
 }
 
 // Subscription auth is represented by synthetic auth.json, not an API-key env

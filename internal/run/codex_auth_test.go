@@ -23,10 +23,14 @@ func codexBundle() credential.Bundle {
 func TestBuildRegisterRequest_CodexUsesSecretFreeCredentialRef(t *testing.T) {
 	rc := daemon.NewRunContext("run-codex")
 	rc.SetCredentialBundle("chatgpt.com", codexBundle())
+	rc.AddResponseTransformer("chatgpt.com", func(_, resp any) (any, bool) { return resp, false })
 
 	req := buildRegisterRequest(rc, []string{"codex"})
 	if len(req.CredentialRefs) != 1 || req.CredentialRefs[0] != "codex" {
 		t.Fatalf("CredentialRefs = %v, want [codex]", req.CredentialRefs)
+	}
+	if len(req.ResponseTransformers) != 0 {
+		t.Fatalf("bundle transformer must be reconstructed from credential refs: %v", req.ResponseTransformers)
 	}
 	data, err := json.Marshal(req)
 	if err != nil {
