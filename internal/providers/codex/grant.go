@@ -157,9 +157,15 @@ func checkCodexVersion(ctx context.Context, codexPath string) error {
 	}
 	version := parseCodexVersionOutput(string(out))
 	if version == "" {
-		return fmt.Errorf("could not read a Codex CLI version from %q; supported versions are 0.146.x through 0.154.x", strings.TrimSpace(string(out)))
+		return fmt.Errorf("could not read a Codex CLI version from %q; supported versions are %s", strings.TrimSpace(string(out)), supportedRange)
 	}
-	return ValidateVersion(version)
+	if err := ValidateVersion(version); err != nil {
+		return err
+	}
+	if warning := UnverifiedVersionWarning(version); warning != "" {
+		ui.Warn(warning + ". If the login fails, install a verified release with 'npm i -g @openai/codex@" + LatestVerifiedCodexVersion + "' and retry")
+	}
+	return nil
 }
 
 // parseCodexVersionOutput extracts Codex's own version from `codex --version`,
@@ -201,18 +207,70 @@ func versionField(line string) string {
 	return ""
 }
 
-// ValidateVersion checks the Codex auth adapter's explicitly supported range.
+// The Codex CLI range subscription auth has been verified against: Moat's
+// synthetic auth.json and generated config.toml load (`codex login status`,
+// `codex --strict-config doctor`), Codex's auth.json schema matches what the
+// grant parses, and with that auth.json staged Codex sends its traffic to
+// chatgpt.com rather than api.openai.com even when OPENAI_API_KEY is set.
+// Bump MaxVerifiedCodexMinor after re-running those checks on a newer release.
+const (
+	MinVerifiedCodexMinor = 146
+	MaxVerifiedCodexMinor = 160
+
+	// LatestVerifiedCodexVersion is the newest release verified, and the one
+	// the codex-cli registry default pins (TestCodexRegistryDefaultIsLatestVerified).
+	LatestVerifiedCodexVersion = "0.160.1"
+)
+
+// supportedRange is the human-readable verified range used in messages.
+var supportedRange = fmt.Sprintf("0.%d.x or newer (verified through 0.%d.x)", MinVerifiedCodexMinor, MaxVerifiedCodexMinor)
+
+// ValidateVersion rejects Codex CLI versions subscription auth is known not to
+// work with: an unreadable version, one older than the verified range, or a
+// new major version.
+//
+// A version newer than the verified range is accepted — see
+// UnverifiedVersionWarning. Codex releases a minor version every few days, so
+// a hard ceiling broke `moat grant codex` for anyone who had simply updated.
+// Accepting it is safe because an auth schema change fails loudly rather than
+// leaking anything: the grant rejects an auth.json it cannot parse, Codex
+// rejects a synthetic auth.json it does not understand, and the real token
+// never enters the container either way.
 func ValidateVersion(version string) error {
-	match := codexVersionPattern.FindStringSubmatch(version)
-	if len(match) != 4 {
-		return fmt.Errorf("unsupported Codex CLI version %q; supported versions are 0.146.x through 0.154.x", version)
+	major, minor, ok := parseCodexVersion(version)
+	if !ok {
+		return fmt.Errorf("unsupported Codex CLI version %q; supported versions are %s", version, supportedRange)
 	}
-	major, _ := strconv.Atoi(match[1])
-	minor, _ := strconv.Atoi(match[2])
-	if major != 0 || minor < 146 || minor > 154 {
-		return fmt.Errorf("unsupported Codex CLI version %s; supported versions are 0.146.x through 0.154.x", match[0])
+	if major != 0 {
+		// A major release is Codex declaring a breaking change; fail closed
+		// until it has been verified.
+		return fmt.Errorf("unsupported Codex CLI version %s; supported versions are %s — install one with 'npm i -g @openai/codex@%s'", version, supportedRange, LatestVerifiedCodexVersion)
+	}
+	if minor < MinVerifiedCodexMinor {
+		return fmt.Errorf("unsupported Codex CLI version %s; supported versions are %s — upgrade with 'npm i -g @openai/codex@%s'", version, supportedRange, LatestVerifiedCodexVersion)
 	}
 	return nil
+}
+
+// UnverifiedVersionWarning returns a warning when version passes
+// ValidateVersion but is newer than the verified range, and "" otherwise.
+// Callers append the remedy that fits where the CLI runs (host or image).
+func UnverifiedVersionWarning(version string) string {
+	major, minor, ok := parseCodexVersion(version)
+	if !ok || major != 0 || minor <= MaxVerifiedCodexMinor {
+		return ""
+	}
+	return fmt.Sprintf("Codex CLI %s is newer than the versions Moat has verified for subscription auth (0.%d.x through 0.%d.x); continuing", version, MinVerifiedCodexMinor, MaxVerifiedCodexMinor)
+}
+
+func parseCodexVersion(version string) (major, minor int, ok bool) {
+	match := codexVersionPattern.FindStringSubmatch(version)
+	if len(match) != 4 {
+		return 0, 0, false
+	}
+	major, _ = strconv.Atoi(match[1])
+	minor, _ = strconv.Atoi(match[2])
+	return major, minor, true
 }
 
 func validateSubscriptionAuth(auth *SubscriptionAuth) error {

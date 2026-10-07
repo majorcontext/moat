@@ -50,22 +50,30 @@ func TestCodexStagingCopiesProviderShellEnv(t *testing.T) {
 	}
 }
 
-// Parity guard: the entrypoint's accepted Codex range and the host-side
-// validator encode the same supported set. A mismatch means a run either
-// passes the host check and dies at container start, or vice versa.
+// Parity guard: the entrypoint's Codex gate and the host-side validator
+// classify every version the same way — fatal, warn, or pass. A mismatch means
+// a run either passes the host check and dies at container start, or vice
+// versa. The constants are duplicated to keep moat-init's binary small.
 func TestCodexVersionRangeMatchesValidator(t *testing.T) {
-	for minor := 140; minor <= 160; minor++ {
-		v := fmt.Sprintf("0.%d.0", minor)
-		if got, want := supportedCodexVersion(v), codex.ValidateVersion(v) == nil; got != want {
-			t.Errorf("supportedCodexVersion(%q) = %v, but codex.ValidateVersion agrees = %v", v, got, want)
-		}
+	if minVerifiedCodexMinor != codex.MinVerifiedCodexMinor ||
+		maxVerifiedCodexMinor != codex.MaxVerifiedCodexMinor ||
+		latestVerifiedCodexVersion != codex.LatestVerifiedCodexVersion {
+		t.Fatalf("moat-init range (0.%d–0.%d, latest %s) != codex package (0.%d–0.%d, latest %s)",
+			minVerifiedCodexMinor, maxVerifiedCodexMinor, latestVerifiedCodexVersion,
+			codex.MinVerifiedCodexMinor, codex.MaxVerifiedCodexMinor, codex.LatestVerifiedCodexVersion)
 	}
-	for _, v := range []string{"", "unknown", "1.0.0", "0.146", "codex-cli"} {
-		if supportedCodexVersion(v) {
-			t.Errorf("supportedCodexVersion(%q) = true, want false", v)
-		}
-		if codex.ValidateVersion(v) == nil {
-			t.Errorf("codex.ValidateVersion(%q) = nil, want error", v)
+	versions := []string{"", "unknown", "0.146", "codex-cli", "1.0.0", "2.0.1", "0.0.0"}
+	for minor := 140; minor <= 175; minor++ {
+		versions = append(versions, fmt.Sprintf("0.%d.0", minor), fmt.Sprintf("0.%d.12", minor))
+	}
+	for _, v := range versions {
+		minor, ok := codexMinor(v)
+		initFatal := !ok || minor < minVerifiedCodexMinor
+		initWarn := !initFatal && minor > maxVerifiedCodexMinor
+		hostFatal := codex.ValidateVersion(v) != nil
+		hostWarn := codex.UnverifiedVersionWarning(v) != ""
+		if initFatal != hostFatal || initWarn != hostWarn {
+			t.Errorf("version %q: moat-init fatal=%v warn=%v, host fatal=%v warn=%v", v, initFatal, initWarn, hostFatal, hostWarn)
 		}
 	}
 }

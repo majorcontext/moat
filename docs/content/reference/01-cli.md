@@ -685,8 +685,9 @@ The models the gateway serves can live with the profile too, so they do not have
 ### moat grant codex
 
 Starts a separate ChatGPT/Codex login owned by Moat. The host Codex CLI must be
-version 0.146.x–0.154.x. Moat does not copy the user's normal Codex credential
-cache.
+version 0.146.x or newer; Moat has verified 0.146.x through 0.160.x and warns,
+but continues, on a newer 0.x release. A 1.x release is rejected. Moat does not
+copy the user's normal Codex credential cache.
 
 The login always uses Codex's device-code flow, which prints a link and a
 one-time code rather than redirecting to a localhost callback, so the same

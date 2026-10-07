@@ -13,7 +13,7 @@ This guide covers running OpenAI Codex CLI in a Moat container.
 
 - Moat installed
 - A ChatGPT plan with Codex access, or an OpenAI API key
-- Codex CLI 0.146.x–0.154.x on the host for the one-time subscription login
+- Codex CLI 0.146.x or newer on the host for the one-time subscription login (verified through 0.160.x)
 
 ## Granting a Codex subscription
 
@@ -61,7 +61,11 @@ the real encrypted credential and atomically replaces the synthetic bearer and
 account headers only for TLS requests to `https://chatgpt.com/backend-api/codex/**`.
 The real access token, refresh token, and account ID are never mounted or sent
 in the container environment. Subscription auth currently supports only the
-default ChatGPT origin and Codex CLI 0.146.x–0.154.x.
+default ChatGPT origin and Codex CLI 0.146.x or newer. Moat has verified 0.146.x
+through 0.160.x; a newer 0.x release is allowed with a warning, because Codex
+ships often and an incompatible release fails visibly (Codex reports it is not
+logged in) rather than exposing the credential. A 1.x release is rejected until
+it has been verified.
 
 OpenAI API keys remain scoped to `api.openai.com`.
 

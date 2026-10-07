@@ -1121,7 +1121,7 @@ region = %s
 			return nil, fmt.Errorf("resolving versions: %w", err)
 		}
 	}
-	// The subscription adapter targets a specific Codex CLI range. Check the
+	// The subscription adapter has a verified Codex CLI range. Check the
 	// version the image will actually install: ResolveVersions only fills in
 	// runtime deps, so an unpinned "codex-cli" still has an empty Version here
 	// and the registry default is what GenerateDockerfile will use.
@@ -1130,9 +1130,13 @@ region = %s
 			if dep.Name != "codex-cli" {
 				continue
 			}
-			if err := codexprov.ValidateVersion(effectiveCodexVersion(dep)); err != nil {
+			version := effectiveCodexVersion(dep)
+			if err := codexprov.ValidateVersion(version); err != nil {
 				cleanupDaemonRun()
 				return nil, err
+			}
+			if warning := codexprov.UnverifiedVersionWarning(version); warning != "" {
+				ui.Warn(warning + ". If Codex reports it is not logged in, pin codex-cli@" + codexprov.LatestVerifiedCodexVersion + " in moat.yaml dependencies")
 			}
 		}
 	}

@@ -63,7 +63,7 @@ func Plan(ctx *Context) []string {
 		default:
 			add("%s: copy allowlisted files from %s into %s/%s (credential files forced 0600)", a.name, a.staging, home, a.dir)
 			if a.name == "codex-staging" && cfg.CodexSubscriptionAuth == "1" {
-				add("codex-staging: verify the installed codex --version is 0.146.x–0.154.x for subscription auth — fatal otherwise")
+				add("codex-staging: verify the installed codex --version for subscription auth — fatal below 0.146 or on a new major, warn above 0.160 (verified range 0.146.x–0.160.x)")
 			}
 		}
 	}

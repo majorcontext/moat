@@ -30,15 +30,44 @@ func TestIsolatedCodexEnvDropsAmbientCredentials(t *testing.T) {
 }
 
 func TestValidateVersion(t *testing.T) {
-	for _, version := range []string{"0.146.0", "0.154.9"} {
+	// Verified range, and newer minors (accepted with a warning) — a Codex
+	// update must not lock users out of `moat grant codex`.
+	for _, version := range []string{"0.146.0", "0.154.9", "0.155.1", "0.160.1", "0.161.0", "0.999.0"} {
 		if err := ValidateVersion(version); err != nil {
 			t.Errorf("ValidateVersion(%q): %v", version, err)
 		}
 	}
-	for _, version := range []string{"0.145.0", "0.155.0", "1.0.0", "latest"} {
+	// Too old, a new major, or unreadable: still rejected.
+	for _, version := range []string{"0.145.0", "0.0.1", "1.0.0", "2.3.4", "latest", "", "0.146"} {
 		if err := ValidateVersion(version); err == nil {
 			t.Errorf("ValidateVersion(%q) succeeded, want rejection", version)
 		}
+	}
+}
+
+func TestUnverifiedVersionWarning(t *testing.T) {
+	for _, version := range []string{"0.161.0", "0.999.3"} {
+		got := UnverifiedVersionWarning(version)
+		if got == "" {
+			t.Errorf("UnverifiedVersionWarning(%q) = \"\", want a warning", version)
+		}
+		if !strings.Contains(got, version) {
+			t.Errorf("UnverifiedVersionWarning(%q) = %q, want it to name the version", version, got)
+		}
+	}
+	// Companion: verified versions are silent, and rejected versions are the
+	// error's job, not the warning's.
+	for _, version := range []string{"0.146.0", "0.155.1", "0.160.9", "0.145.0", "1.0.0", "latest", ""} {
+		if got := UnverifiedVersionWarning(version); got != "" {
+			t.Errorf("UnverifiedVersionWarning(%q) = %q, want none", version, got)
+		}
+	}
+}
+
+func TestLatestVerifiedCodexVersionIsInRange(t *testing.T) {
+	major, minor, ok := parseCodexVersion(LatestVerifiedCodexVersion)
+	if !ok || major != 0 || minor != MaxVerifiedCodexMinor {
+		t.Fatalf("LatestVerifiedCodexVersion %q is not on the 0.%d line", LatestVerifiedCodexVersion, MaxVerifiedCodexMinor)
 	}
 }
 

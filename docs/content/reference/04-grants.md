@@ -244,10 +244,12 @@ credential encrypted under a versioned internal key. The container sees only a
 synthetic Codex auth file. The daemon replaces its bearer and account headers
 as one TLS-only bundle on the default ChatGPT Codex backend path.
 
-Subscription auth supports Codex CLI 0.146.x–0.154.x, checked both against the
-`codex-cli` version the image installs and against the executable actually
-present in the container. Pin a supported version with `codex-cli@<version>` in
-`dependencies` if your project overrides it.
+Subscription auth requires Codex CLI 0.146.x or newer and is verified through
+0.160.x. The version is checked against the `codex-cli` version the image
+installs and against the executable actually present in the container: older
+than 0.146 or a new major version (1.x) fails the run, and a 0.x release newer
+than 0.160 prints a warning and continues. If a newer Codex reports it is not
+logged in, pin a verified version with `codex-cli@0.160.1` in `dependencies`.
 
 Re-run `moat grant codex` if refresh is revoked. Custom or managed ChatGPT base
 URLs are not supported.
