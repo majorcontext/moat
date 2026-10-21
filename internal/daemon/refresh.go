@@ -130,33 +130,6 @@ func StartTokenRefresh(ctx context.Context, rc *RunContext, grants []string) {
 // concurrently would leave one of them holding a dead credential.
 var codexRefreshMu sync.Mutex
 
-// Inherited OAuth grants share rotating refresh tokens across runs. Serialize
-// redemption by owning profile and provider, then re-read under that lock.
-// These locks coordinate daemon runs only. A CLI grant in another process
-// does not take them; atomic credential writes prevent torn files, but the
-// last writer wins when a grant and refresh update the same credential.
-var profileRefreshLocks = struct {
-	sync.Mutex
-	locks map[profileRefreshKey]*sync.Mutex
-}{locks: make(map[profileRefreshKey]*sync.Mutex)}
-
-type profileRefreshKey struct {
-	profile  string
-	provider credential.Provider
-}
-
-func lockProfileRefresh(key profileRefreshKey) func() {
-	profileRefreshLocks.Lock()
-	mu := profileRefreshLocks.locks[key]
-	if mu == nil {
-		mu = &sync.Mutex{}
-		profileRefreshLocks.locks[key] = mu
-	}
-	profileRefreshLocks.Unlock()
-	mu.Lock()
-	return mu.Unlock
-}
-
 // codexRefreshSkew is how long before expiry a subscription is refreshed.
 const codexRefreshSkew = 10 * time.Minute
 
@@ -191,11 +164,12 @@ func refreshCodexSubscription(ctx context.Context, store credential.Store, cred 
 	}
 	codexRefreshMu.Lock()
 	defer codexRefreshMu.Unlock()
-	var err error
-	store, err = credential.RefreshStore(store, credential.ProviderCodexSubscription)
+	store, unlock, err := credential.LockRefreshStore(ctx, store, credential.ProviderCodexSubscription)
 	if err != nil {
 		return nil, false, err
 	}
+
+	defer unlock()
 
 	if latest, readErr := store.Get(credential.ProviderCodexSubscription); readErr == nil {
 		reloaded := provider.FromLegacy(latest)
@@ -282,18 +256,11 @@ func refreshTokenForGrant(ctx context.Context, rc *RunContext, grant string, sto
 	}
 	// Pin both the read and subsequent save to the profile owning this grant.
 	// A newly granted child override must not receive the parent's refreshed token.
-	store, err = credential.RefreshStore(store, credName)
+	store, unlock, err := credential.LockRefreshStore(ctx, store, credName)
 	if err != nil {
 		return
 	}
-	if fileStore, ok := store.(*credential.FileStore); ok {
-		source, sourceErr := fileStore.Source(credName)
-		if sourceErr != nil {
-			return
-		}
-		unlock := lockProfileRefresh(profileRefreshKey{source, credName})
-		defer unlock()
-	}
+	defer unlock()
 	cred, err = store.Get(credName)
 	if err != nil {
 		return

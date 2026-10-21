@@ -1,6 +1,7 @@
 package credential
 
 import (
+	"context"
 	"errors"
 	"os"
 	"testing"
@@ -168,10 +169,11 @@ func TestRevocationExcludesFutureParentGrants(t *testing.T) {
 func TestRefreshStorePinsOwner(t *testing.T) {
 	_, base, child := inheritedStores(t)
 	saveProfileToken(t, base, "oauth:linear", "base")
-	owner, err := RefreshStore(child, "oauth:linear")
+	owner, unlock, err := LockRefreshStore(context.Background(), child, "oauth:linear")
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer unlock()
 	// A local grant arriving during refresh must not be overwritten.
 	saveProfileToken(t, child, "oauth:linear", "child")
 	if err := owner.Save(Credential{Provider: "oauth:linear", Token: "refreshed"}); err != nil {

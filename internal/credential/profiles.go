@@ -1,15 +1,18 @@
 package credential
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
+	"github.com/gofrs/flock"
 	"github.com/majorcontext/moat/internal/config"
 )
 
 // NewProfileStore opens a profile with its explicitly configured ancestors.
-// Save always writes locally; refreshes must use RefreshStore to retain ownership.
+// Save always writes locally; refreshes use LockRefreshStore to retain ownership.
 func NewProfileStore(profile string, key []byte) (*FileStore, error) {
 	if err := ValidateProfile(profile); err != nil {
 		return nil, err
@@ -85,11 +88,60 @@ func (s *FileStore) Source(provider Provider) (string, error) {
 	return owner.profile, nil
 }
 
-// RefreshStore pins read/write operations to the credential's owning profile.
-// Stores without inheritance (including test stores) already have this behavior.
-func RefreshStore(store Store, provider Provider) (Store, error) {
+// LockRefreshStore pins operations to the owning profile and locks that
+// credential across the re-read, token exchange, and save. Save and Delete use
+// the same lock, so CLI grants and revocations cannot interleave with refresh.
+// The caller must release the lock when finished; the returned store must not
+// be retained or used after release.
+func LockRefreshStore(ctx context.Context, store Store, provider Provider) (Store, func(), error) {
 	if s, ok := store.(*FileStore); ok {
-		return s.Owner(provider)
+		owner, err := s.Owner(provider)
+		if err != nil {
+			return nil, nil, err
+		}
+		unlock, err := owner.lock(ctx, provider)
+		if err != nil {
+			return nil, nil, err
+		}
+		// Re-read under the lock: a revoke may have completed while we waited.
+		if _, err := owner.Get(provider); err != nil {
+			unlock()
+			return nil, nil, err
+		}
+		return &lockedRefreshStore{FileStore: owner, provider: provider}, unlock, nil
 	}
-	return store, nil
+	return store, func() {}, nil
+}
+
+func (s *FileStore) lock(ctx context.Context, provider Provider) (func(), error) {
+	if err := validateProvider(provider); err != nil {
+		return nil, err
+	}
+	// The stable lock inode is separate from the atomically replaced secret.
+	lock := flock.New(s.path(provider)+".lock", flock.SetPermissions(0o600))
+	locked, err := lock.TryLockContext(ctx, 25*time.Millisecond)
+	if err != nil || !locked {
+		_ = lock.Close()
+		if err == nil {
+			err = fmt.Errorf("lock unavailable")
+		}
+		return nil, fmt.Errorf("locking credential %s: %w", provider, err)
+	}
+	return func() { _ = lock.Close() }, nil
+}
+
+type lockedRefreshStore struct {
+	*FileStore
+	provider Provider
+}
+
+func (s *lockedRefreshStore) Save(cred Credential) error {
+	if cred.Provider != s.provider {
+		return fmt.Errorf("refresh store is locked for %s, not %s", s.provider, cred.Provider)
+	}
+	return s.save(cred)
+}
+
+func (s *lockedRefreshStore) Delete(provider Provider) error {
+	return fmt.Errorf("cannot delete %s through a refresh store", provider)
 }

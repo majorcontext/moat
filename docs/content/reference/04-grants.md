@@ -985,7 +985,7 @@ profiles:
 
 Profile creation preserves YAML comments and unrelated settings, but may reformat indentation. Concurrent `moat profile create` commands use a shared file lock to preserve each other's changes; manual config edits do not participate in that lock.
 
-OAuth refresh coordination covers runs within the shared daemon. A simultaneous `moat grant` in another process can still replace the same credential; the last write wins. Atomic file replacement prevents partial reads, but does not serialize these separate operations.
+OAuth refreshes hold a per-credential file lock across the read, token exchange, and save. CLI grants and revocations use the same lock, so they wait for an in-progress refresh before updating that credential. Atomic file replacement lets readers see a complete credential throughout the update. If deletion fails after an inheritance exclusion was saved, the grant remains excluded and the error reports that the local file could not be removed.
 
 ### Storage layout
 

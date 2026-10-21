@@ -1,6 +1,7 @@
 package credential
 
 import (
+	"context"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
@@ -70,6 +71,16 @@ func validateProvider(provider Provider) error {
 
 // Save stores a credential encrypted on disk.
 func (s *FileStore) Save(cred Credential) error {
+	unlock, err := s.lock(context.Background(), cred.Provider)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	return s.save(cred)
+}
+
+// save requires the caller to hold the provider's file lock.
+func (s *FileStore) save(cred Credential) error {
 	if err := validateProvider(cred.Provider); err != nil {
 		return err
 	}
@@ -153,6 +164,16 @@ func (s *FileStore) Get(provider Provider) (*Credential, error) {
 
 // Delete removes a credential for the given provider.
 func (s *FileStore) Delete(provider Provider) error {
+	unlock, err := s.lock(context.Background(), provider)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	return s.delete(provider)
+}
+
+// delete requires the caller to hold the provider's file lock.
+func (s *FileStore) delete(provider Provider) error {
 	if err := validateProvider(provider); err != nil {
 		return err
 	}
@@ -163,6 +184,9 @@ func (s *FileStore) Delete(provider Provider) error {
 		}
 	}
 	if err := os.Remove(s.path(provider)); err != nil && !os.IsNotExist(err) {
+		if s.parent != nil {
+			return fmt.Errorf("credential excluded from inheritance, but removing the local file failed: %w", err)
+		}
 		return fmt.Errorf("deleting credential: %w", err)
 	}
 	return nil
