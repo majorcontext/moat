@@ -667,14 +667,12 @@ func formatHookCommand(cmd string) string {
 func writeEntrypoint(b *strings.Builder, opts *ImageSpec, dockerMode DockerMode, contextFiles map[string][]byte) error {
 	// On native Linux Docker the container runs as the workspace owner's UID
 	// (not 5000) so bind-mounted files keep host ownership. When that UID has
-	// no passwd entry, moat-init stages agent config under /home/moatuser, so
-	// the home must be writable by any UID (see ResolveHome in internal/moatinit). This
-	// runs last so it also covers files that user-space installs created as
-	// moatuser (e.g. the 0600 ~/.claude.json written by plugin installation).
-	// No root-context step writes under the home, so this works whether the
-	// build is currently root or moatuser.
-	b.WriteString("# Make home writable for arbitrary runtime UIDs (Linux bind mode)\n")
-	b.WriteString(fmt.Sprintf("RUN chmod -R a+rwX /home/%s\n\n", containerUser))
+	// no passwd entry, moat-init stages agent config under /home/moatuser.
+	// Writable directories let it replace foreign-owned files without changing
+	// file modes baked by installers or build hooks (SSH rejects writable config
+	// files and private keys). Run last to cover directories those steps create.
+	b.WriteString("# Make home directories writable for arbitrary runtime UIDs (Linux bind mode)\n")
+	b.WriteString(fmt.Sprintf("RUN find /home/%s -type d -exec chmod a+rwx {} +\n\n", containerUser))
 	if opts.needsInit(dockerMode) {
 		goBin, err := entrypointBinary(runtime.GOARCH)
 		if err != nil {

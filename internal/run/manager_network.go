@@ -20,20 +20,21 @@ import (
 //  1. We have ports to publish (host mode doesn't support port publishing)
 //  2. We're on macOS/Windows (host mode not supported)
 //  3. We're using the Apple container runtime
-//  4. Containers run under gVisor (see useHostNetwork)
+//  4. We're using gVisor, whose default netstack needs a container network
 //
 // We only use host mode when we need proxy access AND don't have ports to
-// publish on Linux.
+// publish on Linux without gVisor. Services and BuildKit may subsequently
+// select a dedicated bridge network.
 func (m *Manager) resolveNetworkConfig(needsPorts, needsProxy bool, hostAddr string) (networkMode string, extraHosts []string) {
 	if !needsProxy && !needsPorts {
 		return "", nil
 	}
 
 	if m.useHostNetwork(needsPorts) {
-		// Docker on Linux without ports: use host network so container can reach 127.0.0.1
+		// Standard Docker on Linux without ports shares the host network.
 		networkMode = "host"
 	} else {
-		// Use bridge mode when we need port publishing, or on macOS/Windows/Apple.
+		// Port publishing, gVisor, and macOS/Windows/Apple use bridge mode.
 		networkMode = "bridge"
 		// On Linux, Docker doesn't provide host.docker.internal by default, so
 		// add it via host-gateway mapping. On macOS/Windows, Docker Desktop and

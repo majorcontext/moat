@@ -229,8 +229,8 @@ func (s *OSSys) CopyFilePreserving(src, dst string) error {
 	if err != nil {
 		return err
 	}
-	// A non-root process can write a world-writable file it does not own but
-	// cannot chmod it. This happens on Linux bind mode, where the container
+	// A non-root process cannot chmod a file it does not own, even when the
+	// file is writable. This happens on Linux bind mode, where the container
 	// runs as the workspace owner's UID and the image's home files belong to
 	// moatuser (5000). Replace such a file instead so the copy is owned by
 	// the running UID and the mode below (and any later chmod 600) applies.

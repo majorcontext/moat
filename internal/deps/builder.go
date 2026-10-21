@@ -18,7 +18,8 @@ import (
 //
 //	2: home made writable for arbitrary runtime UIDs (Linux bind mode), and
 //	   ~/.codex pre-created so the sessions bind mount does not create it as root.
-const dockerfileLayoutVersion = 2
+//	3: only directory permissions are relaxed; preserve private file modes.
+const dockerfileLayoutVersion = 3
 
 // ImageTag generates a deterministic image tag for a set of dependencies.
 func ImageTag(deps []Dependency, opts *ImageSpec) string {

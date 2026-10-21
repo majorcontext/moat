@@ -6,7 +6,7 @@ Moat is pre-1.0. The CLI interface and `moat.yaml` schema may change between min
 
 ## Unreleased
 
-Fixes Moat on Linux hosts where the workspace owner's UID is not 5000, which includes default WSL and Ubuntu installs, and fixes gVisor runs with no published ports having no network. Cached run images rebuild once.
+Adds credential profile inheritance and fixes Linux startup failures caused by workspace UIDs and gVisor networking. Cached run images rebuild once.
 
 ### Added
 
@@ -14,8 +14,8 @@ Fixes Moat on Linux hosts where the workspace owner's UID is not 5000, which inc
 
 ### Fixed
 
-- Fix runs failing in `moat-init` when the workspace owner's UID is not 5000 — previously, on Linux the container ran as the workspace owner's UID (1000 on a default WSL or Ubuntu install), which has no passwd entry in the image, so `HOME` was `/` and agent staging failed with `mkdir //.claude: permission denied`; files baked into the image as `moatuser`, such as the `0600` `~/.claude.json` written by plugin installation, could not be overwritten or have their mode set. `moat-init` now uses `/home/moatuser` when Docker leaves `HOME` as `/` (the UID has no account in the image) and keeps a `HOME` that the image's own account for the UID provides, such as `/home/node` in Node images. Run images now make the home writable by any UID as the last build step and pre-create `~/.codex`, and `moat-init` replaces a staged file it cannot change the mode of. ([#478](https://github.com/majorcontext/moat/pull/478))
-- Fix gVisor runs hanging with no network access — previously, on Linux a run with no published ports used Docker host networking, and a gVisor sandbox set up by a stock `runsc install` has no network interfaces in that mode, so the agent could not reach the Moat proxy and retried with no output. gVisor runs now use bridge networking and reach the proxy through Docker's host gateway; runs with the standard `runc` runtime are unchanged. ([#478](https://github.com/majorcontext/moat/pull/478))
+- Fix agent staging on Linux when the workspace owner's UID has no account in the image — previously, `HOME=/` caused permission errors, and files owned by `moatuser` could not be overwritten or chmodded. The entrypoint now falls back to `/home/moatuser`, replaces foreign-owned staged files, and preserves an existing account's home. Images pre-create `~/.codex` and make home directories writable without changing file permissions, including SSH config and private keys. ([#478](https://github.com/majorcontext/moat/pull/478))
+- Fix gVisor runs hanging without network access when no ports are published — previously, Docker host networking left a default `runsc` sandbox with no network interfaces. gVisor runs now use bridge networking and reach the proxy through the host gateway. ([#478](https://github.com/majorcontext/moat/pull/478))
 
 ## v0.8.2 — 2026-10-07
 

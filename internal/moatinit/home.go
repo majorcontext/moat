@@ -49,8 +49,7 @@ func initFilesOwnership(euid int, moatuserExists bool, home string) (chown bool,
 //
 // A HOME the UID's own passwd entry supplies is left alone: in images built
 // FROM node:*, UID 1000 is the node user with HOME=/home/node, and overriding
-// it would stage into /home/moatuser, where bind mounts leave root-owned
-// parent directories.
+// it would separate agent config from the account's home directory.
 func ResolveHome(sys Sys) {
 	if sys.Geteuid() == 0 || sys.Getenv("HOME") != "/" {
 		return

@@ -58,30 +58,15 @@ This model works well for AI coding agents running on code you control. For runn
 
 ## Runtime-specific proxy security
 
-The TLS-intercepting proxy has different security configurations depending on the container runtime.
+The TLS-intercepting proxy binds to `0.0.0.0` (all interfaces) and requires per-run token authentication on both Docker and Apple containers. Containers use the synthetic `moat-proxy` hostname, which resolves to the host gateway for their runtime.
 
-| | Docker | Apple containers |
-|---|--------|------------------|
-| **Proxy bind address** | `127.0.0.1` (localhost only) | `0.0.0.0` (all interfaces) |
-| **Container reaches proxy via** | `host.docker.internal` or host network | Gateway IP |
-| **Authentication** | Network-level (localhost only) | Per-run cryptographic token |
-| **Platform** | Linux, macOS, Windows | macOS 26+ (Apple Silicon) |
+Each run receives a 32-byte random token generated using `crypto/rand`. The token is embedded in the proxy URL passed to the container:
 
-### Docker
-
-The proxy binds to `127.0.0.1` (localhost only). Containers reach the proxy via `host.docker.internal` or host network mode. Because the proxy listens only on the loopback interface, other machines on the network cannot reach it. No additional authentication is required -- only processes on the same host can connect.
-
-### Apple containers
-
-On macOS 26+ with Apple Silicon, containers access the host via a gateway IP rather than `host.docker.internal`. The proxy binds to `0.0.0.0` (all interfaces) to be reachable from the container network.
-
-Because the proxy is exposed beyond localhost, security is maintained via per-run cryptographic token authentication. Each run generates a 32-byte random token using `crypto/rand`. The token is embedded in the proxy URL passed to the container:
-
-```
-HTTP_PROXY=http://moat:<token>@<host>:<port>
+```text
+HTTP_PROXY=http://moat:<token>@moat-proxy:<port>
 ```
 
-The proxy validates the token on every request. Requests without a valid token are rejected. This ensures that only the intended container can use the proxy, even though the proxy listens on all interfaces.
+The proxy rejects requests without a valid token and uses valid tokens to select each run's credentials and network policy. Anyone who obtains a run's proxy token can act as that run, so treat it as a secret. See [Proxy architecture](./09-proxy.md#runtime-specific-behavior) for connection details.
 
 ## Secrets vs. credentials
 

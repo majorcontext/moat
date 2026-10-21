@@ -42,7 +42,7 @@ Docker runtime supports two sandbox modes:
 
 On Linux, if gVisor is not installed, Moat returns an error with installation instructions. gVisor is available for Debian/Ubuntu via the official `gvisor.dev` package repository, and installation details are included in the error message itself.
 
-**Networking:** On Linux with `runc`, a run that publishes no ports uses Docker host networking. gVisor runs always use bridge networking: under host networking, a gVisor sandbox configured by a stock `runsc install` has no network interfaces. In bridge mode the container keeps its own network namespace, gVisor's network stack handles its traffic, and the container reaches the proxy through Docker's host gateway.
+**Networking:** gVisor runs use bridge networking because a default `runsc` installation has no network interfaces under Docker host networking. Containers reach the proxy through the host gateway. Standard Docker on Linux uses host networking when proxy access is needed and no ports are published; published ports, services, and BuildKit use bridge networks.
 
 ### Overriding sandbox mode
 
@@ -54,9 +54,9 @@ Standard container isolation (`runc`) protects against accidental damage and pro
 
 ### Proxy security model
 
-The credential-injecting proxy binds to `127.0.0.1` (localhost) on the host. Containers reach the proxy via `host.docker.internal`, a Docker-provided hostname that resolves to the host machine.
+The credential-injecting proxy binds to `0.0.0.0` (all interfaces) on the host. Containers reach it through the synthetic `moat-proxy` hostname, mapped to the host gateway.
 
-Since the proxy listens only on localhost, only processes on the host machine can access it. Containers access it through Docker's host networking bridge.
+Each run authenticates with its own cryptographically random 32-byte token in the proxy URL. The proxy rejects requests without a valid token and uses the token to select the run's credentials and network policy. See [Proxy architecture](./09-proxy.md#runtime-specific-behavior).
 
 ### Platform support
 
