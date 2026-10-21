@@ -98,5 +98,12 @@ func runRevoke(cmd *cobra.Command, args []string) error {
 	} else {
 		fmt.Printf("%s credential revoked\n", provider)
 	}
+	excluded, exclusionErr := store.IsExcluded(provider)
+	if exclusionErr != nil {
+		return fmt.Errorf("checking grant exclusion: %w", exclusionErr)
+	}
+	if excluded {
+		fmt.Println("Excluded from inheritance, including future parent grants. Re-grant to enable it locally again.")
+	}
 	return nil
 }

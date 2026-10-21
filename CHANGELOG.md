@@ -4,6 +4,12 @@ Moat runs AI coding agents in isolated containers with credential injection, net
 
 Moat is pre-1.0. The CLI interface and `moat.yaml` schema may change between minor versions. Breaking changes are listed under **Breaking** headings below.
 
+## Unreleased
+
+### Added
+
+- **Credential profile inheritance** — create a profile with `moat profile create NAME --inherit PARENT` or `--inherit-default`, then override individual grants locally. Credentials, SSH host mappings, environment variables, and implicit agent grants follow the parent chain; revocations exclude grants without changing the parent, and OAuth refreshes update the owning profile. ([#479](https://github.com/majorcontext/moat/pull/479))
+
 ## v0.8.2 — 2026-10-07
 
 Restores Codex 0.160.1 subscription startup and inference by supporting workspace routing discovery with Moat's synthetic account identity. Adds process-inspection tools to run images and rejects development builds that still embed the placeholder container entrypoint; cached run images rebuild once, and an already-running proxy needs `moat proxy restart` after upgrading.

@@ -122,6 +122,49 @@ func TestProfileCorruptOverrideNeverFallsBack(t *testing.T) {
 	}
 }
 
+func TestIntermediateProfileRevocationBlocksDescendant(t *testing.T) {
+	root, middle, leaf := inheritedStores(t)
+	saveProfileToken(t, root, "github", "root")
+	assertProfileToken(t, leaf, "github", "root")
+	if err := middle.Delete("github"); err != nil {
+		t.Fatal(err)
+	}
+	if excluded, err := leaf.IsExcluded("github"); err != nil || excluded {
+		t.Fatalf("leaf must not have its own exclusion: %v, %v", excluded, err)
+	}
+	if _, err := leaf.Get("github"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("descendant bypassed intermediate exclusion: %v", err)
+	}
+	if _, err := leaf.Source("github"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("source bypassed intermediate exclusion: %v", err)
+	}
+	if creds, err := leaf.List(); err != nil || len(creds) != 0 {
+		t.Fatalf("list bypassed intermediate exclusion: %v, %v", creds, err)
+	}
+	assertProfileToken(t, root, "github", "root")
+	// Re-granting at the intermediate level restores inheritance below it.
+	saveProfileToken(t, middle, "github", "middle")
+	assertProfileToken(t, leaf, "github", "middle")
+	assertProfileToken(t, root, "github", "root")
+}
+
+func TestRevocationExcludesFutureParentGrants(t *testing.T) {
+	root, middle, leaf := inheritedStores(t)
+	saveProfileToken(t, middle, "oauth:linear", "local")
+	if err := middle.Delete("oauth:linear"); err != nil {
+		t.Fatal(err)
+	}
+	// The parent did not have this grant at revoke time. Adding it later must
+	// not re-enable a grant explicitly revoked in the intermediate profile.
+	saveProfileToken(t, root, "oauth:linear", "new-parent")
+	if _, err := leaf.Get("oauth:linear"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("future parent grant bypassed exclusion: %v", err)
+	}
+	assertProfileToken(t, root, "oauth:linear", "new-parent")
+	saveProfileToken(t, leaf, "oauth:linear", "leaf-override")
+	assertProfileToken(t, leaf, "oauth:linear", "leaf-override")
+}
+
 func TestRefreshStorePinsOwner(t *testing.T) {
 	_, base, child := inheritedStores(t)
 	saveProfileToken(t, base, "oauth:linear", "base")

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/gofrs/flock"
 	"gopkg.in/yaml.v3"
 )
 
@@ -75,6 +76,16 @@ func CreateProfile(name string, prof ProfileConfig) error {
 	if err := ValidateProfileName(name); err != nil {
 		return err
 	}
+	if err := os.MkdirAll(GlobalConfigDir(), 0o700); err != nil {
+		return err
+	}
+	// Hold a separate, stable lock file across the entire read/modify/rename.
+	// Never remove it: locking the replaced config inode would lose exclusion.
+	lock := flock.New(filepath.Join(GlobalConfigDir(), "config.lock"), flock.SetPermissions(0o600))
+	if err := lock.Lock(); err != nil {
+		return fmt.Errorf("locking global config: %w", err)
+	}
+	defer func() { _ = lock.Close() }()
 	path := filepath.Join(GlobalConfigDir(), "config.yaml")
 	data, err := os.ReadFile(path)
 	if err != nil && !os.IsNotExist(err) {
@@ -136,9 +147,6 @@ func CreateProfile(name string, prof ProfileConfig) error {
 	data, err = yaml.Marshal(&doc)
 	if err != nil {
 		return err
-	}
-	if mkdirErr := os.MkdirAll(GlobalConfigDir(), 0o700); mkdirErr != nil {
-		return mkdirErr
 	}
 	f, err := os.CreateTemp(GlobalConfigDir(), ".config-*")
 	if err != nil {

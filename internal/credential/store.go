@@ -113,7 +113,7 @@ func (s *FileStore) Get(provider Provider) (*Credential, error) {
 	if err := validateProvider(provider); err != nil {
 		return nil, err
 	}
-	if blocked, err := s.isRevoked(provider); err != nil {
+	if blocked, err := s.IsExcluded(provider); err != nil {
 		return nil, err
 	} else if blocked {
 		return nil, fmt.Errorf("%w: %s (revoked in this profile)", ErrNotFound, provider)

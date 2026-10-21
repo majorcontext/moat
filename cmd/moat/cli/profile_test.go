@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -101,11 +102,14 @@ func TestInheritedGrantListAndRevoke(t *testing.T) {
 		t.Fatalf("listing = %v", rows)
 	}
 	for _, p := range []string{"github", "oauth:linear"} {
-		captureStdout(t, func() {
+		out := captureStdout(t, func() {
 			if err := runRevoke(&cobra.Command{}, []string{p}); err != nil {
 				t.Fatal(err)
 			}
 		})
+		if !strings.Contains(out, "Excluded from inheritance, including future parent grants") {
+			t.Fatalf("missing exclusion explanation: %s", out)
+		}
 		if _, err := child.Get(credential.Provider(p)); !errors.Is(err, credential.ErrNotFound) {
 			t.Fatalf("not excluded: %v", err)
 		}
@@ -115,5 +119,39 @@ func TestInheritedGrantListAndRevoke(t *testing.T) {
 	}
 	if rows := list(); len(rows) != 0 {
 		t.Fatal(rows)
+	}
+}
+
+func TestRevokeLocalGrantExplainsOnlyInheritedExclusions(t *testing.T) {
+	for _, inherits := range []bool{false, true} {
+		t.Run(fmt.Sprint(inherits), func(t *testing.T) {
+			t.Setenv("MOAT_HOME", t.TempDir())
+			t.Setenv("MOAT_KEYRING_BACKEND", "file")
+			oldProfile := credential.ActiveProfile
+			t.Cleanup(func() { credential.ActiveProfile = oldProfile })
+			credential.ActiveProfile = "client"
+			if err := config.CreateProfile("client", config.ProfileConfig{InheritDefault: inherits}); err != nil {
+				t.Fatal(err)
+			}
+			key, err := credential.DefaultEncryptionKey()
+			if err != nil {
+				t.Fatal(err)
+			}
+			store, err := credential.NewProfileStore("client", key)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := store.Save(credential.Credential{Provider: "github", Token: "local"}); err != nil {
+				t.Fatal(err)
+			}
+			out := captureStdout(t, func() {
+				if err := runRevoke(&cobra.Command{}, []string{"github"}); err != nil {
+					t.Fatal(err)
+				}
+			})
+			if got := strings.Contains(out, "Excluded from inheritance"); got != inherits {
+				t.Fatalf("unexpected exclusion explanation: %s", out)
+			}
+		})
 	}
 }

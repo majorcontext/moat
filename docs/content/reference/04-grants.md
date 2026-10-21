@@ -965,7 +965,7 @@ Granting a credential writes only to the selected profile. Revoking a grant in a
 moat revoke oauth:linear --profile client
 ```
 
-Re-granting the credential enables it locally again. Exclusions also apply to descendants. These operations affect stored grants; already-running containers may retain credentials until restarted.
+Re-granting the credential enables it locally again. Exclusions also apply to descendants and to grants added to the parent later; `moat revoke` reports this exclusion. These operations affect stored grants; already-running containers may retain credentials until restarted.
 
 Inheritance is recorded in `~/.moat/config.yaml`:
 
@@ -982,6 +982,10 @@ profiles:
 ```
 
 `inherit` and `inherit_default` are mutually exclusive. Unknown parents and inheritance cycles are rejected. A named profile called `default` is distinct from the default store. Environment variables merge along the same chain, with child values taking precedence; `moat.yaml` and `-e` override profile environment variables.
+
+Profile creation preserves YAML comments and unrelated settings, but may reformat indentation. Concurrent `moat profile create` commands use a shared file lock to preserve each other's changes; manual config edits do not participate in that lock.
+
+OAuth refresh coordination covers runs within the shared daemon. A simultaneous `moat grant` in another process can still replace the same credential; the last write wins. Atomic file replacement prevents partial reads, but does not serialize these separate operations.
 
 ### Storage layout
 

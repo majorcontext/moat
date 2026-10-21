@@ -1,7 +1,10 @@
 package config
 
 import (
+	"bytes"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -32,6 +35,57 @@ func TestProfileInheritance(t *testing.T) {
 	}
 	if cfg.ProfileEnv("") != nil {
 		t.Fatal("default store must not have profile env")
+	}
+}
+
+// Separate processes exercise the advisory file lock, not just goroutine
+// synchronization. Every writer must keep the profiles created by its peers.
+func TestCreateProfilesConcurrently(t *testing.T) {
+	const processCount, profilesPerProcess = 4, 3
+	if prefix := os.Getenv("MOAT_TEST_CREATE_PROFILE_PREFIX"); prefix != "" {
+		for i := 0; i < profilesPerProcess; i++ {
+			if err := CreateProfile(fmt.Sprintf("%s-%d", prefix, i), ProfileConfig{InheritDefault: true}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return
+	}
+	t.Setenv("MOAT_HOME", t.TempDir())
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var commands [processCount]*exec.Cmd
+	var outputs [processCount]bytes.Buffer
+	for i := range commands {
+		cmd := exec.Command(executable, "-test.run=^TestCreateProfilesConcurrently$")
+		cmd.Env = append(os.Environ(), fmt.Sprintf("MOAT_TEST_CREATE_PROFILE_PREFIX=writer%d", i))
+		cmd.Stdout, cmd.Stderr = &outputs[i], &outputs[i]
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+		commands[i] = cmd
+		t.Cleanup(func() { _ = cmd.Process.Kill() })
+	}
+	for i, cmd := range commands {
+		if err := cmd.Wait(); err != nil {
+			t.Fatalf("writer %d: %v\n%s", i, err, &outputs[i])
+		}
+	}
+	cfg, err := LoadGlobal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Profiles) != processCount*profilesPerProcess {
+		t.Fatalf("lost concurrent profile writes: got %d profiles", len(cfg.Profiles))
+	}
+	for i := range commands {
+		for j := 0; j < profilesPerProcess; j++ {
+			name := fmt.Sprintf("writer%d-%d", i, j)
+			if !cfg.Profiles[name].InheritDefault {
+				t.Errorf("missing profile %s", name)
+			}
+		}
 	}
 }
 

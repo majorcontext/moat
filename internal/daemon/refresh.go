@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"net/url"
 	"slices"
 	"strings"
@@ -131,6 +132,9 @@ var codexRefreshMu sync.Mutex
 
 // Inherited OAuth grants share rotating refresh tokens across runs. Serialize
 // redemption by owning profile and provider, then re-read under that lock.
+// These locks coordinate daemon runs only. A CLI grant in another process
+// does not take them; atomic credential writes prevent torn files, but the
+// last writer wins when a grant and refresh update the same credential.
 var profileRefreshLocks = struct {
 	sync.Mutex
 	locks map[profileRefreshKey]*sync.Mutex
@@ -295,6 +299,11 @@ func refreshTokenForGrant(ctx context.Context, rc *RunContext, grant string, sto
 		return
 	}
 	provCred = provider.FromLegacy(cred)
+	// Providers may mutate their input or return an equal copy. Snapshot the
+	// stored values, including mutable collections, before calling Refresh.
+	previous := *cred
+	previous.Scopes = slices.Clone(cred.Scopes)
+	previous.Metadata = maps.Clone(cred.Metadata)
 
 	refreshCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	updated, err := rp.Refresh(refreshCtx, rc, provCred)
@@ -310,7 +319,7 @@ func refreshTokenForGrant(ctx context.Context, rc *RunContext, grant string, sto
 		Provider: credName, Token: updated.Token, Scopes: updated.Scopes,
 		ExpiresAt: updated.ExpiresAt, CreatedAt: updated.CreatedAt, Metadata: updated.Metadata,
 	}
-	if updated != provCred {
+	if !sameCredential(previous, storeCred) {
 		if saveErr := store.Save(storeCred); saveErr != nil {
 			// Keep publishing the new token to this run's MCP servers and Copilot
 			// below. Refresh() has already rewritten the run's direct credentials
@@ -346,6 +355,12 @@ func refreshTokenForGrant(ctx context.Context, rc *RunContext, grant string, sto
 		}
 	}
 	log.Debug("token refreshed", "provider", credName)
+}
+
+func sameCredential(a, b credential.Credential) bool {
+	return a.Provider == b.Provider && a.Token == b.Token &&
+		a.ExpiresAt.Equal(b.ExpiresAt) && a.CreatedAt.Equal(b.CreatedAt) &&
+		slices.Equal(a.Scopes, b.Scopes) && maps.Equal(a.Metadata, b.Metadata)
 }
 
 // credentialRefProviders are the grants a client may ask the daemon to resolve

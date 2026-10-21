@@ -38,7 +38,12 @@ func (s *FileStore) revokedPath(provider Provider) string {
 	return filepath.Join(s.dir, string(provider)+".revoked")
 }
 
-func (s *FileStore) isRevoked(provider Provider) (bool, error) {
+// IsExcluded reports whether this store locally excludes a grant from
+// inheritance, including future grants added to its parent.
+func (s *FileStore) IsExcluded(provider Provider) (bool, error) {
+	if err := validateProvider(provider); err != nil {
+		return false, err
+	}
 	_, err := os.Stat(s.revokedPath(provider))
 	if os.IsNotExist(err) {
 		return false, nil
@@ -52,7 +57,7 @@ func (s *FileStore) Owner(provider Provider) (*FileStore, error) {
 	if err := validateProvider(provider); err != nil {
 		return nil, err
 	}
-	if blocked, err := s.isRevoked(provider); err != nil {
+	if blocked, err := s.IsExcluded(provider); err != nil {
 		return nil, err
 	} else if blocked {
 		return nil, fmt.Errorf("%w: %s", ErrNotFound, provider)

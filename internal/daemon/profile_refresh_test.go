@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -103,5 +105,79 @@ func TestInheritedOAuthRefreshSharedAcrossRuns(t *testing.T) {
 	}
 	if updated.Token != "rotated-access" || updated.Metadata["refresh_token"] != "rotated-refresh" {
 		t.Fatal("parent was not refreshed")
+	}
+}
+
+type valueRefreshProvider struct {
+	fakeRefreshableProvider
+	update func(*provider.Credential) *provider.Credential
+}
+
+func (p *valueRefreshProvider) Refresh(_ context.Context, _ provider.ProxyConfigurer, cred *provider.Credential) (*provider.Credential, error) {
+	return p.update(cred), nil
+}
+
+type countingRefreshStore struct {
+	credential.Store
+	saves int
+}
+
+func (s *countingRefreshStore) Save(cred credential.Credential) error {
+	s.saves++
+	return s.Store.Save(cred)
+}
+
+func TestRefreshPersistsOnlyChangedValues(t *testing.T) {
+	const name = "test-value-refresh"
+	for _, tc := range []struct {
+		name      string
+		copyInput bool
+		mutate    func(*provider.Credential)
+		wantSaves int
+	}{
+		{name: "same pointer"},
+		{name: "equal copy", copyInput: true},
+		{name: "new token", copyInput: true, mutate: func(c *provider.Credential) { c.Token = "new-token" }, wantSaves: 1},
+		{name: "new expiry only", copyInput: true, mutate: func(c *provider.Credential) { c.ExpiresAt = c.ExpiresAt.Add(time.Hour) }, wantSaves: 1},
+		{name: "rotated refresh token only", copyInput: true, mutate: func(c *provider.Credential) { c.Metadata["refresh_token"] = "rotated" }, wantSaves: 1},
+		{name: "in-place metadata change", mutate: func(c *provider.Credential) { c.Metadata["refresh_token"] = "rotated" }, wantSaves: 1},
+		{name: "in-place scopes change", mutate: func(c *provider.Credential) { c.Scopes[0] = "write" }, wantSaves: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			prov := &valueRefreshProvider{fakeRefreshableProvider: fakeRefreshableProvider{name: name}, update: func(c *provider.Credential) *provider.Credential {
+				if tc.copyInput {
+					copyCred := *c
+					copyCred.Metadata = maps.Clone(c.Metadata)
+					copyCred.Scopes = slices.Clone(c.Scopes)
+					c = &copyCred
+				}
+				if tc.mutate != nil {
+					tc.mutate(c)
+				}
+				return c
+			}}
+			provider.Register(prov)
+			t.Cleanup(func() { provider.Unregister(name) })
+			store := &countingRefreshStore{Store: &fakeStore{creds: map[credential.Provider]*credential.Credential{
+				name: {Provider: name, Token: "token", ExpiresAt: time.Now().Add(time.Hour), Scopes: []string{"read"}, Metadata: map[string]string{"refresh_token": "original"}},
+			}}}
+			rc := NewRunContext("test-run")
+			rc.MCPServers = []config.MCPServerConfig{{Name: "service", URL: "https://service.example/mcp", Auth: &config.MCPAuthConfig{Grant: name, Header: "Authorization"}}}
+			rc.SetCredentialWithGrant("service.example", "Authorization", "stale-run-token", name)
+			refreshTokenForGrant(context.Background(), rc, name, store)
+			if store.saves != tc.wantSaves {
+				t.Fatalf("saves = %d, want %d", store.saves, tc.wantSaves)
+			}
+			// Even an unchanged shared credential must update this run, which
+			// may still hold the token from before another run refreshed it.
+			stored, err := store.Get(name)
+			if err != nil {
+				t.Fatal(err)
+			}
+			entry, ok := rc.GetCredential("service.example")
+			if !ok || entry.Value != stored.Token {
+				t.Fatal("run did not receive current token")
+			}
+		})
 	}
 }

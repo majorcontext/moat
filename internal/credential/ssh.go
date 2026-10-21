@@ -50,7 +50,7 @@ func (s *FileStore) GetSSHMappings() ([]SSHMapping, error) {
 		if err := validateProvider(Provider("ssh:" + host)); err != nil {
 			return nil, err
 		}
-		blocked, err := s.isRevoked(Provider("ssh:" + host))
+		blocked, err := s.IsExcluded(Provider("ssh:" + host))
 		if err != nil {
 			return nil, err
 		}
@@ -176,7 +176,7 @@ func (s *FileStore) SSHSource(host string) (string, error) {
 	if err := validateProvider(key); err != nil {
 		return "", err
 	}
-	if blocked, err := s.isRevoked(key); err != nil {
+	if blocked, err := s.IsExcluded(key); err != nil {
 		return "", err
 	} else if blocked {
 		return "", fmt.Errorf("%w: %s", ErrNotFound, key)
