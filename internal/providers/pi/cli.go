@@ -177,7 +177,7 @@ func resolvePiPreflight(cfg *config.Config) error {
 		}
 	}
 
-	grants, err := loadPiGrants()
+	grants, err := loadPiGrants(providerOverride)
 	if err != nil {
 		return err
 	}
@@ -211,8 +211,8 @@ func buildPiCommand(promptFlag, initialPrompt string) []string {
 }
 
 // loadPiGrants opens the credential store once and reports which backend
-// grants it holds.
-func loadPiGrants() (piGrants, error) {
+// grants it holds. An explicit backend limits reads to that credential.
+func loadPiGrants(providerOverride string) (piGrants, error) {
 	key, err := credential.DefaultEncryptionKey()
 	if err != nil {
 		return piGrants{}, fmt.Errorf("pi: reading the credential encryption key: %w", err)
@@ -221,15 +221,19 @@ func loadPiGrants() (piGrants, error) {
 	if err != nil {
 		return piGrants{}, fmt.Errorf("pi: opening the credential store: %w", err)
 	}
-	return piGrantsFromStore(store.Get)
+	return piGrantsFromStore(providerOverride, store.Get)
 }
 
-// piGrantsFromStore classifies each backend credential. Only a missing
-// credential means "not configured": any other failure (unreadable file,
+// piGrantsFromStore classifies the selected backend credential, or every
+// backend when inferring the provider. Only a missing credential means
+// "not configured": any other failure (unreadable file,
 // failed decryption) is returned as-is, so the user is not told to grant a key
 // they already have.
-func piGrantsFromStore(get func(credential.Provider) (*credential.Credential, error)) (piGrants, error) {
+func piGrantsFromStore(providerOverride string, get func(credential.Provider) (*credential.Credential, error)) (piGrants, error) {
 	lookup := func(prov credential.Provider) (*credential.Credential, error) {
+		if providerOverride != "" && string(prov) != providerOverride {
+			return nil, nil
+		}
 		cred, err := get(prov)
 		if errors.Is(err, credential.ErrNotFound) {
 			return nil, nil

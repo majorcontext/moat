@@ -120,13 +120,13 @@ func TestPiGrantsFromStore(t *testing.T) {
 	}
 
 	t.Run("none configured", func(t *testing.T) {
-		g, err := piGrantsFromStore(store(nil, ""))
+		g, err := piGrantsFromStore("", store(nil, ""))
 		if err != nil || g != (piGrants{}) {
 			t.Errorf("got %+v, %v; want empty grants, nil", g, err)
 		}
 	})
 	t.Run("all configured", func(t *testing.T) {
-		g, err := piGrantsFromStore(store(map[credential.Provider]*credential.Credential{
+		g, err := piGrantsFromStore("", store(map[credential.Provider]*credential.Credential{
 			credential.ProviderAnthropic: {},
 			credential.ProviderOpenAI:    {},
 			credential.ProviderLunaRoute: {},
@@ -137,7 +137,7 @@ func TestPiGrantsFromStore(t *testing.T) {
 		}
 	})
 	t.Run("gateway anthropic key is not a plain anthropic key", func(t *testing.T) {
-		g, err := piGrantsFromStore(store(map[credential.Provider]*credential.Credential{
+		g, err := piGrantsFromStore("", store(map[credential.Provider]*credential.Credential{
 			credential.ProviderAnthropic: {Metadata: map[string]string{credential.MetaKeyBaseURL: "https://gw.lunaroute.com"}},
 		}, ""))
 		want := piGrants{AnthropicGatewayURL: "https://gw.lunaroute.com"}
@@ -149,7 +149,7 @@ func TestPiGrantsFromStore(t *testing.T) {
 	// configured" — that would tell the user to grant a key they already have.
 	for _, p := range []credential.Provider{credential.ProviderAnthropic, credential.ProviderOpenAI, credential.ProviderLunaRoute} {
 		t.Run("read failure on "+string(p), func(t *testing.T) {
-			_, err := piGrantsFromStore(store(nil, p))
+			_, err := piGrantsFromStore("", store(nil, p))
 			if err == nil || !strings.Contains(err.Error(), "authentication failed") || !strings.Contains(err.Error(), string(p)) {
 				t.Errorf("err = %v, want the %s read failure", err, p)
 			}
