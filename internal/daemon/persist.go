@@ -259,7 +259,7 @@ func RestoreRunsWithSerial(ctx context.Context, registry *Registry, runs []Persi
 		// Open the store scoped to this run's profile — the daemon serves runs
 		// from many profiles, so a single default-profile store would re-resolve
 		// the wrong credentials (the same bug as token refresh).
-		store, err := credential.NewFileStore(storeDirForRun(rc), key)
+		store, err := credential.NewProfileStore(rc.CredProfile, key)
 		if err != nil {
 			log.Warn("restore: cannot open credential store, skipping run",
 				"run_id", pr.RunID, "error", err)

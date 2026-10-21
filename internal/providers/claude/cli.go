@@ -177,7 +177,7 @@ func GetCredentialName() string {
 	if err != nil {
 		return ""
 	}
-	store, err := credential.NewFileStore(credential.DefaultStoreDir(), key)
+	store, err := credential.NewProfileStore(credential.ActiveProfile, key)
 	if err != nil {
 		return ""
 	}
@@ -200,10 +200,14 @@ func resolveClaudeCredential(store *credential.FileStore) string {
 
 	// Auto-migrate: claude-oauth.enc (old provider name) → claude.enc
 	if oldCred, getErr := store.Get("claude-oauth"); getErr == nil {
+		owner, err := store.Owner("claude-oauth")
+		if err != nil {
+			return ""
+		}
 		migrated := *oldCred
 		migrated.Provider = credential.ProviderClaude
-		if saveErr := store.Save(migrated); saveErr == nil {
-			_ = store.Delete("claude-oauth")
+		if saveErr := owner.Save(migrated); saveErr == nil {
+			_ = owner.Delete("claude-oauth")
 			log.Info("migrated credential from claude-oauth to claude",
 				"subsystem", "grant",
 			)
@@ -219,10 +223,14 @@ func resolveClaudeCredential(store *credential.FileStore) string {
 
 	// Auto-migrate: if anthropic.enc contains an OAuth token, move it to claude.enc
 	if credential.IsOAuthToken(cred.Token) {
+		owner, err := store.Owner(credential.ProviderAnthropic)
+		if err != nil {
+			return ""
+		}
 		migrated := *cred
 		migrated.Provider = credential.ProviderClaude
-		if saveErr := store.Save(migrated); saveErr == nil {
-			_ = store.Delete(credential.ProviderAnthropic)
+		if saveErr := owner.Save(migrated); saveErr == nil {
+			_ = owner.Delete(credential.ProviderAnthropic)
 			log.Info("migrated OAuth token from anthropic to claude",
 				"subsystem", "grant",
 			)

@@ -18,7 +18,8 @@ var grantListCmd = &cobra.Command{
 	Short: "List granted credentials",
 	Long: `List all credentials stored in the credential store.
 
-Shows the provider, type, and when each credential was granted.
+Shows the provider, type, when each credential was granted, and its source profile.
+Includes inherited grants, with local overrides taking precedence.
 Use --profile to list credentials for a specific profile.
 
 Examples:
@@ -39,7 +40,7 @@ func runGrantList(cmd *cobra.Command, args []string) error {
 	}
 
 	storeDir := credential.DefaultStoreDir()
-	store, err := credential.NewFileStore(storeDir, key)
+	store, err := credential.NewProfileStore(credential.ActiveProfile, key)
 	if err != nil {
 		return fmt.Errorf("opening credential store: %w", err)
 	}
@@ -50,13 +51,16 @@ func runGrantList(cmd *cobra.Command, args []string) error {
 	}
 
 	// Load SSH mappings (stored separately from .enc credentials)
-	sshMappings, _ := store.GetSSHMappings()
+	sshMappings, err := store.GetSSHMappings()
+	if err != nil {
+		return fmt.Errorf("listing SSH mappings: %w", err)
+	}
 
-	if credential.ActiveProfile != "" {
+	if credential.ActiveProfile != "" && !jsonOut {
 		fmt.Printf("Profile: %s\n\n", credential.ActiveProfile)
 	}
 
-	if len(creds) == 0 && len(sshMappings) == 0 {
+	if len(creds) == 0 && len(sshMappings) == 0 && !jsonOut {
 		// Check if there are .enc files that couldn't be decrypted
 		if hasUnreadableCredentials(storeDir) {
 			ui.Warn("Found encrypted credential files that cannot be decrypted.")
@@ -85,10 +89,16 @@ func runGrantList(cmd *cobra.Command, args []string) error {
 			Provider  string `json:"provider"`
 			Type      string `json:"type"`
 			GrantedAt string `json:"granted_at"`
+			Source    string `json:"source"`
 		}
 		out := make([]jsonCred, 0, len(creds)+len(sshMappings))
 		for _, c := range creds {
+			source, err := store.Source(c.Provider)
+			if err != nil {
+				return err
+			}
 			out = append(out, jsonCred{
+				Source: profileSourceLabel(source),
 				// Name it the way it is granted and revoked, not by the
 				// internal store key.
 				Provider:  credential.GrantNameForStoreKey(c.Provider),
@@ -97,7 +107,12 @@ func runGrantList(cmd *cobra.Command, args []string) error {
 			})
 		}
 		for _, m := range sshMappings {
+			source, err := store.SSHSource(m.Host)
+			if err != nil {
+				return err
+			}
 			out = append(out, jsonCred{
+				Source:    profileSourceLabel(source),
 				Provider:  "ssh:" + m.Host,
 				Type:      "key",
 				GrantedAt: m.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
@@ -107,24 +122,41 @@ func runGrantList(cmd *cobra.Command, args []string) error {
 	}
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "PROVIDER\tTYPE\tGRANTED")
+	fmt.Fprintln(w, "PROVIDER\tTYPE\tGRANTED\tSOURCE")
 	for _, c := range creds {
-		fmt.Fprintf(w, "%s\t%s\t%s\n",
+		source, err := store.Source(c.Provider)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
 			credential.GrantNameForStoreKey(c.Provider),
 			credType(c),
 			formatAge(c.CreatedAt),
+			profileSourceLabel(source),
 		)
 	}
 	for _, m := range sshMappings {
-		fmt.Fprintf(w, "ssh:%s\tkey (%s)\t%s\n",
+		source, err := store.SSHSource(m.Host)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(w, "ssh:%s\tkey (%s)\t%s\t%s\n",
 			m.Host,
 			shortFingerprint(m.KeyFingerprint),
 			formatAge(m.CreatedAt),
+			profileSourceLabel(source),
 		)
 	}
 	w.Flush()
 
 	return nil
+}
+
+func profileSourceLabel(name string) string {
+	if name == "" {
+		return "(default)"
+	}
+	return name
 }
 
 func credType(c credential.Credential) string {

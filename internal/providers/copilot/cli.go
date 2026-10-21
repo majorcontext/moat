@@ -226,7 +226,7 @@ func defaultCopilotCredentialConfigured() bool {
 	if err != nil {
 		return false
 	}
-	store, err := credential.NewFileStore(credential.DefaultStoreDir(), key)
+	store, err := credential.NewProfileStore(credential.ActiveProfile, key)
 	if err != nil {
 		return false
 	}

@@ -292,7 +292,7 @@ func getAnthropicCredential() (*credential.Credential, string) {
 		return nil, "cannot access credential store encryption key"
 	}
 
-	store, err := credential.NewFileStore(credential.DefaultStoreDir(), key)
+	store, err := credential.NewProfileStore(credential.ActiveProfile, key)
 	if err != nil {
 		return nil, fmt.Sprintf("cannot open credential store: %v", err)
 	}

@@ -2,8 +2,10 @@ package credential
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 )
 
@@ -26,6 +28,41 @@ func (s *FileStore) sshPath() string {
 
 // GetSSHMappings returns all SSH host-to-key mappings.
 func (s *FileStore) GetSSHMappings() ([]SSHMapping, error) {
+	local, err := s.localSSHMappings()
+	if err != nil {
+		return nil, err
+	}
+	byHost := make(map[string]SSHMapping)
+	if s.parent != nil {
+		inherited, err := s.parent.GetSSHMappings()
+		if err != nil {
+			return nil, err
+		}
+		for _, m := range inherited {
+			byHost[m.Host] = m
+		}
+	}
+	for _, m := range local {
+		byHost[m.Host] = m
+	}
+	var mappings []SSHMapping
+	for host, m := range byHost {
+		if err := validateProvider(Provider("ssh:" + host)); err != nil {
+			return nil, err
+		}
+		blocked, err := s.isRevoked(Provider("ssh:" + host))
+		if err != nil {
+			return nil, err
+		}
+		if !blocked {
+			mappings = append(mappings, m)
+		}
+	}
+	sort.Slice(mappings, func(i, j int) bool { return mappings[i].Host < mappings[j].Host })
+	return mappings, nil
+}
+
+func (s *FileStore) localSSHMappings() ([]SSHMapping, error) {
 	data, err := os.ReadFile(s.sshPath())
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -64,7 +101,11 @@ func (s *FileStore) GetSSHMappingsForHosts(hosts []string) ([]SSHMapping, error)
 
 // AddSSHMapping adds or updates an SSH host-to-key mapping.
 func (s *FileStore) AddSSHMapping(mapping SSHMapping) error {
-	mappings, err := s.GetSSHMappings()
+	key := Provider("ssh:" + mapping.Host)
+	if err := validateProvider(key); err != nil {
+		return err
+	}
+	mappings, err := s.localSSHMappings()
 	if err != nil {
 		return err
 	}
@@ -89,14 +130,29 @@ func (s *FileStore) AddSSHMapping(mapping SSHMapping) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(s.sshPath(), data, 0o600)
+	if err := os.WriteFile(s.sshPath(), data, 0o600); err != nil {
+		return err
+	}
+	if err := os.Remove(s.revokedPath(key)); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
 }
 
 // RemoveSSHMapping removes an SSH mapping for a host.
 func (s *FileStore) RemoveSSHMapping(host string) error {
-	mappings, err := s.GetSSHMappings()
+	key := Provider("ssh:" + host)
+	if err := validateProvider(key); err != nil {
+		return err
+	}
+	mappings, err := s.localSSHMappings()
 	if err != nil {
 		return err
+	}
+	if s.parent != nil {
+		if writeErr := os.WriteFile(s.revokedPath(key), nil, 0o600); writeErr != nil {
+			return writeErr
+		}
 	}
 
 	var filtered []SSHMapping
@@ -112,4 +168,30 @@ func (s *FileStore) RemoveSSHMapping(host string) error {
 		return err
 	}
 	return os.WriteFile(s.sshPath(), data, 0o600)
+}
+
+// SSHSource returns the profile supplying a host mapping.
+func (s *FileStore) SSHSource(host string) (string, error) {
+	key := Provider("ssh:" + host)
+	if err := validateProvider(key); err != nil {
+		return "", err
+	}
+	if blocked, err := s.isRevoked(key); err != nil {
+		return "", err
+	} else if blocked {
+		return "", fmt.Errorf("%w: %s", ErrNotFound, key)
+	}
+	mappings, err := s.localSSHMappings()
+	if err != nil {
+		return "", err
+	}
+	for _, m := range mappings {
+		if m.Host == host {
+			return s.profile, nil
+		}
+	}
+	if s.parent != nil {
+		return s.parent.SSHSource(host)
+	}
+	return "", fmt.Errorf("%w: %s", ErrNotFound, key)
 }
