@@ -103,6 +103,13 @@ func TestRefreshLockCancellation(t *testing.T) {
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("lock wait = %v", err)
 	}
+	if !strings.Contains(err.Error(), "another moat process holds the lock") {
+		t.Fatalf("lock timeout needs recovery guidance: %v", err)
+	}
+	unlock()
+	if err := base.Save(Credential{Provider: "github", Token: "retry"}); err != nil {
+		t.Fatalf("write after lock timeout: %v", err)
+	}
 }
 
 func TestDeleteFailureKeepsExclusion(t *testing.T) {

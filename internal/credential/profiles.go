@@ -2,6 +2,7 @@ package credential
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -117,11 +118,20 @@ func (s *FileStore) lock(ctx context.Context, provider Provider) (func(), error)
 	if err := validateProvider(provider); err != nil {
 		return nil, err
 	}
+	// Bound waits even for Save/Delete, whose Store interface has no context.
+	// Refresh token exchanges normally time out after 30 seconds.
+	ctx, cancel := context.WithTimeout(ctx, time.Minute)
+	defer cancel()
+	// Keep the lock file permanently: unlinking it could let another process
+	// lock a different inode while existing waiters still use the original.
 	// The stable lock inode is separate from the atomically replaced secret.
 	lock := flock.New(s.path(provider)+".lock", flock.SetPermissions(0o600))
 	locked, err := lock.TryLockContext(ctx, 25*time.Millisecond)
 	if err != nil || !locked {
 		_ = lock.Close()
+		if errors.Is(err, context.DeadlineExceeded) {
+			return nil, fmt.Errorf("waiting for credential %s: %w; another moat process holds the lock, retry when it finishes", provider, err)
+		}
 		if err == nil {
 			err = fmt.Errorf("lock unavailable")
 		}
