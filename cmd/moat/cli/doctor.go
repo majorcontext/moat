@@ -168,7 +168,7 @@ func (s *credentialSection) Print(w io.Writer) error {
 		return fmt.Errorf("getting encryption key: %w", err)
 	}
 
-	store, err := credential.NewFileStore(credential.DefaultStoreDir(), key)
+	store, err := credential.NewProfileStore(credential.ActiveProfile, key)
 	if err != nil {
 		return fmt.Errorf("creating credential store: %w", err)
 	}
@@ -322,7 +322,7 @@ func (s *sshSection) Print(w io.Writer) error {
 		return fmt.Errorf("getting encryption key: %w", err)
 	}
 
-	store, err := credential.NewFileStore(credential.DefaultStoreDir(), key)
+	store, err := credential.NewProfileStore(credential.ActiveProfile, key)
 	if err != nil {
 		return fmt.Errorf("creating credential store: %w", err)
 	}

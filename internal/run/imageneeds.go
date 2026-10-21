@@ -32,7 +32,7 @@ func resolveImageNeeds(grants []string, depList []deps.Dependency) imageNeeds {
 	key, keyErr := credential.DefaultEncryptionKey()
 	if keyErr != nil {
 		log.Debug("failed to derive encryption key", "error", keyErr)
-	} else if s, storeErr := credential.NewFileStore(credential.DefaultStoreDir(), key); storeErr != nil {
+	} else if s, storeErr := credential.NewProfileStore(credential.ActiveProfile, key); storeErr != nil {
 		log.Debug("failed to open credential store", "error", storeErr)
 	} else {
 		store = s

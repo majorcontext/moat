@@ -913,7 +913,7 @@ This deletes the encrypted credential file. Future runs cannot use the credentia
 
 ## Credential profiles
 
-Profiles maintain separate sets of credentials. Use one profile for personal projects and another for work.
+Profiles maintain separate sets of credentials. Use one profile for personal projects and another for work. A profile can explicitly inherit another profile's grants and override individual credentials.
 
 ### Setting a profile
 
@@ -935,6 +935,58 @@ moat grant github
 moat run --grant github
 ```
 
+### Inherit and override
+
+Create a profile using the default credential store or an existing named profile as its parent:
+
+```bash
+moat profile create client --inherit-default
+
+# Alternatively, inherit from a named profile
+moat profile create client --inherit work
+
+# Override just these services in the new profile
+moat grant oauth sentry --profile client
+moat grant oauth linear --profile client
+
+moat grant list --profile client
+moat run --profile client
+```
+
+The two create commands above are alternatives; creating an existing profile is an error. Without either inheritance flag, `moat profile create NAME` creates an isolated profile. The parent is explicit and does not depend on `MOAT_PROFILE` or `--profile`.
+
+Lookup checks local grants first, then follows the parent chain. Parent grants remain live: adding, updating, or removing a parent grant affects children that have no override. OAuth refreshes are saved in the profile that owns the credential. SSH host mappings also inherit, with overrides per host. Grant lists include a `SOURCE` column (`source` in JSON); `(default)` identifies the unscoped store. If an effective grant cannot be read or decrypted, listing fails with an error naming the provider instead of silently omitting it. A corrupt local override never falls back to the parent grant.
+
+Implicit agent grants use the same lookup. For example, `moat codex --profile client` automatically discovers an inherited Codex subscription or OpenAI API key; no explicit `--grant` is needed. Selecting the profile through `MOAT_PROFILE` works the same way.
+
+Granting a credential writes only to the selected profile. Revoking a grant in an inheriting profile deletes any local credential and excludes that grant from inheritance, leaving the parent unchanged:
+
+```bash
+moat revoke oauth:linear --profile client
+```
+
+Re-granting the credential enables it locally again. Exclusions also apply to descendants and to grants added to the parent later; `moat revoke` reports this exclusion. These operations affect stored grants; already-running containers may retain credentials until restarted.
+
+Inheritance is recorded in `~/.moat/config.yaml`:
+
+```yaml
+profiles:
+  work:
+    inherit_default: true
+    env:
+      TEAM: work
+  client:
+    inherit: work
+    env:
+      TEAM: client
+```
+
+`inherit` and `inherit_default` are mutually exclusive. Unknown parents and inheritance cycles are rejected. A named profile called `default` is distinct from the default store. Environment variables merge along the same chain, with child values taking precedence; `moat.yaml` and `-e` override profile environment variables.
+
+Profile creation preserves YAML comments and unrelated settings, but may reformat indentation. Concurrent `moat profile create` commands use a shared file lock to preserve each other's changes; manual config edits do not participate in that lock.
+
+OAuth refreshes hold a per-credential file lock across the read, token exchange, and save. CLI grants and revocations use the same lock, so they wait for an in-progress refresh before updating that credential. Lock waits time out after one minute with an error identifying the provider; retry once the other operation finishes. Atomic file replacement lets readers see a complete credential throughout the update. If deletion fails after an inheritance exclusion was saved, the grant remains excluded and the error reports that the local file could not be removed.
+
 ### Storage layout
 
 Profile credentials are stored separately from the default credential store:
@@ -946,7 +998,7 @@ Profile credentials are stored separately from the default credential store:
   personal/                    # "personal" profile
 ```
 
-Each profile has its own isolated set of encrypted credential files. Granting a credential in one profile does not affect another.
+Each profile has its own encrypted credential files. Inheritance reads the parent's files without copying them; local overrides and exclusions live in the child profile. Profiles without explicit inheritance remain isolated.
 
 ### Profile names
 

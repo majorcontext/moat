@@ -191,7 +191,7 @@ func (s *Server) handleRegisterRun(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusInternalServerError, RegisterResponse{Error: "opening credential store"})
 			return
 		}
-		store, err := credential.NewFileStore(storeDirForRun(rc), key)
+		store, err := credential.NewProfileStore(rc.CredProfile, key)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, RegisterResponse{Error: "opening credential store"})
 			return

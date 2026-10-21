@@ -137,7 +137,7 @@ func (m *Manager) Create(ctx context.Context, opts Options) (resRun *Run, retErr
 			if keyErr != nil {
 				credKeyFailed = true
 				credStoreErr = fmt.Errorf("getting encryption key: %w", keyErr)
-			} else if s, storeErr := credential.NewFileStore(credential.DefaultStoreDir(), key); storeErr != nil {
+			} else if s, storeErr := credential.NewProfileStore(credential.ActiveProfile, key); storeErr != nil {
 				credStoreErr = fmt.Errorf("opening credential store: %w", storeErr)
 			} else {
 				credStoreCache = s

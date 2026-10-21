@@ -3,6 +3,7 @@ package cli
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/majorcontext/moat/internal/credential"
 	"github.com/majorcontext/moat/internal/log"
@@ -23,7 +24,9 @@ Supported providers:
   aws               AWS IAM role configuration
   mcp:<name>        MCP server credential (mcp-<name> also accepted)
 
-The credential file is permanently deleted.
+The local credential is deleted. In an inheriting profile, the grant is also
+excluded from inheritance; the parent's credential is never changed.
+Re-grant the credential to enable it locally again.
 
 Use --profile (or MOAT_PROFILE env var) to revoke credentials from a named profile.
 
@@ -64,21 +67,29 @@ func runRevoke(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("getting encryption key: %w", err)
 	}
-	store, err := credential.NewFileStore(
-		credential.DefaultStoreDir(),
+	store, err := credential.NewProfileStore(
+		credential.ActiveProfile,
 		key,
 	)
 	if err != nil {
 		return fmt.Errorf("opening credential store: %w", err)
 	}
 
-	// Check if credential exists
-	if _, err := store.Get(provider); err != nil {
-		return fmt.Errorf("no credential found for %s", provider)
-	}
-
-	if err := store.Delete(provider); err != nil {
-		return fmt.Errorf("deleting credential: %w", err)
+	if strings.HasPrefix(providerName, "ssh:") {
+		host := strings.TrimPrefix(providerName, "ssh:")
+		if _, err := store.SSHSource(host); err != nil {
+			return err
+		}
+		if err := store.RemoveSSHMapping(host); err != nil {
+			return err
+		}
+	} else {
+		if _, err := store.Get(provider); err != nil {
+			return fmt.Errorf("reading credential for %s: %w", provider, err)
+		}
+		if err := store.Delete(provider); err != nil {
+			return fmt.Errorf("deleting credential: %w", err)
+		}
 	}
 
 	log.Info("credential revoked", "provider", provider)
@@ -86,6 +97,13 @@ func runRevoke(cmd *cobra.Command, args []string) error {
 		fmt.Printf("%s credential revoked (profile: %s)\n", provider, credential.ActiveProfile)
 	} else {
 		fmt.Printf("%s credential revoked\n", provider)
+	}
+	excluded, exclusionErr := store.IsExcluded(provider)
+	if exclusionErr != nil {
+		return fmt.Errorf("checking grant exclusion: %w", exclusionErr)
+	}
+	if excluded {
+		fmt.Println("Excluded from inheritance, including future parent grants. Re-grant to enable it locally again.")
 	}
 	return nil
 }

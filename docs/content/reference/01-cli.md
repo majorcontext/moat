@@ -879,7 +879,7 @@ moat grant aws \
 
 ### moat grant list
 
-List stored credentials. Shows credentials from the active profile, or the default store if no profile is set.
+List effective credentials, including inherited grants. Shows each credential's source profile in the `SOURCE` column (`source` in JSON); `(default)` means the unscoped store. Uses the active profile, or the default store if no profile is set.
 
 ```
 moat grant list
@@ -957,6 +957,8 @@ Output columns:
 
 Remove stored credentials. Operates on the active profile, or the default store if no profile is set.
 
+For an inheriting profile, deletes any local credential and excludes the grant from inheritance. The parent's credential remains unchanged. Re-grant to enable the credential locally again.
+
 ```
 moat revoke <provider>
 ```
@@ -973,6 +975,31 @@ moat revoke ssh:github.com
 # Revoke from a specific profile
 moat revoke github --profile work
 ```
+
+---
+
+## moat profile create
+
+Create a credential profile, optionally inheriting grants and environment variables from a parent.
+
+```bash
+moat profile create <name> [--inherit <parent> | --inherit-default]
+```
+
+| Flag | Description |
+|------|-------------|
+| `--inherit NAME` | Inherit from an existing named profile |
+| `--inherit-default` | Inherit from the default credential store |
+
+The flags are mutually exclusive. Without either flag, the profile is isolated. Existing destination names, unknown parents, and inheritance cycles are errors. `--profile` and `MOAT_PROFILE` do not choose the parent.
+
+```bash
+moat profile create client --inherit-default
+moat grant oauth sentry --profile client
+moat grant list --profile client
+```
+
+See [Inherit and override](./04-grants.md#inherit-and-override) for lookup, refresh, and revocation behavior.
 
 ---
 

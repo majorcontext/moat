@@ -217,7 +217,7 @@ func loadPiGrants() (piGrants, error) {
 	if err != nil {
 		return piGrants{}, fmt.Errorf("pi: reading the credential encryption key: %w", err)
 	}
-	store, err := credential.NewFileStore(credential.DefaultStoreDir(), key)
+	store, err := credential.NewProfileStore(credential.ActiveProfile, key)
 	if err != nil {
 		return piGrants{}, fmt.Errorf("pi: opening the credential store: %w", err)
 	}

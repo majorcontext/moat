@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"net/url"
 	"slices"
 	"strings"
@@ -73,7 +74,7 @@ func StartTokenRefresh(ctx context.Context, rc *RunContext, grants []string) {
 		log.Debug("token refresh: cannot get encryption key", "error", err)
 		return
 	}
-	store, err := credential.NewFileStore(storeDirForRun(rc), key)
+	store, err := credential.NewProfileStore(rc.CredProfile, key)
 	if err != nil {
 		log.Debug("token refresh: cannot open store", "error", err)
 		return
@@ -163,8 +164,14 @@ func refreshCodexSubscription(ctx context.Context, store credential.Store, cred 
 	}
 	codexRefreshMu.Lock()
 	defer codexRefreshMu.Unlock()
+	store, unlock, err := credential.LockRefreshStore(ctx, store, credential.ProviderCodexSubscription)
+	if err != nil {
+		return nil, false, err
+	}
 
-	if latest, err := store.Get(credential.ProviderCodexSubscription); err == nil {
+	defer unlock()
+
+	if latest, readErr := store.Get(credential.ProviderCodexSubscription); readErr == nil {
 		reloaded := provider.FromLegacy(latest)
 		if !codexNeedsRefresh(reloaded) {
 			// Another run exchanged while this one waited on the lock.
@@ -224,8 +231,8 @@ func refreshTokenForGrant(ctx context.Context, rc *RunContext, grant string, sto
 	}
 
 	// Codex subscriptions are refreshed centrally so concurrent runs cannot
-	// each redeem the same single-use refresh token. Every other provider
-	// refreshes per run against its own credential.
+	// each redeem the same single-use refresh token. Other providers below
+	// serialize by the profile that owns their credential.
 	if credName == credential.ProviderCodexSubscription {
 		updated, exchanged, refreshErr := refreshCodexSubscription(ctx, store, provCred)
 		if refreshErr != nil {
@@ -247,6 +254,23 @@ func refreshTokenForGrant(ctx context.Context, rc *RunContext, grant string, sto
 		prov.ConfigureProxy(rc, updated)
 		return
 	}
+	// Pin both the read and subsequent save to the profile owning this grant.
+	// A newly granted child override must not receive the parent's refreshed token.
+	store, unlock, err := credential.LockRefreshStore(ctx, store, credName)
+	if err != nil {
+		return
+	}
+	defer unlock()
+	cred, err = store.Get(credName)
+	if err != nil {
+		return
+	}
+	provCred = provider.FromLegacy(cred)
+	// Providers may mutate their input or return an equal copy. Snapshot the
+	// stored values, including mutable collections, before calling Refresh.
+	previous := *cred
+	previous.Scopes = slices.Clone(cred.Scopes)
+	previous.Metadata = maps.Clone(cred.Metadata)
 
 	refreshCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	updated, err := rp.Refresh(refreshCtx, rc, provCred)
@@ -255,21 +279,25 @@ func refreshTokenForGrant(ctx context.Context, rc *RunContext, grant string, sto
 		log.Debug("token refresh failed", "provider", credName, "error", err)
 		return
 	}
-	if updated == nil || updated.Token == provCred.Token {
+	if updated == nil {
 		return
 	}
 	storeCred := credential.Credential{
 		Provider: credName, Token: updated.Token, Scopes: updated.Scopes,
 		ExpiresAt: updated.ExpiresAt, CreatedAt: updated.CreatedAt, Metadata: updated.Metadata,
 	}
-	if saveErr := store.Save(storeCred); saveErr != nil {
-		// Keep publishing the new token to this run's MCP servers and Copilot
-		// below. Refresh() has already rewritten the run's direct credentials
-		// in memory, so returning here would leave the relay injecting a stale
-		// token while the direct path used the fresh one. The cost of
-		// continuing is that a daemon restart re-reads the unsaved older token.
-		log.Warn("failed to persist refreshed credential", "provider", credName, "error", saveErr)
+	if !sameCredential(previous, storeCred) {
+		if saveErr := store.Save(storeCred); saveErr != nil {
+			// Keep publishing the new token to this run's MCP servers and Copilot
+			// below. Refresh() has already rewritten the run's direct credentials
+			// in memory, so returning here would leave the relay injecting a stale
+			// token while the direct path used the fresh one. The cost of
+			// continuing is that a daemon restart re-reads the unsaved older token.
+			log.Warn("failed to persist refreshed credential", "provider", credName, "error", saveErr)
+		}
 	}
+	// Publish even when Refresh returned the existing credential: another run
+	// may have refreshed the shared parent while this run waited for the lock.
 	// Update MCP server credentials that use this grant.
 	//
 	// prov.ConfigureProxy is deliberately not called here: Refresh() already
@@ -294,6 +322,12 @@ func refreshTokenForGrant(ctx context.Context, rc *RunContext, grant string, sto
 		}
 	}
 	log.Debug("token refreshed", "provider", credName)
+}
+
+func sameCredential(a, b credential.Credential) bool {
+	return a.Provider == b.Provider && a.Token == b.Token &&
+		a.ExpiresAt.Equal(b.ExpiresAt) && a.CreatedAt.Equal(b.CreatedAt) &&
+		slices.Equal(a.Scopes, b.Scopes) && maps.Equal(a.Metadata, b.Metadata)
 }
 
 // credentialRefProviders are the grants a client may ask the daemon to resolve
