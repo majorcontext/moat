@@ -84,8 +84,10 @@ func runRevoke(cmd *cobra.Command, args []string) error {
 			return err
 		}
 	} else {
-		if _, err := store.Get(provider); err != nil {
-			return fmt.Errorf("reading credential for %s: %w", provider, err)
+		// Check existence and inheritance without decrypting: revocation must
+		// also work for corrupt credentials or credentials encrypted with an old key.
+		if _, err := store.Source(provider); err != nil {
+			return fmt.Errorf("locating credential for %s: %w", provider, err)
 		}
 		if err := store.Delete(provider); err != nil {
 			return fmt.Errorf("deleting credential: %w", err)
