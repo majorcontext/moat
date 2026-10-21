@@ -1,20 +1,22 @@
 package credential
 
 import (
+	"context"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/credential/keyring"
-	"github.com/majorcontext/moat/internal/log"
 )
 
 // validProfileName matches alphanumeric characters, hyphens, and underscores.
@@ -22,8 +24,10 @@ var validProfileName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`)
 
 // FileStore implements Store using encrypted files.
 type FileStore struct {
-	dir    string
-	cipher cipher.AEAD
+	dir     string
+	cipher  cipher.AEAD
+	parent  *FileStore
+	profile string
 }
 
 // NewFileStore creates a file-based credential store.
@@ -66,6 +70,16 @@ func validateProvider(provider Provider) error {
 
 // Save stores a credential encrypted on disk.
 func (s *FileStore) Save(cred Credential) error {
+	unlock, err := s.lock(context.Background(), cred.Provider)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	return s.save(cred)
+}
+
+// save requires the caller to hold the provider's file lock.
+func (s *FileStore) save(cred Credential) error {
 	if err := validateProvider(cred.Provider); err != nil {
 		return err
 	}
@@ -75,13 +89,30 @@ func (s *FileStore) Save(cred Credential) error {
 	}
 
 	nonce := make([]byte, s.cipher.NonceSize())
-	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
-		return fmt.Errorf("generating nonce: %w", err)
+	if _, randErr := io.ReadFull(rand.Reader, nonce); randErr != nil {
+		return fmt.Errorf("generating nonce: %w", randErr)
 	}
 
 	encrypted := s.cipher.Seal(nonce, nonce, data, nil)
-	if err := os.WriteFile(s.path(cred.Provider), encrypted, 0o600); err != nil {
+	// Readers in other runs may be resolving this shared credential while it
+	// rotates. Publish the complete encrypted file in one rename.
+	f, err := os.CreateTemp(s.dir, ".credential-*")
+	if err != nil {
+		return fmt.Errorf("creating credential file: %w", err)
+	}
+	defer os.Remove(f.Name())
+	if _, err := f.Write(encrypted); err != nil {
+		_ = f.Close()
 		return fmt.Errorf("writing credential file: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(f.Name(), s.path(cred.Provider)); err != nil {
+		return fmt.Errorf("writing credential file: %w", err)
+	}
+	if err := os.Remove(s.revokedPath(cred.Provider)); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("clearing credential exclusion: %w", err)
 	}
 
 	return nil
@@ -92,9 +123,17 @@ func (s *FileStore) Get(provider Provider) (*Credential, error) {
 	if err := validateProvider(provider); err != nil {
 		return nil, err
 	}
+	if blocked, err := s.IsExcluded(provider); err != nil {
+		return nil, err
+	} else if blocked {
+		return nil, fmt.Errorf("%w: %s (revoked in this profile)", ErrNotFound, provider)
+	}
 	encrypted, err := os.ReadFile(s.path(provider))
 	if err != nil {
 		if os.IsNotExist(err) {
+			if s.parent != nil {
+				return s.parent.Get(provider)
+			}
 			return nil, fmt.Errorf("%w: %s", ErrNotFound, provider)
 		}
 		return nil, fmt.Errorf("reading credential file: %w", err)
@@ -124,10 +163,29 @@ func (s *FileStore) Get(provider Provider) (*Credential, error) {
 
 // Delete removes a credential for the given provider.
 func (s *FileStore) Delete(provider Provider) error {
+	unlock, err := s.lock(context.Background(), provider)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	return s.delete(provider)
+}
+
+// delete requires the caller to hold the provider's file lock.
+func (s *FileStore) delete(provider Provider) error {
 	if err := validateProvider(provider); err != nil {
 		return err
 	}
+	// Record the exclusion before deleting so fallback cannot re-enable a grant.
+	if s.parent != nil {
+		if err := os.WriteFile(s.revokedPath(provider), nil, 0o600); err != nil {
+			return err
+		}
+	}
 	if err := os.Remove(s.path(provider)); err != nil && !os.IsNotExist(err) {
+		if s.parent != nil {
+			return fmt.Errorf("credential excluded from inheritance, but removing the local file failed: %w", err)
+		}
 		return fmt.Errorf("deleting credential: %w", err)
 	}
 	return nil
@@ -135,24 +193,30 @@ func (s *FileStore) Delete(provider Provider) error {
 
 // List returns all stored credentials.
 func (s *FileStore) List() ([]Credential, error) {
-	entries, err := os.ReadDir(s.dir)
-	if err != nil {
-		return nil, fmt.Errorf("reading credential dir: %w", err)
-	}
-
-	creds := make([]Credential, 0, len(entries))
-	for _, entry := range entries {
-		if filepath.Ext(entry.Name()) != ".enc" {
-			continue
+	providers := make(map[Provider]bool)
+	for layer := s; layer != nil; layer = layer.parent {
+		entries, err := os.ReadDir(layer.dir)
+		if err != nil {
+			return nil, fmt.Errorf("reading credential dir: %w", err)
 		}
-		provider := Provider(entry.Name()[:len(entry.Name())-4])
+		for _, entry := range entries {
+			if filepath.Ext(entry.Name()) == ".enc" {
+				providers[Provider(strings.TrimSuffix(entry.Name(), ".enc"))] = true
+			}
+		}
+	}
+	creds := make([]Credential, 0, len(providers))
+	for provider := range providers {
 		cred, err := s.Get(provider)
 		if err != nil {
-			log.Debug("Skipping credential", "provider", provider, "error", err)
-			continue // Skip unreadable credentials
+			if errors.Is(err, ErrNotFound) {
+				continue
+			}
+			return nil, fmt.Errorf("reading credential %s: %w", provider, err)
 		}
 		creds = append(creds, *cred)
 	}
+	sort.Slice(creds, func(i, j int) bool { return creds[i].Provider < creds[j].Provider })
 
 	return creds, nil
 }
@@ -202,20 +266,29 @@ func ValidateProfile(name string) error {
 // ListProfiles returns the names of all credential profiles.
 // Does not include the default (unscoped) profile.
 func ListProfiles() ([]string, error) {
+	cfg, err := config.LoadGlobal()
+	if err != nil {
+		return nil, err
+	}
+	names := make(map[string]bool)
+	for name := range cfg.Profiles {
+		names[name] = true
+	}
 	profilesDir := filepath.Join(config.GlobalConfigDir(), "credentials", "profiles")
 	entries, err := os.ReadDir(profilesDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
+	if err != nil && !os.IsNotExist(err) {
 		return nil, fmt.Errorf("reading profiles directory: %w", err)
 	}
 	var profiles []string
 	for _, entry := range entries {
 		if entry.IsDir() && ValidateProfile(entry.Name()) == nil {
-			profiles = append(profiles, entry.Name())
+			names[entry.Name()] = true
 		}
 	}
+	for name := range names {
+		profiles = append(profiles, name)
+	}
+	sort.Strings(profiles)
 	return profiles, nil
 }
 

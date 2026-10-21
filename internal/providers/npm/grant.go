@@ -408,7 +408,7 @@ func loadExistingEntries() ([]RegistryEntry, error) {
 	if err != nil {
 		return nil, err
 	}
-	store, err := credential.NewFileStore(credential.DefaultStoreDir(), key)
+	store, err := credential.NewProfileStore(credential.ActiveProfile, key)
 	if err != nil {
 		return nil, err
 	}

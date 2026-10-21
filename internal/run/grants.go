@@ -21,14 +21,15 @@ func AppendMCPGrants(grants []string, cfg *config.Config) []string {
 	return appendMCPGrants(grants, cfg)
 }
 
-// OpenDefaultStore opens the default-profile credential store. Mirrors the
-// store construction inside Create so the CLI pre-flight reads the same source.
+// OpenDefaultStore opens the active profile and its explicitly configured
+// ancestors (or the default store when no profile is selected). It mirrors the
+// store construction inside Create so CLI preflight reads the same credentials.
 func OpenDefaultStore() (*credential.FileStore, error) {
 	key, err := credential.DefaultEncryptionKey()
 	if err != nil {
 		return nil, err
 	}
-	return credential.NewFileStore(credential.DefaultStoreDir(), key)
+	return credential.NewProfileStore(credential.ActiveProfile, key)
 }
 
 // MissingReason explains why a grant is unavailable.

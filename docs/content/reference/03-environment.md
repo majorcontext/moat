@@ -358,6 +358,7 @@ A profile is an identity — a set of credentials plus the configuration that go
 
 - Profile names follow the same rules as `--profile`: start with a letter or digit, then letters, digits, hyphens, and underscores.
 - `moat.yaml` `env` and the `-e` flag both override profile env.
+- Profiles can [inherit a parent](./04-grants.md#inherit-and-override) with `inherit: NAME` or `inherit_default: true`. Environment variables merge from parent to child, with the child's values winning. The default store has no environment variables.
 - Proxy variables Moat owns (`HTTP_PROXY`, `NO_PROXY`, `ALL_PROXY`, …) are ignored with a warning when the run has a proxy, exactly as they are in `moat.yaml` `env`.
 - Runs with no `--profile` (the default credential store) get no profile env — the default store is not a named profile.
 

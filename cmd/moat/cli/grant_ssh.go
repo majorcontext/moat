@@ -116,7 +116,7 @@ func runGrantSSH(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("getting encryption key: %w", err)
 	}
-	store, err := credential.NewFileStore(credential.DefaultStoreDir(), key)
+	store, err := credential.NewProfileStore(credential.ActiveProfile, key)
 	if err != nil {
 		return fmt.Errorf("opening credential store: %w", err)
 	}

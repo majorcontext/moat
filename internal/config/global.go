@@ -38,6 +38,11 @@ type GlobalConfig struct {
 // configuration goes with them — so settings that belong to the identity rather
 // than to a project live here instead of in each moat.yaml.
 type ProfileConfig struct {
+	// Inherit names a parent profile; InheritDefault selects the unscoped store.
+	// These are mutually exclusive, so a named profile called "default" remains valid.
+	Inherit        string `yaml:"inherit,omitempty"`
+	InheritDefault bool   `yaml:"inherit_default,omitempty"`
+
 	// Env are environment variables set in the container for any run using
 	// this profile. moat.yaml env and -e flags override them; proxy variables
 	// moat owns are filtered out, exactly as for the other two layers.
@@ -135,6 +140,9 @@ func LoadGlobal() (*GlobalConfig, error) {
 				return DefaultGlobalConfig(), fmt.Errorf("profiles.%s.env: %w", name, err)
 			}
 		}
+		if _, err := cfg.ProfileChain(name); err != nil {
+			return DefaultGlobalConfig(), err
+		}
 	}
 
 	// Apply environment overrides
@@ -173,11 +181,20 @@ func (c *GlobalConfig) ProfileEnv(name string) map[string]string {
 	if c == nil || name == "" {
 		return nil
 	}
-	prof, ok := c.Profiles[name]
-	if !ok {
+	chain, err := c.ProfileChain(name)
+	if err != nil {
 		return nil
 	}
-	return prof.Env
+	var env map[string]string
+	for i := len(chain) - 1; i >= 0; i-- {
+		for key, value := range c.Profiles[chain[i]].Env {
+			if env == nil {
+				env = make(map[string]string)
+			}
+			env[key] = value
+		}
+	}
+	return env
 }
 
 // ValidateProfileName checks a profile name from the global config. It mirrors

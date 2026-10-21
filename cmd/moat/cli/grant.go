@@ -36,7 +36,9 @@ Credentials are stored securely and injected into agent containers when
 requested via the --grant flag on 'moat run'.
 
 Use --profile (or MOAT_PROFILE env var) to store credentials in a named profile.
-Profile-scoped credentials are isolated from the default store.
+Profiles are isolated unless explicitly configured to inherit another profile.
+Create an inheriting profile with 'moat profile create NAME --inherit-default'
+or 'moat profile create NAME --inherit PARENT'. Grants always write locally.
 
 Run 'moat grant providers' to list all available providers.
 
@@ -76,7 +78,7 @@ func saveCredential(cred credential.Credential) (string, error) {
 		return "", fmt.Errorf("getting encryption key: %w", err)
 	}
 	storeDir := credential.DefaultStoreDir()
-	store, err := credential.NewFileStore(storeDir, key)
+	store, err := credential.NewProfileStore(credential.ActiveProfile, key)
 	if err != nil {
 		return "", fmt.Errorf("opening credential store: %w", err)
 	}

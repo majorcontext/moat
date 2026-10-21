@@ -223,16 +223,26 @@ func (rc *RunContext) SetCredentialHeader(host, headerName, headerValue string) 
 // grant and header name already exists for the host (e.g., during token
 // refresh), it is updated in place rather than duplicated.
 func (rc *RunContext) SetCredentialWithGrant(host, headerName, headerValue, grant string) {
+	rc.updateCredentialWithGrant(host, headerName, headerValue, grant)
+}
+
+// updateCredentialWithGrant skips identical entries, including refresh ticks
+// that republish a shared token this run already has. It reports a change.
+func (rc *RunContext) updateCredentialWithGrant(host, headerName, headerValue, grant string) bool {
 	rc.mu.Lock()
 	defer rc.mu.Unlock()
 	entry := CredentialEntry{Name: headerName, Value: headerValue, Grant: grant}
 	for i, existing := range rc.Credentials[host] {
 		if existing.Grant == grant && existing.Name == headerName {
+			if existing == entry {
+				return false
+			}
 			rc.Credentials[host][i] = entry
-			return
+			return true
 		}
 	}
 	rc.Credentials[host] = append(rc.Credentials[host], entry)
+	return true
 }
 
 // AddExtraHeader implements credential.ProxyConfigurer.
