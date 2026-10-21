@@ -249,3 +249,68 @@ type appleRuntimeWithAddress struct {
 func (r appleRuntimeWithAddress) Type() container.RuntimeType { return container.RuntimeApple }
 func (r appleRuntimeWithAddress) GetHostAddress() string      { return r.addr }
 func (r appleRuntimeWithAddress) SupportsHostNetwork() bool   { return false }
+
+// gvisorRuntime is a stubRuntime that supports host networking but reports
+// running containers under gVisor, like DockerRuntime with runsc.
+type gvisorRuntime struct {
+	*stubRuntime
+	gvisor bool
+}
+
+func (r gvisorRuntime) UsesGVisor() bool { return r.gvisor }
+
+func TestResolveNetworkConfig_GVisorUsesBridge(t *testing.T) {
+	// A stock runsc sandbox has no interfaces under --network=host, so gVisor
+	// runs must use bridge mode even when host networking is otherwise chosen.
+	m := mgrWithRuntime(gvisorRuntime{stubRuntime: &stubRuntime{}, gvisor: true})
+	mode, hosts := m.resolveNetworkConfig(false, true, "127.0.0.1")
+	if mode != "bridge" {
+		t.Fatalf("expected bridge mode under gVisor, got %q", mode)
+	}
+	// The proxy must stay reachable: the synthetic hosts are still mapped.
+	wantSynth, _ := synthHostStrategy(container.RuntimeDocker, goruntime.GOOS, "127.0.0.1")
+	for _, h := range wantSynth {
+		if !slices.Contains(hosts, h) {
+			t.Fatalf("gVisor bridge extraHosts = %v, missing %q", hosts, h)
+		}
+	}
+}
+
+func TestResolveNetworkConfig_NonGVisorKeepsHostMode(t *testing.T) {
+	// Companion: a runtime that implements UsesGVisor but reports false keeps
+	// host mode, so plain runc on Linux is unchanged.
+	m := mgrWithRuntime(gvisorRuntime{stubRuntime: &stubRuntime{}, gvisor: false})
+	mode, _ := m.resolveNetworkConfig(false, true, "127.0.0.1")
+	if mode != "host" {
+		t.Fatalf("expected host mode without gVisor, got %q", mode)
+	}
+}
+
+func TestUseHostNetwork(t *testing.T) {
+	tests := []struct {
+		name       string
+		rt         container.Runtime
+		needsPorts bool
+		want       bool
+	}{
+		{"host-capable, no ports", &stubRuntime{}, false, true},
+		{"host-capable, ports", &stubRuntime{}, true, false},
+		{"no host network support", noHostNetRuntime{&stubRuntime{}}, false, false},
+		{"gVisor", gvisorRuntime{stubRuntime: &stubRuntime{}, gvisor: true}, false, false},
+		{"runc via UsesGVisor false", gvisorRuntime{stubRuntime: &stubRuntime{}, gvisor: false}, false, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := mgrWithRuntime(tt.rt)
+			if got := m.useHostNetwork(tt.needsPorts); got != tt.want {
+				t.Errorf("useHostNetwork(%v) = %v, want %v", tt.needsPorts, got, tt.want)
+			}
+			// Network mode and the NO_PROXY decision both derive from
+			// useHostNetwork; check the mode agrees.
+			mode, _ := m.resolveNetworkConfig(tt.needsPorts, true, "127.0.0.1")
+			if (mode == "host") != tt.want {
+				t.Errorf("resolveNetworkConfig mode = %q, but useHostNetwork = %v", mode, tt.want)
+			}
+		})
+	}
+}

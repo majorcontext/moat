@@ -39,7 +39,7 @@ For HTTPS, the client sends a `CONNECT` request to the proxy. The proxy checks t
 
 For plain HTTP, the proxy forwards the request directly, injecting credentials if the host matches.
 
-Requests to `localhost`, `127.0.0.1`, and other addresses listed in `NO_PROXY` bypass the proxy entirely. Moat sets `NO_PROXY` automatically to exclude local addresses and internal endpoints like the MCP relay.
+Moat includes `moat-proxy` in `NO_PROXY` so internal endpoints such as the MCP relay are reached directly. Bridge-mode runs also bypass the proxy for container loopback addresses. Host-network runs keep loopback traffic proxied so `network.host` rules apply to host services.
 
 ## TLS interception
 
@@ -86,16 +86,17 @@ The relay client uses `http.Transport{Proxy: nil}` to connect directly to the up
 
 ## Runtime-specific behavior
 
-The proxy binds to different interfaces depending on the container runtime:
+The proxy binds to `0.0.0.0` (all interfaces) and requires per-run token authentication on both runtimes:
 
-| Runtime | Bind address | Container reaches proxy via | Authentication |
-|---------|-------------|---------------------------|----------------|
-| Docker | `127.0.0.1` (localhost) | `host.docker.internal` or host network mode | None required |
-| Apple containers | `0.0.0.0` (all interfaces) | Host gateway IP | Per-run token |
+| Runtime | Container reaches `moat-proxy` via | Authentication |
+|---------|-----------------------------------|----------------|
+| Docker on Linux | Docker `host-gateway` mapping | Per-run token |
+| Docker on macOS/Windows | Address resolved from `host.docker.internal` | Per-run token |
+| Apple containers | Host gateway IP | Per-run token |
 
-**Docker:** The proxy binds to localhost only. Docker containers reach host services via `host.docker.internal`, which resolves to the host's loopback interface. No proxy authentication is required because only processes on the host can reach `127.0.0.1`. Firewall rules do not filter by destination IP for the proxy port, since `host.docker.internal` resolves to different IPs across environments.
+Each run receives a cryptographically random 32-byte token in its proxy URL (`http://moat:<token>@moat-proxy:<port>`). The proxy validates the token and selects that run's credentials and network policy. Requests without a valid token are rejected.
 
-**Apple containers:** Containers access the host via a gateway IP, not localhost. The proxy must bind to all interfaces (`0.0.0.0`) so the container can reach it. Security is maintained with a per-run cryptographic token: 32 bytes generated from `crypto/rand`, passed to the container in the `HTTP_PROXY` URL as `http://moat:<token>@host:port`. The proxy validates the `Proxy-Authorization` header on every request using constant-time comparison to prevent timing attacks.
+On Linux, gVisor uses bridge networking. Standard Docker uses host networking when proxy access is needed and no ports are published; services and BuildKit select dedicated bridge networks. See [Runtimes](./07-runtimes.md#sandbox-modes).
 
 ## Proxy lifecycle
 

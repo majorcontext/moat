@@ -121,6 +121,31 @@ sudo usermod -aG docker $USER
 
 Log out and back in for the group change to take effect.
 
+On Linux, Moat runs containers under gVisor by default and exits with installation instructions if it is missing. Install it on Debian/Ubuntu using the [gVisor package repository](https://gvisor.dev/docs/user_guide/install/):
+
+```bash
+sudo apt-get install -y ca-certificates curl gnupg
+curl -fsSL https://gvisor.dev/archive.key | sudo gpg --dearmor -o /usr/share/keyrings/gvisor.gpg && \
+  echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/gvisor.gpg] https://storage.googleapis.com/gvisor/releases release main" | \
+  sudo tee /etc/apt/sources.list.d/gvisor.list && \
+  sudo apt-get update && sudo apt-get install -y runsc && \
+  sudo runsc install && \
+  sudo systemctl reload docker
+```
+
+`runsc install` registers gVisor as an additional Docker runtime; Docker's default runtime stays `runc`, and Moat selects `runsc` for its own containers. See [Runtimes](../concepts/07-runtimes.md#overriding-sandbox-mode) to run without gVisor.
+
+**Windows (WSL 2):**
+
+Install Docker Engine and gVisor inside your WSL distribution using the Debian/Ubuntu steps above, and run Moat from the same distribution. Moat in WSL is a Linux binary and uses the Linux defaults: gVisor, and containers that run as your WSL user's UID so workspace files keep their ownership. The `systemctl` commands require systemd. If it is not already enabled, add this to `/etc/wsl.conf`:
+
+```ini
+[boot]
+systemd=true
+```
+
+Save your work, run `wsl.exe --shutdown` from PowerShell, then reopen the distribution before running the installation commands. This stops all running WSL distributions. See [Microsoft’s systemd instructions](https://learn.microsoft.com/en-us/windows/wsl/systemd) for prerequisites and verification.
+
 **Other platforms:**
 
 - **Linux (other distros)**: [Docker Engine](https://docs.docker.com/engine/install/)

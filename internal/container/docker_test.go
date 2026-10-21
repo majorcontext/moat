@@ -834,3 +834,19 @@ func TestSetupFirewallRejectsOutOfRangePorts(t *testing.T) {
 		t.Fatalf("SetupFirewall with proxy port 0 failed for the wrong reason: %v", err)
 	}
 }
+
+func TestDockerRuntimeUsesGVisor(t *testing.T) {
+	for _, tt := range []struct {
+		oci  string
+		want bool
+	}{
+		{"runsc", true},
+		{"", false},
+		{"runc", false},
+	} {
+		r := &DockerRuntime{ociRuntime: tt.oci}
+		if got := r.UsesGVisor(); got != tt.want {
+			t.Errorf("UsesGVisor() with ociRuntime %q = %v, want %v", tt.oci, got, tt.want)
+		}
+	}
+}

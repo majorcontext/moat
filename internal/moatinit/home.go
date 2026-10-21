@@ -38,3 +38,23 @@ func initFilesOwnership(euid int, moatuserExists bool, home string) (chown bool,
 	}
 	return false, home
 }
+
+// ResolveHome repairs HOME for a non-root entrypoint whose UID has no passwd
+// entry in the image. On Linux bind mode the container runs as the workspace
+// owner's UID, and when the image has no account for it Docker sets HOME to
+// "/", where staging fails ("mkdir //.claude: permission denied"). If the
+// image has /home/moatuser — the home the run's mounts and agent staging
+// target — HOME is pointed there and exported, so the user command sees the
+// same value.
+//
+// A HOME the UID's own passwd entry supplies is left alone: in images built
+// FROM node:*, UID 1000 is the node user with HOME=/home/node, and overriding
+// it would separate agent config from the account's home directory.
+func ResolveHome(sys Sys) {
+	if sys.Geteuid() == 0 || sys.Getenv("HOME") != "/" {
+		return
+	}
+	if isDir(sys, "/home/moatuser") {
+		sys.Setenv("HOME", "/home/moatuser")
+	}
+}

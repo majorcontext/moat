@@ -737,6 +737,14 @@ func (r *DockerRuntime) SupportsHostNetwork() bool {
 	return goruntime.GOOS == "linux"
 }
 
+// UsesGVisor reports whether containers run under gVisor (runsc). Under
+// Docker's --network=host, gVisor's netstack gets no interfaces unless runsc
+// itself runs with --network=host, which a stock `runsc install` does not
+// configure, so callers must not pick host networking for these containers.
+func (r *DockerRuntime) UsesGVisor() bool {
+	return r.ociRuntime == "runsc"
+}
+
 // Close releases Docker client resources.
 func (r *DockerRuntime) Close() error {
 	return r.cli.Close()

@@ -18,6 +18,7 @@ import (
 
 func main() {
 	sys := moatinit.NewSys()
+	moatinit.ResolveHome(sys)
 	ctx := &moatinit.Context{
 		Sys:    sys,
 		Cfg:    moatinit.LoadConfig(sys),

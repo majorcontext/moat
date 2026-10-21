@@ -2,6 +2,9 @@
 package deps
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -2134,5 +2137,115 @@ func TestGenerateDockerfileClaudeCodeInstallsZstd(t *testing.T) {
 	}
 	if strings.Contains(without.Dockerfile, "zstd") {
 		t.Error("zstd should only be added for claude-code")
+	}
+}
+
+func TestGenerateDockerfileHomeWritableForAnyUID(t *testing.T) {
+	// On Linux bind mode the container runs as the workspace owner's UID, not
+	// moatuser, so home directories must allow creating and replacing files
+	// after every step that writes there. Existing file modes must be preserved.
+	chmod := "RUN find /home/moatuser -type d -exec chmod a+rwx {} +"
+	tests := []struct {
+		name string
+		spec *ImageSpec
+	}{
+		{"with init entrypoint", &ImageSpec{InitProviders: []string{"claude"}}},
+		{"without init entrypoint", &ImageSpec{}},
+		{"with build hooks", &ImageSpec{Hooks: &HooksConfig{PostBuild: "touch ~/.private"}}},
+		{"with plugins", &ImageSpec{
+			ClaudeMarketplaces: []claude.MarketplaceConfig{{Name: "m", Source: "github", Repo: "o/r"}},
+			ClaudePlugins:      []string{"p@m"},
+			InitProviders:      []string{"claude"},
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := GenerateDockerfile([]Dependency{{Name: "node", Version: "22"}, {Name: "claude-code"}}, tt.spec)
+			if err != nil {
+				t.Fatalf("GenerateDockerfile error: %v", err)
+			}
+			df := result.Dockerfile
+			idx := strings.Index(df, chmod)
+			if idx < 0 {
+				t.Fatalf("Dockerfile missing %q:\n%s", chmod, df)
+			}
+			// ~/.codex must exist in the image: otherwise Docker creates it as
+			// root when bind-mounting ~/.codex/sessions, and a non-moatuser UID
+			// cannot stage config.toml into it.
+			if !strings.Contains(df, "/home/moatuser/.codex") {
+				t.Errorf("Dockerfile does not pre-create /home/moatuser/.codex:\n%s", df)
+			}
+			// It must come after the last step that writes into the home as
+			// moatuser, or those directories stay unwritable for other UIDs.
+			for _, marker := range []string{"claude-plugins.sh", "useradd", "touch ~/.private"} {
+				if last := strings.LastIndex(df, marker); last > idx {
+					t.Errorf("%q appears after the chmod; home directories it creates stay unwritable", marker)
+				}
+			}
+		})
+	}
+}
+
+// Execute the generated permission step against a real tree: private files,
+// executable files, and symlink targets must keep their original modes.
+func TestHomeDirectoryPermissionsPreserveFiles(t *testing.T) {
+	result, err := GenerateDockerfile(nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, tail, ok := strings.Cut(result.Dockerfile, "# Make home directories writable")
+	if !ok {
+		t.Fatal("missing home permission step")
+	}
+	_, tail, _ = strings.Cut(tail, "\nRUN ")
+	command, _, _ := strings.Cut(tail, "\n")
+	home := t.TempDir()
+	outside := t.TempDir()
+	outsideInfo, err := os.Stat(outside)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(home, "linked")); err != nil {
+		t.Fatal(err)
+	}
+	sshDir := filepath.Join(home, ".ssh")
+	if err := os.Mkdir(sshDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]os.FileMode{
+		filepath.Join(sshDir, "config"):     0o600,
+		filepath.Join(sshDir, "id_ed25519"): 0o600,
+		filepath.Join(home, ".claude.json"): 0o600,
+		filepath.Join(home, "tool"):         0o755,
+		filepath.Join(outside, "private"):   0o600,
+	}
+	for path, mode := range files {
+		if err := os.WriteFile(path, []byte("unchanged"), mode); err != nil {
+			t.Fatal(err)
+		}
+	}
+	command = strings.ReplaceAll(command, "/home/moatuser", `"$MOAT_TEST_HOME"`)
+	cmd := exec.Command("sh", "-c", command)
+	cmd.Env = append(os.Environ(), "MOAT_TEST_HOME="+home)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("permission step: %v\n%s", err, out)
+	}
+	for path, want := range files {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := info.Mode().Perm(); got != want {
+			t.Errorf("%s mode = %o, want %o", path, got, want)
+		}
+	}
+	for path, want := range map[string]os.FileMode{home: 0o777, sshDir: 0o777, outside: outsideInfo.Mode().Perm()} {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info.Mode().Perm() != want {
+			t.Errorf("%s mode = %o, want %o", path, info.Mode().Perm(), want)
+		}
 	}
 }

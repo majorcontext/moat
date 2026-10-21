@@ -42,9 +42,11 @@ Docker runtime supports two sandbox modes:
 
 On Linux, if gVisor is not installed, Moat returns an error with installation instructions. gVisor is available for Debian/Ubuntu via the official `gvisor.dev` package repository, and installation details are included in the error message itself.
 
+**Networking:** gVisor runs use bridge networking because a default `runsc` installation has no network interfaces under Docker host networking. Containers reach the proxy through the host gateway. Standard Docker on Linux uses host networking when proxy access is needed and no ports are published; published ports, services, and BuildKit use bridge networks.
+
 ### Overriding sandbox mode
 
-The `--no-sandbox` flag (or `sandbox: false` in `moat.yaml`) disables the gVisor requirement on Linux, falling back to the standard `runc` runtime. This is useful in environments where gVisor is not installed, during development where gVisor overhead is undesirable, or when debugging runtime-specific issues.
+The `--no-sandbox` flag (or `sandbox: none` in `moat.yaml`) disables the gVisor requirement on Linux, falling back to the standard `runc` runtime. This is useful in environments where gVisor is not installed, during development where gVisor overhead is undesirable, or when debugging runtime-specific issues.
 
 On macOS and Windows, `--no-sandbox` has no effect since gVisor is unavailable in Docker Desktop and standard mode is already the default.
 
@@ -52,9 +54,9 @@ Standard container isolation (`runc`) protects against accidental damage and pro
 
 ### Proxy security model
 
-The credential-injecting proxy binds to `127.0.0.1` (localhost) on the host. Containers reach the proxy via `host.docker.internal`, a Docker-provided hostname that resolves to the host machine.
+The credential-injecting proxy binds to `0.0.0.0` (all interfaces) on the host. Containers reach it through the synthetic `moat-proxy` hostname, mapped to the host gateway.
 
-Since the proxy listens only on localhost, only processes on the host machine can access it. Containers access it through Docker's host networking bridge.
+Each run authenticates with its own cryptographically random 32-byte token in the proxy URL. The proxy rejects requests without a valid token and uses the token to select the run's credentials and network policy. See [Proxy architecture](./09-proxy.md#runtime-specific-behavior).
 
 ### Platform support
 

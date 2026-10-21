@@ -229,6 +229,14 @@ func (s *OSSys) CopyFilePreserving(src, dst string) error {
 	if err != nil {
 		return err
 	}
+	// A non-root process cannot chmod a file it does not own, even when the
+	// file is writable. This happens on Linux bind mode, where the container
+	// runs as the workspace owner's UID and the image's home files belong to
+	// moatuser (5000). Replace such a file instead so the copy is owned by
+	// the running UID and the mode below (and any later chmod 600) applies.
+	if dstInfo, err := os.Lstat(rdst); err == nil && foreignOwned(dstInfo, os.Geteuid()) {
+		_ = os.Remove(rdst) // on failure, the write/chmod below reports the error
+	}
 	if err := os.WriteFile(rdst, data, info.Mode().Perm()); err != nil {
 		return err
 	}
@@ -241,6 +249,16 @@ func (s *OSSys) CopyFilePreserving(src, dst string) error {
 		_ = os.Chown(rdst, int(st.Uid), int(st.Gid)) // best-effort, like cp -p as non-root
 	}
 	return os.Chtimes(rdst, time.Now(), info.ModTime())
+}
+
+// foreignOwned reports whether info is a regular file owned by a UID other
+// than euid, for a non-root euid — a file the process cannot chmod.
+func foreignOwned(info fs.FileInfo, euid int) bool {
+	if euid == 0 || !info.Mode().IsRegular() {
+		return false
+	}
+	st, ok := info.Sys().(*syscall.Stat_t)
+	return ok && int(st.Uid) != euid
 }
 
 // CopyTreePreserving mirrors `cp -rp src dst` where dst is the destination

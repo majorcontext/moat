@@ -370,8 +370,12 @@ func writeUserSetup(b *strings.Builder) {
 	b.WriteString("      userdel -r \"$existing_user\" || echo \"Warning: failed to remove user $existing_user\"; \\\n")
 	b.WriteString("    fi && \\\n")
 	b.WriteString(fmt.Sprintf("    useradd -m -u %s -s /bin/bash %s && \\\n", containerUID, containerUser))
-	b.WriteString(fmt.Sprintf("    mkdir -p /home/%s/.claude/projects /home/%s/.config && \\\n", containerUser, containerUser))
-	b.WriteString(fmt.Sprintf("    chown -R %s:%s /home/%s/.claude /home/%s/.config\n\n", containerUser, containerUser, containerUser, containerUser))
+	// Pre-create the directories that run mounts land inside (~/.claude/projects
+	// for Claude log sync, ~/.codex/sessions for Codex session sync). Otherwise
+	// Docker creates the missing parents as root when it sets up the bind
+	// mount, and the container user cannot stage agent config into them.
+	b.WriteString(fmt.Sprintf("    mkdir -p /home/%s/.claude/projects /home/%s/.codex /home/%s/.config && \\\n", containerUser, containerUser, containerUser))
+	b.WriteString(fmt.Sprintf("    chown -R %s:%s /home/%s/.claude /home/%s/.codex /home/%s/.config\n\n", containerUser, containerUser, containerUser, containerUser, containerUser))
 }
 
 // writeDockerCLI installs Docker CLI from Docker's official repository.
@@ -661,6 +665,14 @@ func formatHookCommand(cmd string) string {
 // would run the base image's command as root with none of the entrypoint's
 // setup — so this fails the build instead of emitting an entrypoint-less image.
 func writeEntrypoint(b *strings.Builder, opts *ImageSpec, dockerMode DockerMode, contextFiles map[string][]byte) error {
+	// On native Linux Docker the container runs as the workspace owner's UID
+	// (not 5000) so bind-mounted files keep host ownership. When that UID has
+	// no passwd entry, moat-init stages agent config under /home/moatuser.
+	// Writable directories let it replace foreign-owned files without changing
+	// file modes baked by installers or build hooks (SSH rejects writable config
+	// files and private keys). Run last to cover directories those steps create.
+	b.WriteString("# Make home directories writable for arbitrary runtime UIDs (Linux bind mode)\n")
+	b.WriteString(fmt.Sprintf("RUN find /home/%s -type d -exec chmod a+rwx {} +\n\n", containerUser))
 	if opts.needsInit(dockerMode) {
 		goBin, err := entrypointBinary(runtime.GOARCH)
 		if err != nil {

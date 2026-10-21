@@ -838,10 +838,11 @@ func (m *Manager) Create(ctx context.Context, opts Options) (resRun *Run, retErr
 		}
 
 		// Build proxy environment using synthetic hostnames on all runtimes.
-		// Host-network mode is used on Docker Linux when no ports need publishing.
-		// In that mode, the container shares the host loopback, so localhost
-		// must NOT be in NO_PROXY (otherwise it bypasses network.host enforcement).
-		isHostNet := m.defaultRuntime().SupportsHostNetwork() && (opts.Config == nil || len(opts.Config.Ports) == 0)
+		// Host-network mode is used on Docker Linux (without gVisor) when no ports
+		// need publishing. In that mode, the container shares the host loopback,
+		// so localhost must NOT be in NO_PROXY (otherwise it bypasses
+		// network.host enforcement).
+		isHostNet := m.useHostNetwork(len(ports) > 0)
 		proxyEnv = buildProxyEnv(regResp.AuthToken, regResp.ProxyPort, isHostNet)
 
 		// Advertise each serial device as an rfc2217:// URL. Control lines have
