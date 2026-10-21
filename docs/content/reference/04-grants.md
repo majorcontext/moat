@@ -955,7 +955,7 @@ moat run --profile client
 
 The two create commands above are alternatives; creating an existing profile is an error. Without either inheritance flag, `moat profile create NAME` creates an isolated profile. The parent is explicit and does not depend on `MOAT_PROFILE` or `--profile`.
 
-Lookup checks local grants first, then follows the parent chain. Parent grants remain live: adding, updating, or removing a parent grant affects children that have no override. OAuth refreshes are saved in the profile that owns the credential. SSH host mappings also inherit, with overrides per host. Grant lists include a `SOURCE` column (`source` in JSON); `(default)` identifies the unscoped store.
+Lookup checks local grants first, then follows the parent chain. Parent grants remain live: adding, updating, or removing a parent grant affects children that have no override. OAuth refreshes are saved in the profile that owns the credential. SSH host mappings also inherit, with overrides per host. Grant lists include a `SOURCE` column (`source` in JSON); `(default)` identifies the unscoped store. If an effective grant cannot be read or decrypted, listing fails with an error naming the provider instead of silently omitting it. A corrupt local override never falls back to the parent grant.
 
 Implicit agent grants use the same lookup. For example, `moat codex --profile client` automatically discovers an inherited Codex subscription or OpenAI API key; no explicit `--grant` is needed. Selecting the profile through `MOAT_PROFILE` works the same way.
 

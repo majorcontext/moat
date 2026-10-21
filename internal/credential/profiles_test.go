@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/majorcontext/moat/internal/config"
@@ -118,8 +119,46 @@ func TestProfileCorruptOverrideNeverFallsBack(t *testing.T) {
 	if _, err := child.Get("github"); err == nil || errors.Is(err, ErrNotFound) {
 		t.Fatalf("got %v", err)
 	}
-	if creds, err := child.List(); err != nil || len(creds) != 0 {
-		t.Fatalf("list exposed parent: %v, %v", creds, err)
+	if creds, err := child.List(); err == nil || !strings.Contains(err.Error(), "github") || len(creds) != 0 {
+		t.Fatalf("list must report corrupt override without exposing parent: %v, %v", creds, err)
+	}
+}
+
+func TestProfileListReportsUnreadableInheritedCredential(t *testing.T) {
+	for _, decryptFailure := range []bool{false, true} {
+		t.Run(map[bool]string{false: "malformed", true: "wrong-key"}[decryptFailure], func(t *testing.T) {
+			_, base, child := inheritedStores(t)
+			if decryptFailure {
+				otherKey := make([]byte, 32)
+				otherKey[0] = 1
+				other, err := NewFileStore(base.dir, otherKey)
+				if err != nil {
+					t.Fatal(err)
+				}
+				saveProfileToken(t, other, "github", "unreadable")
+			} else if err := os.WriteFile(base.path("github"), []byte("corrupt"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			creds, err := child.List()
+			if err == nil || !strings.Contains(err.Error(), "github") || len(creds) != 0 {
+				t.Fatalf("list hid unreadable parent: %v, %v", creds, err)
+			}
+			if decryptFailure && !errors.Is(err, ErrDecrypt) {
+				t.Fatalf("lost decrypt error: %v", err)
+			}
+			// A valid local override still hides an unreadable ancestor.
+			saveProfileToken(t, child, "github", "local")
+			if creds, err := child.List(); err != nil || len(creds) != 1 || creds[0].Token != "local" {
+				t.Fatalf("valid override: %v, %v", creds, err)
+			}
+			// An explicit exclusion also hides the unreadable ancestor.
+			if err := child.Delete("github"); err != nil {
+				t.Fatal(err)
+			}
+			if creds, err := child.List(); err != nil || len(creds) != 0 {
+				t.Fatalf("excluded ancestor: %v, %v", creds, err)
+			}
+		})
 	}
 }
 

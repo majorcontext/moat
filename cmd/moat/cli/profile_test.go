@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -153,5 +155,38 @@ func TestRevokeLocalGrantExplainsOnlyInheritedExclusions(t *testing.T) {
 				t.Fatalf("unexpected exclusion explanation: %s", out)
 			}
 		})
+	}
+}
+
+func TestGrantListReportsUnreadableInheritedCredential(t *testing.T) {
+	t.Setenv("MOAT_HOME", t.TempDir())
+	t.Setenv("MOAT_KEYRING_BACKEND", "file")
+	oldProfile, oldJSON := credential.ActiveProfile, jsonOut
+	t.Cleanup(func() { credential.ActiveProfile = oldProfile; jsonOut = oldJSON })
+	credential.ActiveProfile = "client"
+	if err := config.CreateProfile("client", config.ProfileConfig{InheritDefault: true}); err != nil {
+		t.Fatal(err)
+	}
+	key, err := credential.DefaultEncryptionKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := credential.NewProfileStore("", key); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(credential.StoreDirForProfile(""), "github.enc"), []byte("corrupt"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, asJSON := range []bool{false, true} {
+		jsonOut = asJSON
+		out := captureStdout(t, func() {
+			err := runGrantList(&cobra.Command{}, nil)
+			if err == nil || !strings.Contains(err.Error(), "reading credential github") {
+				t.Fatalf("missing credential error: %v", err)
+			}
+		})
+		if out != "" {
+			t.Fatalf("printed incomplete listing: %q", out)
+		}
 	}
 }

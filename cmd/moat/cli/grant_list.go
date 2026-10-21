@@ -4,12 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"text/tabwriter"
 
 	"github.com/majorcontext/moat/internal/credential"
 	"github.com/majorcontext/moat/internal/mcpcatalog"
-	"github.com/majorcontext/moat/internal/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -39,7 +37,6 @@ func runGrantList(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("getting encryption key: %w", err)
 	}
 
-	storeDir := credential.DefaultStoreDir()
 	store, err := credential.NewProfileStore(credential.ActiveProfile, key)
 	if err != nil {
 		return fmt.Errorf("opening credential store: %w", err)
@@ -61,19 +58,6 @@ func runGrantList(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(creds) == 0 && len(sshMappings) == 0 && !jsonOut {
-		// Check if there are .enc files that couldn't be decrypted
-		if hasUnreadableCredentials(storeDir) {
-			ui.Warn("Found encrypted credential files that cannot be decrypted.")
-			ui.Warn("This usually means the encryption key has changed.")
-			ui.Warn("")
-			ui.Warn("To fix:")
-			ui.Warn("  1. Re-grant your credentials: moat grant <provider>")
-			ui.Warn("  2. Or restore your encryption key from backup")
-			ui.Warn("")
-			ui.Warn("For details, run with --verbose to see which providers failed")
-			return nil
-		}
-
 		fmt.Println("No credentials found.")
 		if credential.ActiveProfile != "" {
 			fmt.Printf("\nGrant a credential with: moat grant <provider> --profile %s\n", credential.ActiveProfile)
@@ -213,19 +197,4 @@ func npmRegistryCount(token string) (int, error) {
 		return 0, err
 	}
 	return len(entries), nil
-}
-
-// hasUnreadableCredentials checks if there are .enc files in the credential directory.
-// Used to detect when credentials exist but can't be decrypted (e.g., key changed).
-func hasUnreadableCredentials(dir string) bool {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return false
-	}
-	for _, entry := range entries {
-		if filepath.Ext(entry.Name()) == ".enc" {
-			return true
-		}
-	}
-	return false
 }

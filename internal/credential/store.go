@@ -17,7 +17,6 @@ import (
 
 	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/credential/keyring"
-	"github.com/majorcontext/moat/internal/log"
 )
 
 // validProfileName matches alphanumeric characters, hyphens, and underscores.
@@ -213,8 +212,7 @@ func (s *FileStore) List() ([]Credential, error) {
 			if errors.Is(err, ErrNotFound) {
 				continue
 			}
-			log.Debug("Skipping credential", "provider", provider, "error", err)
-			continue // Skip unreadable credentials
+			return nil, fmt.Errorf("reading credential %s: %w", provider, err)
 		}
 		creds = append(creds, *cred)
 	}
