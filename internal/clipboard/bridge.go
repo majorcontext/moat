@@ -45,16 +45,20 @@ func (b *Bridge) Paste(ctx context.Context) error {
 	return nil
 }
 
-// Copy applies a container clipboard change to the host. Repeated notifications
-// for the last paste are ignored until the container copies different text.
+// Copy applies a container clipboard change to the host. Consume the paste echo
+// once: a later agent copy of the same text must still update the host clipboard.
 func (b *Bridge) Copy(data []byte) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.closed || (b.hasPaste && bytes.Equal(b.pasted, data)) {
+	if b.closed {
 		return nil
 	}
+	echo := b.hasPaste && bytes.Equal(b.pasted, data)
 	b.hasPaste = false
 	b.pasted = nil
+	if echo {
+		return nil
+	}
 	return b.writeHost(data)
 }
 

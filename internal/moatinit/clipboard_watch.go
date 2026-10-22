@@ -20,6 +20,7 @@ import (
 // WatchClipboard streams future X11 CLIPBOARD changes to the attached host.
 // It never replays the existing clipboard on attach. Closing stdin ends the
 // watcher, including when a host detaches from an otherwise running container.
+// Stdout is reserved for the wire protocol; diagnostics must not be written there.
 func WatchClipboard(ctx context.Context, stdin io.Reader, stdout io.Writer) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()

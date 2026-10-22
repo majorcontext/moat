@@ -23,13 +23,16 @@ func TestBridgePasteDoesNotOverwriteNewHostClipboard(t *testing.T) {
 		t.Fatalf("unexpected paste: %q (%s)", sent, target)
 	}
 	host = "new local copy"
-	for range 2 {
-		if err := b.Copy([]byte(sent)); err != nil {
-			t.Fatal(err)
-		}
-		if host != "new local copy" {
-			t.Fatal("paste echo replaced newer host clipboard")
-		}
+	if err := b.Copy([]byte(sent)); err != nil {
+		t.Fatal(err)
+	}
+	if host != "new local copy" {
+		t.Fatal("paste echo replaced newer host clipboard")
+	}
+	// A later explicit copy of the same text is a new action, not an echo.
+	_ = b.Copy([]byte(sent))
+	if host != sent {
+		t.Fatal("agent copy of previously pasted text was suppressed")
 	}
 	if err := b.Copy([]byte("agent copy\n")); err != nil {
 		t.Fatal(err)

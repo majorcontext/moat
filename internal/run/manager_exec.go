@@ -49,7 +49,9 @@ func (m *Manager) WatchClipboard(ctx context.Context, runID string, update func(
 	})
 	defer stop()
 	go func() {
-		err := m.ExecInteractive(ctx, runID, []string{"/usr/local/bin/moat-clipboard-watch"}, container.ExecOptions{
+		// The shell gives a missing helper in old images a consistent exit
+		// code 127 on both runtimes; exec preserves stdin-based shutdown.
+		err := m.ExecInteractive(ctx, runID, []string{"sh", "-c", "exec /usr/local/bin/moat-clipboard-watch"}, container.ExecOptions{
 			Stdin: input, Stdout: sink, Stderr: io.Discard,
 		})
 		_ = sink.CloseWithError(err)
