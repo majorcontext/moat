@@ -36,7 +36,10 @@ const LunaRouteExtensionPackage = "npm:@lunaroute/pi-extension"
 //
 // The fetch goes through the proxy like any other request, so the key is
 // injected there and never enters the container.
-const lunaRouteLaunchScript = `store="$HOME/.pi/agent/models-store.json"
+const lunaRouteLaunchScript = lunaRouteCatalogScript + `exec pi "$@"
+`
+
+const lunaRouteCatalogScript = `store="$HOME/.pi/agent/models-store.json"
 ready() {
   node -e 'try{const m=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).lunaroute;process.exit(m&&Array.isArray(m.models)&&m.models.length?0:1)}catch(e){process.exit(1)}' "$store"
 }
@@ -53,7 +56,6 @@ if ! ready; then
   rm -rf "$tmp"
   ready || echo "moat: could not load LunaRoute's model list from gw.lunaroute.com — check the network policy and 'moat grant lunaroute'" >&2
 fi
-exec pi "$@"
 `
 
 // HasLunaRouteExtension reports whether pkgs installs the LunaRoute extension,

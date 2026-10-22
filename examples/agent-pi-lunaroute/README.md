@@ -18,7 +18,7 @@ moat pi examples/agent-pi-lunaroute
 moat pi examples/agent-pi-lunaroute -p "fix the bug in main.py"
 ```
 
-Pi starts on the first model LunaRoute lists; switch with `/model` inside Pi.
+Pi starts on the first available LunaRoute model, ordered by model ID; switch with `/model` inside Pi.
 
 ## What Moat does for the lunaroute backend
 

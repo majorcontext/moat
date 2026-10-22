@@ -479,7 +479,7 @@ Pi has no credential of its own — it runs against your `anthropic`, `openai`, 
 |------|-------------|
 | `-p`, `--prompt TEXT` | Run non-interactive with prompt |
 | `--provider NAME` | Model backend: `anthropic`, `openai`, or `lunaroute`. Overrides `pi.provider`; required when more than one of those grants is configured. |
-| `--model PATTERN` | Model pattern to use (overrides `pi.model`). When unset, Pi's per-provider default is used. |
+| `--model PATTERN` | Model pattern to use (overrides `pi.model`). When unset, Moat selects the first available model for the chosen backend, ordered by model ID. |
 
 ### Examples
 

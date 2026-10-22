@@ -1873,7 +1873,9 @@ pi:
 ```
 
 - Type: `string`
-- Default: `""` (Pi's per-provider default is used)
+- Default: `""` (the first available model for the chosen backend, ordered by model ID)
+
+When no model is pinned, Moat queries Pi's model list inside the container after extensions load. Startup stops if the chosen backend has no available models; it does not fall back to another backend.
 
 ### pi.packages
 

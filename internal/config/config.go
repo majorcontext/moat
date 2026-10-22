@@ -392,7 +392,7 @@ type GeminiConfig struct {
 // Pi has no credential of its own; it runs against the anthropic or openai
 // grant. Provider selects the backend (must be "anthropic" or "openai" in v1);
 // when unset it is inferred from the single configured grant. Model optionally
-// pins a model pattern (Pi's per-provider default is used when empty).
+// pins a model pattern (the first available model for the backend is used when empty).
 type PiConfig struct {
 	Provider string   `yaml:"provider,omitempty"`
 	Model    string   `yaml:"model,omitempty"`

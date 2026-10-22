@@ -39,7 +39,7 @@ func TestBuildPiCommand(t *testing.T) {
 	t.Run("interactive no model", func(t *testing.T) {
 		piResolvedProvider, piResolvedModel = "anthropic", ""
 		got := buildPiCommand("", "")
-		want := []string{"pi", "--provider", "anthropic", "--append-system-prompt", ctx}
+		want := []string{"sh", "-c", defaultModelLaunchScript, "pi", "anthropic", "--append-system-prompt", ctx}
 		if !slices.Equal(got, want) {
 			t.Errorf("buildPiCommand = %v, want %v", got, want)
 		}
@@ -48,7 +48,7 @@ func TestBuildPiCommand(t *testing.T) {
 	t.Run("initial prompt passthrough", func(t *testing.T) {
 		piResolvedProvider, piResolvedModel = "anthropic", ""
 		got := buildPiCommand("", "hello there")
-		want := []string{"pi", "--provider", "anthropic", "--append-system-prompt", ctx, "hello there"}
+		want := []string{"sh", "-c", defaultModelLaunchScript, "pi", "anthropic", "--append-system-prompt", ctx, "hello there"}
 		if !slices.Equal(got, want) {
 			t.Errorf("buildPiCommand = %v, want %v", got, want)
 		}

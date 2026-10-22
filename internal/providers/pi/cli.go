@@ -193,16 +193,20 @@ func resolvePiPreflight(cfg *config.Config) error {
 // buildPiCommand assembles the container command for Pi. Extracted from the
 // BuildCommand closure so it is unit-testable.
 func buildPiCommand(promptFlag, initialPrompt string) []string {
-	c := []string{"--provider", piResolvedProvider}
-	if piResolvedModel != "" {
-		c = append(c, "--model", piResolvedModel)
-	}
-	c = append(c, "--append-system-prompt", PiInitMountPath+"/"+ContextFileName)
+	c := []string{"--append-system-prompt", PiInitMountPath + "/" + ContextFileName}
 	if promptFlag != "" {
 		c = append(c, "-p", promptFlag)
 	} else if initialPrompt != "" {
 		c = append(c, initialPrompt)
 	}
+	if piResolvedModel == "" {
+		script := defaultModelLaunchScript
+		if piResolvedProvider == backendLunaRoute {
+			script = lunaRouteCatalogScript + script
+		}
+		return append([]string{"sh", "-c", script, "pi", piResolvedProvider}, c...)
+	}
+	c = append([]string{"--provider", piResolvedProvider, "--model", piResolvedModel}, c...)
 	if piResolvedProvider == backendLunaRoute {
 		// $0 is "pi"; the args follow as "$@", so nothing is re-quoted.
 		return append([]string{"sh", "-c", lunaRouteLaunchScript, "pi"}, c...)
