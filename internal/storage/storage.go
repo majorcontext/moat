@@ -34,6 +34,7 @@ type Metadata struct {
 	ContainerID    string         `json:"container_id,omitempty"`
 	State          string         `json:"state,omitempty"`
 	Interactive    bool           `json:"interactive,omitempty"`
+	Clipboard      bool           `json:"clipboard,omitempty"` // Missing in older runs: leave bridging disabled on join.
 	CreatedAt      time.Time      `json:"created_at,omitempty"`
 	StartedAt      time.Time      `json:"started_at,omitempty"`
 	StoppedAt      time.Time      `json:"stopped_at,omitempty"`

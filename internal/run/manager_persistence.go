@@ -201,6 +201,7 @@ func (m *Manager) registerPersistedRun(runState State, stateConfirmed bool, skip
 		ContainerID:       meta.ContainerID,
 		Store:             store,
 		Interactive:       meta.Interactive,
+		Clipboard:         meta.Clipboard,
 		CreatedAt:         meta.CreatedAt,
 		StartedAt:         meta.StartedAt,
 		StoppedAt:         meta.StoppedAt,

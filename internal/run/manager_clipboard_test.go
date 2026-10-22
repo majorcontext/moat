@@ -10,6 +10,7 @@ import (
 
 	"github.com/majorcontext/moat/internal/clipboardwire"
 	"github.com/majorcontext/moat/internal/container"
+	"github.com/majorcontext/moat/internal/storage"
 )
 
 type clipboardRuntime struct {
@@ -70,5 +71,27 @@ func TestWatchClipboardPropagatesExecError(t *testing.T) {
 	m.runs = map[string]*Run{"run_test": {ID: "run_test", State: StateRunning}}
 	if err := m.WatchClipboard(context.Background(), "run_test", func([]byte) { t.Fatal("unexpected clipboard write") }); !errors.Is(err, want) {
 		t.Fatalf("got %v, want %v", err, want)
+	}
+}
+
+func TestClipboardSettingSurvivesRunReload(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		store, err := storage.NewRunStore(t.TempDir(), "run_test")
+		if err != nil {
+			t.Fatal(err)
+		}
+		r := &Run{ID: "run_test", State: StateRunning, Clipboard: enabled, Store: store}
+		if err := r.SaveMetadata(); err != nil {
+			t.Fatal(err)
+		}
+		meta, err := store.LoadMetadata()
+		if err != nil {
+			t.Fatal(err)
+		}
+		m := &Manager{runs: make(map[string]*Run)}
+		m.registerPersistedRun(StateRunning, false, true, meta, store, r.ID, nil)
+		if m.runs[r.ID].Clipboard != enabled {
+			t.Fatalf("clipboard setting %v lost when loading run for join", enabled)
+		}
 	}
 }

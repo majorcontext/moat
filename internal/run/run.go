@@ -228,6 +228,7 @@ func (r *Run) SaveMetadata() error {
 		ContainerID:         r.ContainerID,
 		State:               string(state),
 		Interactive:         r.Interactive,
+		Clipboard:           r.Clipboard,
 		CreatedAt:           r.CreatedAt,
 		StartedAt:           startedAt,
 		StoppedAt:           stoppedAt,
