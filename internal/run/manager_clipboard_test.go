@@ -18,7 +18,7 @@ type clipboardRuntime struct {
 }
 
 func (r *clipboardRuntime) ExecInteractive(_ context.Context, _ string, cmd []string, opts container.ExecOptions) error {
-	if !slices.Equal(cmd, []string{"/usr/local/bin/moat-init", "--watch-clipboard"}) || opts.TTY {
+	if !slices.Equal(cmd, []string{"/usr/local/bin/moat-clipboard-watch"}) || opts.TTY {
 		return errors.New("watcher must use a dedicated non-TTY stream")
 	}
 	return r.exec(opts)

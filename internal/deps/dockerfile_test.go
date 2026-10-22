@@ -1916,6 +1916,9 @@ func TestGenerateDockerfileClipboard(t *testing.T) {
 	if !strings.Contains(result.Dockerfile, "xclip") {
 		t.Errorf("Dockerfile should install xclip when NeedsClipboard is true.\nGenerated Dockerfile:\n%s", result.Dockerfile)
 	}
+	if !strings.Contains(result.Dockerfile, "ln -s moat-init /usr/local/bin/moat-clipboard-watch") {
+		t.Error("clipboard images must install the separate watcher entrypoint")
+	}
 }
 
 func TestGenerateDockerfileNoClipboard(t *testing.T) {
@@ -1925,6 +1928,9 @@ func TestGenerateDockerfileNoClipboard(t *testing.T) {
 	}
 	if strings.Contains(result.Dockerfile, "xvfb") {
 		t.Errorf("Dockerfile should NOT install xvfb by default.\nGenerated Dockerfile:\n%s", result.Dockerfile)
+	}
+	if strings.Contains(result.Dockerfile, "moat-clipboard-watch") {
+		t.Error("clipboard-disabled images should not install a watcher entrypoint")
 	}
 }
 

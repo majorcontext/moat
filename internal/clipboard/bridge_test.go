@@ -74,3 +74,26 @@ func TestBridgeImagePasteAndCanceledPaste(t *testing.T) {
 		t.Fatalf("sent %d pastes", calls)
 	}
 }
+
+func TestImagePasteClearsTextEchoSuppression(t *testing.T) {
+	content := &Content{Data: []byte("text"), MIMEType: "text/plain"}
+	copies := 0
+	b := &Bridge{
+		readHost:       func() (*Content, error) { return content, nil },
+		writeContainer: func(context.Context, []byte, string) error { return nil },
+		writeHost:      func([]byte) error { copies++; return nil },
+	}
+	if err := b.Paste(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	content = &Content{Data: []byte("png"), MIMEType: "image/png"}
+	if err := b.Paste(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Copy([]byte("text")); err != nil {
+		t.Fatal(err)
+	}
+	if copies != 1 {
+		t.Fatal("image paste left old text copy suppressed")
+	}
+}

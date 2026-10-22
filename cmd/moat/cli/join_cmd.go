@@ -319,12 +319,14 @@ func runJoinInteractive(ctx context.Context, manager *run.Manager, r *run.Run, c
 	statusWriter, statusCleanup, stdout := setupStatusBar(manager, r, session)
 	defer statusCleanup()
 
-	injectable := term.NewInjectableReader(os.Stdin)
-	defer injectable.Close()
+	var stdin io.Reader = os.Stdin
 	if statusWriter != nil {
+		injectable := term.NewInjectableReader(stdin)
+		defer injectable.Close()
 		statusWriter.SetInjector(injectable)
+		stdin = injectable
 	}
-	stdin, clipboardCleanup := setupClipboard(ctx, manager, r, injectable)
+	stdin, clipboardCleanup := setupClipboard(ctx, manager, r, stdin)
 	defer clipboardCleanup()
 
 	// Tee join output to its own indexed log file only when registration succeeded,

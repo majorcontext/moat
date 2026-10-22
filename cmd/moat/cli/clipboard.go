@@ -9,6 +9,7 @@ import (
 	"github.com/majorcontext/moat/internal/log"
 	"github.com/majorcontext/moat/internal/run"
 	"github.com/majorcontext/moat/internal/term"
+	"github.com/majorcontext/moat/internal/ui"
 )
 
 // setupClipboard owns both directions of clipboard bridging for an attachment.
@@ -38,6 +39,7 @@ func setupClipboard(ctx context.Context, manager *run.Manager, r *run.Run, stdin
 		})
 		if err != nil && ctx.Err() == nil {
 			log.Debug("container clipboard watcher stopped", "error", err)
+			ui.Warn("Container-to-host clipboard sync is unavailable. Start a new run if this container predates your Moat upgrade.")
 		}
 	}()
 	reader := term.NewClipboardProxy(stdin, func() {

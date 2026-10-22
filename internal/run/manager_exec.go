@@ -49,7 +49,7 @@ func (m *Manager) WatchClipboard(ctx context.Context, runID string, update func(
 	})
 	defer stop()
 	go func() {
-		err := m.ExecInteractive(ctx, runID, []string{"/usr/local/bin/moat-init", "--watch-clipboard"}, container.ExecOptions{
+		err := m.ExecInteractive(ctx, runID, []string{"/usr/local/bin/moat-clipboard-watch"}, container.ExecOptions{
 			Stdin: input, Stdout: sink, Stderr: io.Discard,
 		})
 		_ = sink.CloseWithError(err)

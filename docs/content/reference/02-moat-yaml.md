@@ -1017,7 +1017,7 @@ clipboard: false
 
 When enabled, moat intercepts `Ctrl+V` during interactive sessions, reads the host clipboard, and makes the data available inside the container via a headless X server. This allows coding agents to paste images and text from the host clipboard.
 
-Text copied by agents into the container clipboard also updates the host clipboard while attached, including in `moat join`. Moat watches for new copy actions; attaching does not replace your clipboard with old container content. Image copies from the container are not forwarded, and text copies are limited to 1 MiB.
+Text copied by agents into the container clipboard also updates the host clipboard while attached, including in `moat join`. Moat watches for new copy actions; attaching does not replace your clipboard with old container content. Image copies from the container are not forwarded, and text copies are limited to 1 MiB. Start a new run after upgrading Moat to enable copy-back in containers created by older versions.
 
 Requires `xvfb` and `xclip` in the container image (added automatically to moat-built images).
 

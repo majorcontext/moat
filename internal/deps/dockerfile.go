@@ -682,6 +682,11 @@ func writeEntrypoint(b *strings.Builder, opts *ImageSpec, dockerMode DockerMode,
 		b.WriteString("# Moat initialization entrypoint (privilege drop + feature setup)\n")
 		b.WriteString("COPY moat-init /usr/local/bin/moat-init\n")
 		b.WriteString("RUN chmod +x /usr/local/bin/moat-init\n")
+		if opts.NeedsClipboard {
+			// A separate entrypoint is absent in old images, so joining one
+			// cannot accidentally rerun an old moat-init with an unknown flag.
+			b.WriteString("RUN ln -s moat-init /usr/local/bin/moat-clipboard-watch\n")
+		}
 		b.WriteString("ENTRYPOINT [\"/usr/local/bin/moat-init\"]\n")
 	} else {
 		b.WriteString(fmt.Sprintf("# Run as non-root user\nUSER %s\n", containerUser))
