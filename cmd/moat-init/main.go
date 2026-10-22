@@ -10,6 +10,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 
@@ -17,6 +18,13 @@ import (
 )
 
 func main() {
+	if len(os.Args) == 2 && os.Args[1] == "--watch-clipboard" {
+		if err := moatinit.WatchClipboard(context.Background(), os.Stdin, os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 	sys := moatinit.NewSys()
 	moatinit.ResolveHome(sys)
 	ctx := &moatinit.Context{

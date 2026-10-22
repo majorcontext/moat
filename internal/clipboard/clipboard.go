@@ -1,4 +1,4 @@
-// Package clipboard reads the host system clipboard.
+// Package clipboard accesses the host system clipboard.
 package clipboard
 
 import (
@@ -62,4 +62,15 @@ func Read() (content *Content, err error) {
 		return nil, nil
 	}
 	return &Content{Data: text, MIMEType: "text/plain"}, nil
+}
+
+// WriteText replaces the host clipboard with text copied inside the container.
+func WriteText(data []byte) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("clipboard unavailable: %v", r)
+		}
+	}()
+	_, err = nativeclipboard.Text.Write(data)
+	return err
 }

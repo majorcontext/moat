@@ -10,6 +10,7 @@ import (
 	"io"
 
 	"github.com/majorcontext/moat/internal/audit"
+	"github.com/majorcontext/moat/internal/clipboardwire"
 	"github.com/majorcontext/moat/internal/container"
 )
 
@@ -29,6 +30,31 @@ func (m *Manager) ResizeTTY(ctx context.Context, runID string, height, width uin
 		return fmt.Errorf("resolving runtime for run %s: %w", runID, rtErr)
 	}
 	return rt.ResizeTTY(ctx, containerID, height, width)
+}
+
+// WatchClipboard streams new container text selections for one attached host.
+// Keeping stdin open gives the watcher a lifetime tied to this attachment;
+// closing it on cancellation stops the helper even if the container stays up.
+func (m *Manager) WatchClipboard(ctx context.Context, runID string, update func([]byte)) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	input, keepOpen := io.Pipe()
+	defer input.Close()
+	defer keepOpen.Close()
+	output, sink := io.Pipe()
+	defer output.Close()
+	stop := context.AfterFunc(ctx, func() {
+		_ = keepOpen.Close()
+		_ = output.CloseWithError(ctx.Err())
+	})
+	defer stop()
+	go func() {
+		err := m.ExecInteractive(ctx, runID, []string{"/usr/local/bin/moat-init", "--watch-clipboard"}, container.ExecOptions{
+			Stdin: input, Stdout: sink, Stderr: io.Discard,
+		})
+		_ = sink.CloseWithError(err)
+	}()
+	return clipboardwire.Read(output, update)
 }
 
 // validXclipTargets is the set of X selection targets allowed in shell commands.
