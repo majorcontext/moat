@@ -20,9 +20,10 @@ type SnippetResult struct {
 const piConfigScriptName = "pi-config.sh"
 
 // piSettingsMergeJS assigns Moat's safe global Pi settings. httpProxy is omitted
-// (redundant with the moat-owned HTTP_PROXY env). Bump the "pi-settings" hash
-// marker in deps.ImageTag whenever this changes so cached images rebuild.
-const piSettingsMergeJS = `Object.assign(s,{defaultProjectTrust:"never",enableInstallTelemetry:false,enableAnalytics:false,quietStartup:true})`
+// (redundant with the moat-owned HTTP_PROXY env). The script is content-hashed
+// by deps.ImageTag. Regular mode preserves native terminal selection, including
+// Moat's footer; fullscreen mode captures mouse input for the entire terminal.
+const piSettingsMergeJS = `Object.assign(s,{defaultProjectTrust:"never",enableInstallTelemetry:false,enableAnalytics:false,quietStartup:true,tuiMode:"regular"})`
 
 // GenerateDockerfileSnippet builds the Dockerfile snippet + script that installs
 // the declared Pi packages and bakes Moat's safe global settings into

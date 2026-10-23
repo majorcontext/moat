@@ -10,13 +10,22 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/majorcontext/moat/internal/moatinit"
 )
 
 func main() {
+	if filepath.Base(os.Args[0]) == "moat-clipboard-watch" || (len(os.Args) == 2 && os.Args[1] == "--watch-clipboard") {
+		if err := moatinit.WatchClipboard(context.Background(), os.Stdin, os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 	sys := moatinit.NewSys()
 	moatinit.ResolveHome(sys)
 	ctx := &moatinit.Context{

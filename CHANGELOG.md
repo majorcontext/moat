@@ -14,6 +14,8 @@ Adds credential profile inheritance and fixes Linux startup failures caused by w
 
 ### Fixed
 
+- Fix copies from Codex and Pi reaching only the container clipboard — new text selections now update the host clipboard while attached, with image pasting preserved. Pi defaults to regular terminal mode so mouse selection also works on Moat's footer. ([#483](https://github.com/majorcontext/moat/pull/483))
+
 - Fix agent staging on Linux when the workspace owner's UID has no account in the image — previously, `HOME=/` caused permission errors, and files owned by `moatuser` could not be overwritten or chmodded. The entrypoint now falls back to `/home/moatuser`, replaces foreign-owned staged files, and preserves an existing account's home. Images pre-create `~/.codex` and make home directories writable without changing file permissions, including SSH config and private keys. ([#478](https://github.com/majorcontext/moat/pull/478))
 - Fix gVisor runs hanging without network access when no ports are published — previously, Docker host networking left a default `runsc` sandbox with no network interfaces. gVisor runs now use bridge networking and reach the proxy through the host gateway. ([#478](https://github.com/majorcontext/moat/pull/478))
 

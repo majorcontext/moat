@@ -14,7 +14,7 @@ func TestGenerateDockerfileSnippet_bakesSettingsWithNoPackages(t *testing.T) {
 	if strings.Contains(script, "pi install ") {
 		t.Errorf("no packages: script should not run pi install, got:\n%s", script)
 	}
-	for _, want := range []string{`defaultProjectTrust:"never"`, "enableInstallTelemetry:false", "enableAnalytics:false", "quietStartup:true", ".pi/agent"} {
+	for _, want := range []string{`defaultProjectTrust:"never"`, "enableInstallTelemetry:false", "enableAnalytics:false", "quietStartup:true", `tuiMode:"regular"`, ".pi/agent"} {
 		if !strings.Contains(script, want) {
 			t.Errorf("script missing %q", want)
 		}

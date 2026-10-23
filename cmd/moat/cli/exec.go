@@ -13,7 +13,6 @@ import (
 	"time"
 
 	intcli "github.com/majorcontext/moat/internal/cli"
-	clipboardpkg "github.com/majorcontext/moat/internal/clipboard"
 	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/log"
 	"github.com/majorcontext/moat/internal/run"
@@ -541,26 +540,8 @@ func RunInteractiveAttached(ctx context.Context, manager *run.Manager, r *run.Ru
 	if statusWriter != nil {
 		statusWriter.SetInjector(injectable)
 	}
-	if r.Clipboard {
-		stdin = term.NewClipboardProxy(stdin, func() {
-			done := make(chan struct{})
-			go func() {
-				defer close(done)
-				clipCtx, clipCancel := context.WithTimeout(context.Background(), 3*time.Second)
-				defer clipCancel()
-				content, err := clipboardpkg.Read()
-				if err != nil || content == nil {
-					return
-				}
-				target := clipboardpkg.MIMEToXclipTarget(content.MIMEType)
-				_ = manager.WriteClipboard(clipCtx, r.ID, content.Data, target)
-			}()
-			select {
-			case <-done:
-			case <-time.After(3 * time.Second):
-			}
-		})
-	}
+	stdin, clipboardCleanup := setupClipboard(ctx, manager, r, stdin)
+	defer clipboardCleanup()
 	if tracer != nil {
 		stdin = trace.NewRecordingReader(stdin, tracer.recorder, trace.EventStdin)
 	}

@@ -319,6 +319,16 @@ func runJoinInteractive(ctx context.Context, manager *run.Manager, r *run.Run, c
 	statusWriter, statusCleanup, stdout := setupStatusBar(manager, r, session)
 	defer statusCleanup()
 
+	var stdin io.Reader = os.Stdin
+	if statusWriter != nil {
+		injectable := term.NewInjectableReader(stdin)
+		defer injectable.Close()
+		statusWriter.SetInjector(injectable)
+		stdin = injectable
+	}
+	stdin, clipboardCleanup := setupClipboard(ctx, manager, r, stdin)
+	defer clipboardCleanup()
+
 	// Tee join output to its own indexed log file only when registration succeeded,
 	// kept separate from the primary's logs.jsonl per the split-console design.
 	if registered && r.Store != nil {
@@ -378,7 +388,7 @@ func runJoinInteractive(ctx context.Context, manager *run.Manager, r *run.Run, c
 	go resizePump(done, sigCh, onWinch, resize)
 
 	execErr := manager.ExecInteractive(execCtx, r.ID, command, container.ExecOptions{
-		Stdin:         os.Stdin,
+		Stdin:         stdin,
 		Stdout:        stdout,
 		Stderr:        os.Stderr,
 		TTY:           true,
