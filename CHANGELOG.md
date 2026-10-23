@@ -10,6 +10,7 @@ Adds credential profile inheritance and fixes Linux startup failures caused by w
 
 ### Added
 
+- Pi transcript forwarding — enable `pi.sync_logs: true` or `moat pi --sync-logs` to retain conversation history under `~/.moat/pi/sessions/<workspace-slug>/` after container removal. Syncing defaults off and keeps each workspace separate. ([#484](https://github.com/majorcontext/moat/pull/484))
 - **Credential profile inheritance** — create a profile with `moat profile create NAME --inherit PARENT` or `--inherit-default`, then override individual grants locally. Credentials, SSH host mappings, environment variables, and implicit agent grants follow the parent chain; revocations exclude grants without changing the parent, and OAuth refreshes update the owning profile. ([#479](https://github.com/majorcontext/moat/pull/479))
 
 ### Fixed
