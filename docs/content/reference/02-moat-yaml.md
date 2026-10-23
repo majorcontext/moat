@@ -1879,6 +1879,23 @@ pi:
 
 When no model is pinned, Moat queries Pi's model list inside the container after extensions load. Startup stops if the chosen backend has no available models; it does not fall back to another backend.
 
+### pi.sync_logs
+
+Persist Pi's session transcripts on the host.
+
+```yaml
+pi:
+  sync_logs: true
+```
+
+- Type: `boolean`
+- Default: `false`
+- CLI override: `moat pi --sync-logs` or `--sync-logs=false`
+
+When enabled, Moat mounts `~/.moat/pi/sessions/<workspace-slug>/` at the container's `~/.pi/agent/sessions/`. Pi writes its own JSONL files directly to the host, preserving its working-directory subfolders (normally `--workspace--/`). Transcripts survive container removal and remain available to later runs of the same workspace. `MOAT_HOME` overrides the `~/.moat` root.
+
+Workspace slugs include a digest so paths differing only in punctuation do not collide. Only transcripts are shared; the host's Pi settings, extensions, credentials, and other workspaces' sessions are not mounted. Syncing must be enabled when creating the run; it does not export transcripts from an existing container.
+
 ### pi.packages
 
 Pi packages (extensions, skills, prompt templates, themes) to install into the container image at build time via `pi install`, so they are baked into a reproducible, cached layer.
@@ -1904,7 +1921,7 @@ For every `moat pi` image, Moat bakes a `~/.pi/agent/settings.json` with safe de
 
 `httpProxy` is not set here — Moat already injects `HTTP_PROXY` into the container. Note that Pi config (`baseUrl`, custom providers, extensions) can redirect model traffic to any host, so only the **network policy** actually constrains egress; `moat pi` prints a warning under a permissive policy. Use `network.policy: strict` for untrusted work.
 
-**Not yet supported:** `pi.mcp` (Pi core has no MCP configuration format) and `pi.sync_logs` are planned follow-ups.
+**Not yet supported:** `pi.mcp` (Pi core has no MCP configuration format).
 
 ---
 

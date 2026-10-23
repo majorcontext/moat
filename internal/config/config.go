@@ -397,6 +397,9 @@ type PiConfig struct {
 	Provider string   `yaml:"provider,omitempty"`
 	Model    string   `yaml:"model,omitempty"`
 	Packages []string `yaml:"packages,omitempty"`
+	// SyncLogs persists Pi transcripts in a per-workspace host directory.
+	// Opt-in: backend grants alone do not enable Pi session sharing.
+	SyncLogs *bool `yaml:"sync_logs,omitempty"`
 }
 
 // piPackageSafe restricts pi.packages entries to characters valid in package
@@ -554,6 +557,11 @@ func (c *Config) ShouldSyncCodexLogs() bool {
 		}
 	}
 	return false
+}
+
+// ShouldSyncPiLogs returns true only when Pi transcript syncing is requested.
+func (c *Config) ShouldSyncPiLogs() bool {
+	return c.Pi.SyncLogs != nil && *c.Pi.SyncLogs
 }
 
 // ShouldSyncGeminiLogs returns true if Gemini session logs should be synced.

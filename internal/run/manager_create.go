@@ -1498,7 +1498,8 @@ region = %s
 	// A Pi run carries an anthropic/openai grant, which would otherwise trip the
 	// claude/codex/gemini staging and log-sync below (those conditions key off
 	// the grant and the ShouldSync*Logs defaults). Pi manages its own staging, so
-	// skip the other agents' machinery entirely for a Pi run. Credential injection
+	// skip the other agents' machinery entirely for a Pi run. Pi's own optional
+	// transcript mount is independent of those grants. Credential injection
 	// is unaffected — it happens in the grant loop, not here.
 	isPiRun := opts.Config != nil && strings.HasPrefix(opts.Config.Agent, "pi")
 
@@ -1556,6 +1557,15 @@ region = %s
 				})
 			}
 		}
+	}
+
+	if opts.Config != nil && opts.Config.ShouldSyncPiLogs() {
+		mount, err := piSessionMount(opts.Workspace, containerHome)
+		if err != nil {
+			cleanupDaemonRun()
+			return nil, err
+		}
+		mounts = append(mounts, mount)
 	}
 
 	// Set up provider-specific container mounts and init files.
