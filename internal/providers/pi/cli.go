@@ -20,6 +20,7 @@ var (
 	piWtFlag       string
 	piProviderFlag string
 	piModelFlag    string
+	piSyncLogsFlag bool
 )
 
 // Resolved by runPi (before RunProvider's closures fire) so GetCredentialGrant
@@ -114,6 +115,7 @@ Use 'moat list' to see running and recent runs.`,
 	piCmd.Flags().StringSliceVar(&piAllowedHosts, "allow-host", nil, "additional hosts to allow network access to")
 	piCmd.Flags().StringVar(&piProviderFlag, "provider", "", "model backend: anthropic, openai, or lunaroute (overrides pi.provider)")
 	piCmd.Flags().StringVar(&piModelFlag, "model", "", "model pattern to use (overrides pi.model)")
+	piCmd.Flags().BoolVar(&piSyncLogsFlag, "sync-logs", false, "persist Pi session transcripts on the host (overrides pi.sync_logs)")
 	piCmd.Flags().StringVar(&piWtFlag, "worktree", "", "run in a git worktree for this branch")
 	piCmd.Flags().StringVar(&piWtFlag, "wt", "", "alias for --worktree")
 	_ = piCmd.Flags().MarkHidden("wt")
@@ -144,6 +146,7 @@ func runPi(cmd *cobra.Command, args []string) error {
 			// field in moat.yaml (which only sets the `moat run` default). This
 			// makes the isPiRun guard in Create reliable.
 			cfg.Agent = "pi"
+			configurePiLogSync(cmd, cfg)
 
 			// The lunaroute backend only has models once LunaRoute's
 			// extension is installed; bake it rather than make every user
@@ -159,6 +162,14 @@ func runPi(cmd *cobra.Command, args []string) error {
 			}
 		},
 	})
+}
+
+// An omitted CLI flag preserves the YAML value; --sync-logs=false can disable it.
+func configurePiLogSync(cmd *cobra.Command, cfg *config.Config) {
+	if cmd.Flags().Changed("sync-logs") {
+		syncLogs := piSyncLogsFlag
+		cfg.Pi.SyncLogs = &syncLogs
+	}
 }
 
 // resolvePiPreflight resolves the Pi backend from --provider/--model flags, the
