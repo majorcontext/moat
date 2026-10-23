@@ -1896,6 +1896,8 @@ When enabled, Moat mounts `~/.moat/pi/sessions/<workspace-slug>/` at the contain
 
 Workspace slugs include a digest so paths differing only in punctuation do not collide. Only transcripts are shared; the host's Pi settings, extensions, credentials, and other workspaces' sessions are not mounted. Syncing must be enabled when creating the run; it does not export transcripts from an existing container.
 
+An explicit `pi.sync_logs: true` also applies to `moat run`, allowing Pi launched from a shell or another agent to use the same mount. If Moat cannot create the host sessions directory, startup fails with an error.
+
 ### pi.packages
 
 Pi packages (extensions, skills, prompt templates, themes) to install into the container image at build time via `pi install`, so they are baked into a reproducible, cached layer.

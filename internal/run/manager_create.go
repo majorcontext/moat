@@ -1563,6 +1563,7 @@ region = %s
 		mount, err := piSessionMount(opts.Workspace, containerHome)
 		if err != nil {
 			cleanupDaemonRun()
+			cleanupSSH(sshServer)
 			return nil, err
 		}
 		mounts = append(mounts, mount)
