@@ -1341,6 +1341,8 @@ moat join [run] <agent> [flags]
 
 The agent must be one moat actually provisioned into the target container — either the agent the run was started with, or one listed in that project's `agents:` (see [`agents:`](./02-moat-yaml.md#agents)). `moat join run_a1b2c3d4e5f6 codex` works against a container started by `moat claude` only when that project's `moat.yaml` also lists `codex` in `agents:`.
 
+Interactive Codex joins use `--no-daemon` when the installed Codex CLI supports it. Each joined client runs its own embedded server, avoiding feature mismatches with the primary session's background server. Older Codex versions launch without this flag; headless joins use `codex exec`.
+
 ### Arguments
 
 | Argument | Description |
