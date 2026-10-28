@@ -56,6 +56,8 @@ moat join run_a1b2c3d4e5f6 codex
 
 Order in `agents:` matters only for picking the primary agent — every entry after the first is equally joinable.
 
+Interactive Codex joins run with `--no-daemon` when supported, so they do not need to restart the primary session's background server if its feature settings differ. On an older Moat release, choose **Run without daemon this time** if Codex shows “Background server has incompatible feature settings.”
+
 ## Joining without a run ID
 
 `moat join <agent>` infers the run instead of requiring one:
