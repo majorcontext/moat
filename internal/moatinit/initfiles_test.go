@@ -88,7 +88,7 @@ func TestDecodeInitContent(t *testing.T) {
 	// ...but carriage returns are rejected deliberately so a CRLF-joined
 	// record fails closed, even on systems where base64 -d accepts CRLF.
 	if _, err := decodeInitContent("YW\r\nJj"); err == nil {
-		t.Error("CR-tainted payload decoded; base64 -d rejects it")
+		t.Error("CR-tainted payload decoded; Moat rejects CR deliberately")
 	}
 
 	// Companion: invalid base64 fails closed (the phase aborts before any
