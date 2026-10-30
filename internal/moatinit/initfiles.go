@@ -129,12 +129,11 @@ func initFilesPhase(ctx *Context) error {
 }
 
 // decodeInitContent decodes a record's base64 payload (INIT-06) with
-// coreutils `base64 -d` acceptance semantics: newlines are tolerated
-// anywhere (they cannot occur inside a record anyway — a newline splits the
-// record), but carriage returns are INVALID INPUT — Go's decoder would
-// silently strip \r where the shell fails closed (a CRLF-joined
-// MOAT_INIT_FILES leaves a trailing \r on each payload), and the
-// differential shell-parity harness pins that divergence. All other
+// coreutils `base64 -d` acceptance semantics for ordinary payloads: newlines
+// are tolerated anywhere (they cannot occur inside a record anyway — a newline
+// splits the record). Carriage returns are deliberately rejected so a
+// CRLF-joined MOAT_INIT_FILES record fails closed. Some base64 implementations
+// accept CRLF, so this is an intentional exception to shell parity. All other
 // non-alphabet bytes are rejected exactly like `base64 -d`.
 //
 // Decoding happens to a buffer BEFORE any file is touched, so an invalid

@@ -49,12 +49,14 @@ func TestSplitInitRecordMatchesLiveShell(t *testing.T) {
 
 // TestDecodeInitContentMatchesCoreutils differentially checks base64
 // accept/reject parity against `base64 -d` for a corpus of payload shapes.
+// CRLF is excluded because rejecting carriage returns is intentional
+// hardening; TestDecodeInitContent covers that exception directly.
 func TestDecodeInitContentMatchesCoreutils(t *testing.T) {
 	if _, err := exec.LookPath("base64"); err != nil {
 		t.Skip("base64 not installed")
 	}
 	corpus := []string{
-		"", "YWJj", "YW\r\nJj", "YWJjZA==", "YWJjZA=", "!!!", "YWJj ", " YWJj",
+		"", "YWJj", "YWJjZA==", "YWJjZA=", "!!!", "YWJj ", " YWJj",
 		"Y W J j", "====", "AA==", strings.Repeat("QUJDREVGRw==", 1),
 	}
 	for _, payload := range corpus {
