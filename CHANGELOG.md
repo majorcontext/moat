@@ -10,15 +10,15 @@ Adds a Supabase CLI grant and fixes Vercel CLI token injection.
 
 ### Added
 
-- **Supabase CLI grant** — `moat grant supabase` can import an existing host Supabase CLI login with confirmation, use `SUPABASE_ACCESS_TOKEN`, or prompt for a personal access token. The container receives a CLI-compatible placeholder while the proxy injects the real token for the Management API.
+- **Supabase CLI grant** — `moat grant supabase` can import an existing host Supabase CLI login with confirmation, use `SUPABASE_ACCESS_TOKEN`, or prompt for a personal access token. The container receives a CLI-compatible placeholder while the proxy injects the real token for the Management API. ([#487](https://github.com/majorcontext/moat/pull/487))
 
 ### Changed
 
-- The Vercel grant now injects credentials only for `api.vercel.com`, removing the previous `*.vercel.com` match.
+- The Vercel grant now injects credentials only for `api.vercel.com`, removing the previous `*.vercel.com` match. If you need injection for another Vercel host, open an issue with the hostname. ([#487](https://github.com/majorcontext/moat/pull/487))
 
 ### Fixed
 
-- Fix Vercel CLI rejecting Moat's placeholder token before making an API request; the grant now supplies a CLI-compatible value.
+- Fix Vercel CLI token rejection — previously, the CLI rejected Moat's placeholder before making an API request; the grant now supplies a CLI-compatible value. ([#487](https://github.com/majorcontext/moat/pull/487))
 
 ## v0.9.0 — 2026-10-27
 

@@ -61,7 +61,8 @@ func (p *Provider) ContainerEnv(cred *provider.Credential) []string {
 }
 
 func (p *Provider) Grant(ctx context.Context) (*provider.Credential, error) {
-	// The generic provider owns environment and paste acquisition.
+	// Keep this environment check in sync with SourceEnv in New; the generic
+	// provider owns environment and paste acquisition.
 	if os.Getenv("SUPABASE_ACCESS_TOKEN") != "" {
 		return p.ConfigProvider.Grant(ctx)
 	}
