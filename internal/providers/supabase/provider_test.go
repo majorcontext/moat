@@ -30,13 +30,16 @@ func (m *mockProxy) SetCredentialWithGrant(host, header, value, grant string) {
 
 func TestProviderInjection(t *testing.T) {
 	p := New()
+	if env := p.ContainerEnv(nil); env != nil {
+		t.Fatalf("ContainerEnv(nil) = %v, want nil", env)
+	}
 	cred := &provider.Credential{Token: "sbp_real"}
 	env := p.ContainerEnv(cred)
 	if len(env) != 1 || !regexp.MustCompile(`^SUPABASE_ACCESS_TOKEN=sbp_[a-f0-9]{40}$`).MatchString(env[0]) {
 		t.Fatalf("ContainerEnv = %v", env)
 	}
-	if other := p.ContainerEnv(&provider.Credential{Token: "different"}); other[0] == env[0] {
-		t.Fatal("different credentials shared a placeholder")
+	if other := p.ContainerEnv(cred); other[0] == env[0] {
+		t.Fatal("the same credential received the same placeholder for two runs")
 	}
 	proxy := &mockProxy{}
 	p.ConfigureProxy(proxy, cred)

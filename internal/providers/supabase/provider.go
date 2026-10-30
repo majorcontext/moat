@@ -4,7 +4,7 @@ package supabase
 
 import (
 	"context"
-	"crypto/sha256"
+	"crypto/rand"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -52,12 +52,17 @@ func New() *Provider {
 	}, "builtin")}
 }
 
-// ContainerEnv supplies the Supabase CLI with a token-shaped placeholder. The
-// value is derived at runtime so it is distinct per grant and never resembles
-// a real credential committed to source control.
+// ContainerEnv supplies the Supabase CLI with a fresh token-shaped placeholder.
+// Header injection does not need this value again, so it can be random per run.
 func (p *Provider) ContainerEnv(cred *provider.Credential) []string {
-	hash := sha256.Sum256([]byte("moat-supabase-placeholder:" + cred.Token))
-	return []string{"SUPABASE_ACCESS_TOKEN=sbp_" + hex.EncodeToString(hash[:20])}
+	if cred == nil {
+		return nil
+	}
+	var placeholder [20]byte
+	if _, err := rand.Read(placeholder[:]); err != nil {
+		panic("crypto/rand failed: " + err.Error())
+	}
+	return []string{"SUPABASE_ACCESS_TOKEN=sbp_" + hex.EncodeToString(placeholder[:])}
 }
 
 func (p *Provider) Grant(ctx context.Context) (*provider.Credential, error) {
