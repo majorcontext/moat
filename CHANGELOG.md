@@ -6,6 +6,20 @@ Moat is pre-1.0. The CLI interface and `moat.yaml` schema may change between min
 
 ## Unreleased
 
+Adds a Supabase CLI grant and fixes Vercel CLI token injection.
+
+### Added
+
+- **Supabase CLI grant** — `moat grant supabase` can import an existing host Supabase CLI login with confirmation, use `SUPABASE_ACCESS_TOKEN`, or prompt for a personal access token. The container receives a CLI-compatible placeholder while the proxy injects the real token for the Management API.
+
+### Changed
+
+- The Vercel grant now injects credentials only for `api.vercel.com`, removing the previous `*.vercel.com` match.
+
+### Fixed
+
+- Fix Vercel CLI rejecting Moat's placeholder token before making an API request; the grant now supplies a CLI-compatible value.
+
 ## v0.9.0 — 2026-10-27
 
 Adds credential profile inheritance and opt-in Pi transcript forwarding, and fixes Linux/WSL startup, Pi backend and model selection, credential revocation, and host clipboard syncing. Cached run images rebuild once.

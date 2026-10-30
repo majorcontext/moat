@@ -257,6 +257,8 @@ func (p *ConfigProvider) ConfigureProxy(proxy provider.ProxyConfigurer, cred *pr
 // ContainerEnv returns environment variables to set in the container.
 // The env var is always set to a placeholder — the real token is injected by
 // the proxy at the network layer (either via header injection or token substitution).
+// Header-injection providers may specify a format-valid placeholder for CLIs
+// that validate token syntax locally.
 func (p *ConfigProvider) ContainerEnv(cred *provider.Credential) []string {
 	if p.def.ContainerEnv == "" {
 		return nil
@@ -266,6 +268,8 @@ func (p *ConfigProvider) ContainerEnv(cred *provider.Credential) []string {
 		// Token substitution mode: use a per-credential placeholder derived from
 		// a hash of the token, so container code can't predict or craft matching URLs.
 		placeholder = tokenSubPlaceholder(cred.Token)
+	} else if p.def.ContainerPlaceholder != "" {
+		placeholder = p.def.ContainerPlaceholder
 	}
 	return []string{p.def.ContainerEnv + "=" + placeholder}
 }

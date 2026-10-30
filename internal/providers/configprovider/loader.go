@@ -156,5 +156,11 @@ func parseProviderDef(data []byte) (ProviderDef, error) {
 	if def.Inject.Header == "" && def.ContainerEnv == "" {
 		return ProviderDef{}, fmt.Errorf("provider %q: inject.header or container_env is required", def.Name)
 	}
+	if def.ContainerPlaceholder != "" && def.ContainerEnv == "" {
+		return ProviderDef{}, fmt.Errorf("provider %q: container_placeholder requires container_env", def.Name)
+	}
+	if def.ContainerPlaceholder != "" && !def.HasHeaderInjection() {
+		return ProviderDef{}, fmt.Errorf("provider %q: container_placeholder requires inject.header", def.Name)
+	}
 	return def, nil
 }

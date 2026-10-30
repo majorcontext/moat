@@ -19,6 +19,7 @@ import (
 	_ "github.com/majorcontext/moat/internal/providers/oauth"     // registers OAuth provider
 	_ "github.com/majorcontext/moat/internal/providers/openai"    // registers OpenAI API-key provider
 	_ "github.com/majorcontext/moat/internal/providers/pi"        // registers Pi provider
+	_ "github.com/majorcontext/moat/internal/providers/supabase"  // registers Supabase provider
 
 	"github.com/majorcontext/moat/internal/providers/configprovider"
 )

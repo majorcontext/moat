@@ -2,7 +2,7 @@
 title: "Grants reference"
 navTitle: "Grants"
 description: "Complete reference for Moat grant types: supported providers, host matching, credential sources, and configuration."
-keywords: ["moat", "grants", "credentials", "github", "anthropic", "aws", "ssh", "openai", "npm", "graphite", "lunaroute", "meta", "facebook", "instagram", "gitlab", "brave-search", "elevenlabs", "linear", "vercel", "sentry", "datadog"]
+keywords: ["moat", "grants", "credentials", "github", "anthropic", "aws", "ssh", "openai", "npm", "graphite", "lunaroute", "meta", "facebook", "instagram", "gitlab", "brave-search", "elevenlabs", "linear", "vercel", "supabase", "sentry", "datadog"]
 ---
 
 # Grants reference
@@ -31,11 +31,20 @@ Store a credential with `moat grant <provider>`, then use it in runs with `--gra
 | `brave-search` | `api.search.brave.com` | `X-Subscription-Token: ...` | `BRAVE_API_KEY`, `BRAVE_SEARCH_API_KEY`, or prompt |
 | `elevenlabs` | `api.elevenlabs.io` | `xi-api-key: ...` | `ELEVENLABS_API_KEY` or prompt |
 | `linear` | `api.linear.app` | `Authorization: ...` | `LINEAR_API_KEY` or prompt |
-| `vercel` | `api.vercel.com`, `*.vercel.com` | `Authorization: Bearer ...` | `VERCEL_TOKEN` or prompt |
+| `vercel` | `api.vercel.com` | `Authorization: Bearer ...` | `VERCEL_TOKEN` or prompt |
+| `supabase` | `api.supabase.com` | `Authorization: Bearer ...` | `SUPABASE_ACCESS_TOKEN`, host Supabase CLI login, or prompt |
 | `sentry` | `sentry.io`, `*.sentry.io` | `Authorization: Bearer ...` | `SENTRY_AUTH_TOKEN` or prompt |
 | `datadog` | `*.datadoghq.com` | `DD-API-KEY: ...` | `DD_API_KEY`, `DATADOG_API_KEY`, or prompt |
 
 Run `moat grant providers` to list all providers, including any [custom providers](#custom-providers) you've added.
+
+## Vercel and Supabase CLIs
+
+Run `moat grant vercel` to paste a Vercel API token, or set `VERCEL_TOKEN` on the host before granting. Create a token at [Vercel account tokens](https://vercel.com/account/tokens). The container receives a format-valid `VERCEL_TOKEN` placeholder; the proxy injects the real token only for `api.vercel.com`.
+
+Run `moat grant supabase` to import a host `supabase login` token or paste a personal access token. Set `SUPABASE_ACCESS_TOKEN` on the host to use it directly. The import choice reads the Supabase CLI's active-profile keyring entry, legacy keyring entry, or fallback `access-token` file. Supabase's browser login creates a full-access token; paste a [scoped token](https://supabase.com/docs/guides/platform/personal-access-tokens) when you want narrower access. The container receives a format-valid `SUPABASE_ACCESS_TOKEN` placeholder; the proxy injects the real token only for `api.supabase.com`.
+
+Both grants cover the platform Management APIs. Supabase database commands can also require a database password (`SUPABASE_DB_PASSWORD`); this grant does not supply one. Add the CLI binaries to your image or project dependencies separately.
 
 ## GitHub
 
@@ -1013,7 +1022,7 @@ Credentials are stored encrypted in `~/.moat/credentials/` (or `~/.moat/credenti
 
 ## Config-driven providers
 
-The providers from `gitlab` through `datadog` in the [grant types table](#grant-types) are defined as YAML configurations shipped with the binary. They work the same as the Go-implemented providers -- credentials are stored encrypted and injected at the network layer -- but are defined declaratively.
+The `gitlab`, `brave-search`, `elevenlabs`, `linear`, `vercel`, `sentry`, `datadog`, and `telegram` providers in the [grant types table](#grant-types) are defined as YAML configurations shipped with the binary. They work the same as the Go-implemented providers -- credentials are stored encrypted and injected at the network layer -- but are defined declaratively.
 
 Use them the same way:
 

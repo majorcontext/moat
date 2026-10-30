@@ -171,6 +171,18 @@ func TestContainerEnv(t *testing.T) {
 	}
 }
 
+func TestContainerEnvCustomPlaceholder(t *testing.T) {
+	cp := NewConfigProvider(ProviderDef{
+		Name: "vercel", ContainerEnv: "VERCEL_TOKEN",
+		Inject:               InjectConfig{Header: "Authorization"},
+		ContainerPlaceholder: "moatProxyInjectedVercelToken000000000000",
+	}, "builtin")
+	got := cp.ContainerEnv(&provider.Credential{Token: "secret"})
+	if len(got) != 1 || got[0] != "VERCEL_TOKEN=moatProxyInjectedVercelToken000000000000" {
+		t.Fatalf("ContainerEnv = %v", got)
+	}
+}
+
 func TestContainerMountsReturnsNil(t *testing.T) {
 	cp := NewConfigProvider(ProviderDef{Name: "test"}, "builtin")
 	mounts, cleanup, err := cp.ContainerMounts(&provider.Credential{}, "/home/user")
