@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"testing"
 
 	"github.com/majorcontext/moat/internal/credential"
@@ -30,6 +31,9 @@ func (m *mockProxy) SetCredentialWithGrant(host, header, value, grant string) {
 
 func TestProviderInjection(t *testing.T) {
 	p := New()
+	if deps := p.ImpliedDependencies(); !slices.Equal(deps, []string{"supabase-cli"}) {
+		t.Fatalf("ImpliedDependencies() = %v, want [supabase-cli]", deps)
+	}
 	if env := p.ContainerEnv(nil); env != nil {
 		t.Fatalf("ContainerEnv(nil) = %v, want nil", env)
 	}

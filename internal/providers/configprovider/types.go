@@ -9,6 +9,8 @@ type ProviderDef struct {
 	Inject       InjectConfig `yaml:"inject"`
 	SourceEnv    []string     `yaml:"source_env,omitempty"`
 	ContainerEnv string       `yaml:"container_env,omitempty"`
+	// ImpliedDeps are installed when a run uses this grant.
+	ImpliedDeps []string `yaml:"implied_dependencies,omitempty"`
 	// ContainerPlaceholder overrides the default env placeholder for CLIs that
 	// validate token syntax before making a request.
 	ContainerPlaceholder string          `yaml:"container_placeholder,omitempty"`

@@ -282,9 +282,9 @@ func (p *ConfigProvider) ContainerMounts(cred *provider.Credential, containerHom
 // Cleanup is a no-op for config providers.
 func (p *ConfigProvider) Cleanup(cleanupPath string) {}
 
-// ImpliedDependencies returns nil (no implied dependencies for config providers).
+// ImpliedDependencies returns dependencies installed when this grant is used.
 func (p *ConfigProvider) ImpliedDependencies() []string {
-	return nil
+	return p.def.ImpliedDeps
 }
 
 // Description returns the provider description.

@@ -65,6 +65,9 @@ func (p *Provider) ContainerEnv(cred *provider.Credential) []string {
 	return []string{"SUPABASE_ACCESS_TOKEN=sbp_" + hex.EncodeToString(placeholder[:])}
 }
 
+// ImpliedDependencies installs the Supabase CLI for runs using this grant.
+func (p *Provider) ImpliedDependencies() []string { return []string{"supabase-cli"} }
+
 func (p *Provider) Grant(ctx context.Context) (*provider.Credential, error) {
 	// Keep this environment check in sync with SourceEnv in New; the generic
 	// provider owns environment and paste acquisition.

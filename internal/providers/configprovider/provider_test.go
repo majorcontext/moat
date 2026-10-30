@@ -3,6 +3,7 @@ package configprovider
 import (
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 
@@ -197,10 +198,14 @@ func TestContainerMountsReturnsNil(t *testing.T) {
 	}
 }
 
-func TestImpliedDependenciesReturnsNil(t *testing.T) {
+func TestImpliedDependencies(t *testing.T) {
 	cp := NewConfigProvider(ProviderDef{Name: "test"}, "builtin")
 	if deps := cp.ImpliedDependencies(); deps != nil {
 		t.Errorf("ImpliedDependencies() = %v, want nil", deps)
+	}
+	cp = NewConfigProvider(ProviderDef{Name: "test", ImpliedDeps: []string{"vercel-cli", "node"}}, "builtin")
+	if deps := cp.ImpliedDependencies(); !slices.Equal(deps, []string{"vercel-cli", "node"}) {
+		t.Errorf("ImpliedDependencies() = %v, want [vercel-cli node]", deps)
 	}
 }
 

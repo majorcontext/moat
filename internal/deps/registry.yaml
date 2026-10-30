@@ -125,6 +125,24 @@ graphite-cli:
   package: "@withgraphite/graphite-cli"
   requires: [node]
 
+vercel-cli:
+  description: Vercel CLI
+  type: npm
+  package: vercel
+  requires: [node]
+
+supabase-cli:
+  description: Supabase CLI
+  type: github-binary
+  repo: supabase/cli
+  asset: "supabase_{version}_linux_{arch}.tar.gz"
+  bin: supabase
+  command: supabase
+  default: "2.122.0"
+  targets:
+    amd64: amd64
+    arm64: arm64
+
 # Build tools
 protoc:
   description: Protocol Buffers compiler (with well-known types)

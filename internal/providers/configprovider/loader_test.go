@@ -1,6 +1,7 @@
 package configprovider
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
@@ -229,6 +230,9 @@ func TestVercelDefaultMatchesCLI(t *testing.T) {
 	}
 	if def.ContainerEnv != "VERCEL_TOKEN" || def.ContainerPlaceholder == "" {
 		t.Fatalf("Vercel env = %q, placeholder = %q", def.ContainerEnv, def.ContainerPlaceholder)
+	}
+	if !slices.Equal(def.ImpliedDeps, []string{"vercel-cli", "node"}) {
+		t.Fatalf("Vercel implied dependencies = %v", def.ImpliedDeps)
 	}
 	for _, r := range def.ContainerPlaceholder {
 		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_') {

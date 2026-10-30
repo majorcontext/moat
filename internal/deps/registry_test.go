@@ -32,6 +32,51 @@ func TestRegistryHasNode(t *testing.T) {
 	}
 }
 
+func TestGrantCLIDependencies(t *testing.T) {
+	vercel, ok := GetSpec("vercel-cli")
+	if !ok || vercel.Type != TypeNpm || vercel.Package != "vercel" {
+		t.Fatalf("vercel-cli spec = %+v, found = %v", vercel, ok)
+	}
+	supabase, ok := GetSpec("supabase-cli")
+	if !ok || supabase.Type != TypeGithubBinary || supabase.Command != "supabase" {
+		t.Fatalf("supabase-cli spec = %+v, found = %v", supabase, ok)
+	}
+
+	commands := getGithubBinaryCommands("supabase-cli", supabase.Default, supabase)
+	install := strings.Join(commands.Commands, "\n")
+	for _, want := range []string{
+		"supabase_2.122.0_linux_amd64.tar.gz",
+		"supabase_2.122.0_linux_arm64.tar.gz",
+		"mv /tmp/supabase /usr/local/bin/supabase",
+	} {
+		if !strings.Contains(install, want) {
+			t.Errorf("Supabase install commands missing %q: %s", want, install)
+		}
+	}
+
+	deps, err := ParseAll([]string{"vercel-cli", "node", "supabase-cli"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Validate(deps); err != nil {
+		t.Fatal(err)
+	}
+	image, err := GenerateDockerfile(deps, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"npm install -g vercel",
+		"supabase_2.122.0_linux_amd64.tar.gz",
+		"supabase_2.122.0_linux_arm64.tar.gz",
+		"/usr/local/bin/supabase",
+	} {
+		if !strings.Contains(image.Dockerfile, want) {
+			t.Errorf("generated Dockerfile missing %q", want)
+		}
+	}
+}
+
 func TestRegistryHasProtoc(t *testing.T) {
 	protoc, ok := GetSpec("protoc")
 	if !ok {
