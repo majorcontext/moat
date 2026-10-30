@@ -3,7 +3,6 @@ description: "Vercel platform API token"
 
 hosts:
   - "api.vercel.com"
-  - "*.vercel.com"
 
 inject:
   header: "Authorization"
@@ -11,6 +10,8 @@ inject:
 
 source_env: [VERCEL_TOKEN]
 container_env: VERCEL_TOKEN
+container_placeholder: moatProxyInjectedVercelToken000000000000
+implied_dependencies: [vercel-cli, node]
 
 validate:
   url: "https://api.vercel.com/v2/user"

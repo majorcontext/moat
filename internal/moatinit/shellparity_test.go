@@ -49,6 +49,8 @@ func TestSplitInitRecordMatchesLiveShell(t *testing.T) {
 
 // TestDecodeInitContentMatchesCoreutils differentially checks base64
 // accept/reject parity against `base64 -d` for a corpus of payload shapes.
+// CRLF is an intentional exception: Moat rejects it even when the local
+// `base64 -d` accepts it.
 func TestDecodeInitContentMatchesCoreutils(t *testing.T) {
 	if _, err := exec.LookPath("base64"); err != nil {
 		t.Skip("base64 not installed")
@@ -62,6 +64,15 @@ func TestDecodeInitContentMatchesCoreutils(t *testing.T) {
 		cmd := exec.Command("base64", "-d")
 		cmd.Stdin = strings.NewReader(payload)
 		shBytes, shErr := cmd.Output()
+		if strings.ContainsRune(payload, '\r') {
+			if goErr == nil {
+				t.Errorf("decodeInitContent(%q) accepted a carriage return", payload)
+			}
+			if shErr == nil && string(shBytes) != "abc" {
+				t.Errorf("base64 -d accepted CRLF but decoded %q, want abc", shBytes)
+			}
+			continue
+		}
 		if (goErr == nil) != (shErr == nil) {
 			t.Errorf("decode divergence for %q: go err=%v, base64 -d err=%v", payload, goErr, shErr)
 			continue

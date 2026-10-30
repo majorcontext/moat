@@ -89,7 +89,7 @@ func TestGrantProviderInfosKeepsRealGrants(t *testing.T) {
 		listed[info.Name] = true
 	}
 
-	for _, name := range []string{"claude", "anthropic", "github", "codex", "openai"} {
+	for _, name := range []string{"claude", "anthropic", "github", "codex", "openai", "supabase"} {
 		if !listed[name] {
 			t.Errorf("provider %q should be listed under 'moat grant providers'", name)
 		}

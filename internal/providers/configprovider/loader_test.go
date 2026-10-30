@@ -1,6 +1,7 @@
 package configprovider
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
@@ -147,6 +148,16 @@ func TestParseProviderDefValidation(t *testing.T) {
 			yaml:    "name: test\ndescription: Test\nhosts: [example.com]\n",
 			wantErr: "inject.header or container_env is required",
 		},
+		{
+			name:    "placeholder without container env",
+			yaml:    "name: test\ndescription: Test\nhosts: [example.com]\ninject:\n  header: Authorization\ncontainer_placeholder: fake\n",
+			wantErr: "container_placeholder requires container_env",
+		},
+		{
+			name:    "placeholder with token substitution",
+			yaml:    "name: test\ndescription: Test\nhosts: [example.com]\ncontainer_env: TEST_TOKEN\ncontainer_placeholder: fake\n",
+			wantErr: "container_placeholder requires inject.header",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -208,6 +219,24 @@ func TestLoadEmbeddedAllDefaults(t *testing.T) {
 	for _, name := range expected {
 		if _, ok := defs[name]; !ok {
 			t.Errorf("expected %q in embedded defaults", name)
+		}
+	}
+}
+
+func TestVercelDefaultMatchesCLI(t *testing.T) {
+	def := loadEmbedded()["vercel"]
+	if len(def.Hosts) != 1 || def.Hosts[0] != "api.vercel.com" {
+		t.Fatalf("Vercel hosts = %v", def.Hosts)
+	}
+	if def.ContainerEnv != "VERCEL_TOKEN" || def.ContainerPlaceholder == "" {
+		t.Fatalf("Vercel env = %q, placeholder = %q", def.ContainerEnv, def.ContainerPlaceholder)
+	}
+	if !slices.Equal(def.ImpliedDeps, []string{"vercel-cli", "node"}) {
+		t.Fatalf("Vercel implied dependencies = %v", def.ImpliedDeps)
+	}
+	for _, r := range def.ContainerPlaceholder {
+		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_') {
+			t.Fatalf("Vercel CLI rejects placeholder character %q", r)
 		}
 	}
 }

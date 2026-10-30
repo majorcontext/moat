@@ -42,6 +42,10 @@ source_env: [GITLAB_TOKEN, GL_TOKEN]
 # The real token is injected at the network layer by the proxy.
 container_env: GITLAB_TOKEN
 
+# Optional format-valid replacement for CLIs that validate token syntax.
+# Only used with inject.header; otherwise Moat generates a unique placeholder.
+# container_placeholder: "examplePlaceholder123"
+
 # Endpoint to validate the token (optional). Omit to skip validation.
 # The URL may contain ${token} for APIs that embed the token in the URL path.
 validate:
@@ -68,6 +72,8 @@ prompt: |
 | `inject.prefix` | string | no | Prefix prepended to the token value (e.g., `"Bearer "`). Default: none. |
 | `source_env` | list of strings | no | Environment variables checked on the host during grant. First non-empty match is used. |
 | `container_env` | string | no | Environment variable set in the container with a placeholder value. |
+| `container_placeholder` | string | no | Literal placeholder for `container_env`. Requires `inject.header`; use a token shape accepted by the client and never put a real credential here. |
+| `implied_dependencies` | list of strings | no | Dependencies installed automatically when a run uses this grant. |
 | `validate` | object | no | Endpoint to validate the token. Omit to skip validation. |
 | `validate.url` | string | yes (if `validate`) | URL to send a validation request to. May contain `${token}` for URL-path substitution. |
 | `validate.method` | string | no | HTTP method. Default: `GET`. |
@@ -85,7 +91,6 @@ description: "Vercel platform API token"
 
 hosts:
   - "api.vercel.com"
-  - "*.vercel.com"
 
 inject:
   header: "Authorization"
@@ -93,6 +98,8 @@ inject:
 
 source_env: [VERCEL_TOKEN]
 container_env: VERCEL_TOKEN
+container_placeholder: moatProxyInjectedVercelToken000000000000
+implied_dependencies: [vercel-cli, node]
 
 validate:
   url: "https://api.vercel.com/v2/user"
@@ -113,7 +120,7 @@ moat run --grant vercel ./my-project
 
 When multiple providers share the same name, Moat uses the first match in this order:
 
-1. **Built-in Go providers** -- Compiled into the binary (github, anthropic, openai, gemini, npm, aws)
+1. **Built-in Go providers** -- Compiled into the binary (github, anthropic, openai, gemini, npm, aws, supabase)
 2. **User YAML providers** -- Files in `~/.moat/providers/`
 3. **Embedded YAML providers** -- Shipped with Moat (gitlab, brave-search, elevenlabs, linear, vercel, sentry, datadog, telegram)
 

@@ -3,6 +3,7 @@ package configprovider
 import (
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 
@@ -171,6 +172,18 @@ func TestContainerEnv(t *testing.T) {
 	}
 }
 
+func TestContainerEnvCustomPlaceholder(t *testing.T) {
+	cp := NewConfigProvider(ProviderDef{
+		Name: "vercel", ContainerEnv: "VERCEL_TOKEN",
+		Inject:               InjectConfig{Header: "Authorization"},
+		ContainerPlaceholder: "moatProxyInjectedVercelToken000000000000",
+	}, "builtin")
+	got := cp.ContainerEnv(&provider.Credential{Token: "secret"})
+	if len(got) != 1 || got[0] != "VERCEL_TOKEN=moatProxyInjectedVercelToken000000000000" {
+		t.Fatalf("ContainerEnv = %v", got)
+	}
+}
+
 func TestContainerMountsReturnsNil(t *testing.T) {
 	cp := NewConfigProvider(ProviderDef{Name: "test"}, "builtin")
 	mounts, cleanup, err := cp.ContainerMounts(&provider.Credential{}, "/home/user")
@@ -185,10 +198,14 @@ func TestContainerMountsReturnsNil(t *testing.T) {
 	}
 }
 
-func TestImpliedDependenciesReturnsNil(t *testing.T) {
+func TestImpliedDependencies(t *testing.T) {
 	cp := NewConfigProvider(ProviderDef{Name: "test"}, "builtin")
 	if deps := cp.ImpliedDependencies(); deps != nil {
 		t.Errorf("ImpliedDependencies() = %v, want nil", deps)
+	}
+	cp = NewConfigProvider(ProviderDef{Name: "test", ImpliedDeps: []string{"vercel-cli", "node"}}, "builtin")
+	if deps := cp.ImpliedDependencies(); !slices.Equal(deps, []string{"vercel-cli", "node"}) {
+		t.Errorf("ImpliedDependencies() = %v, want [vercel-cli node]", deps)
 	}
 }
 
