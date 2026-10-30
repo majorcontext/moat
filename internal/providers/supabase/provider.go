@@ -56,6 +56,7 @@ func New() *Provider {
 // Header injection does not need this value again, so it can be random per run.
 func (p *Provider) ContainerEnv(cred *provider.Credential) []string {
 	if cred == nil {
+		// Without a grant, no proxy credential can back the placeholder.
 		return nil
 	}
 	var placeholder [20]byte
