@@ -149,7 +149,7 @@ func (s *Server) capabilities() []string {
 	// Credential refs and bundles are unconditional: they are properties of
 	// this binary, not of runtime wiring. Serial is conditional because the
 	// broker may not be running.
-	caps := []string{CapKeepPolicy, CapKeepBodyPolicy, CapHostGatewayV2, CapCredentialRefs, CapCredentialBundles}
+	caps := []string{CapKeepPolicy, CapKeepBodyPolicy, CapKeepScopedBody, CapHostGatewayV2, CapCredentialRefs, CapCredentialBundles}
 	if s.serial != nil {
 		caps = append(caps, CapSerialDevices)
 	}

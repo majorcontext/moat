@@ -166,6 +166,14 @@ func (m *Manager) Create(ctx context.Context, opts Options) (resRun *Run, retErr
 		}
 	}
 
+	// GitHub scope: decide what the github grant may change before any
+	// resources are allocated, so a configuration the policy cannot cover
+	// (ssh:github.com, a github-granted MCP server, Copilot) fails cleanly.
+	githubPlan, ghErr := prepareGitHubScope(opts)
+	if ghErr != nil {
+		return nil, ghErr
+	}
+
 	// Get ports from config
 	var ports map[string]int
 	if opts.Config != nil && len(opts.Config.Ports) > 0 {
@@ -677,6 +685,28 @@ func (m *Manager) Create(ctx context.Context, opts Options) (resRun *Run, retErr
 					}
 					policyYAML["llm-gateway"] = yamlBytes
 				}
+			}
+		}
+
+		// github.scope: workspace adds its rules to the http scope, merged with
+		// any network.keep_policy (Keep evaluates one rule file per scope).
+		if githubPlan != nil {
+			if err := checkGitHubScopeCapability(daemonCapabilities); err != nil {
+				return nil, err
+			}
+			var ghToken string
+			if store != nil {
+				if cred, _, credErr := loadCredentialForGrant(store, "github", "github"); credErr == nil {
+					ghToken = cred.Token
+				}
+			}
+			ghPolicy, ghErr := githubScopePolicy(ctx, githubPlan, ghToken)
+			if ghErr != nil {
+				return nil, ghErr
+			}
+			policyYAML, policyRuleSets, ghErr = mergeGitHubScopePolicy(ghPolicy, policyYAML, policyRuleSets)
+			if ghErr != nil {
+				return nil, ghErr
 			}
 		}
 

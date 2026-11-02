@@ -1,0 +1,137 @@
+# github-workspace: limits what the github grant can change on GitHub to a
+# project's approved repositories (github.scope: workspace in moat.yaml).
+#
+# Moat renders this file for every run: it fills in the defs below from the
+# project's approved repositories and replaces $REPOS in messages. Print the
+# rendered policy for a project with `moat github policy`.
+#
+# The proxy evaluates it in the "http" scope on intercepted HTTPS requests.
+# Writes are denied unless they target an approved repository:
+#   github.com      git push (git-receive-pack) and every other non-read request
+#   api.github.com  REST writes, plus GraphQL mutations that name a repository
+#                   or change code
+scope: http
+mode: enforce
+on_error: closed
+defs:
+  # Approved repositories, lowercased owner/repo.
+  gh_ws_repos: '["example/app"]'
+  # github.com paths inside an approved repository: /owner/repo[.git][/...]
+  gh_ws_git_path: "r'^/(example/app)(\\.git)?(/|$)'"
+  # api.github.com REST paths inside an approved repository.
+  gh_ws_api_path: "r'^/repos/(example/app)(/|$)'"
+  # api.github.com paths that address an approved repository by numeric ID.
+  gh_ws_id_path: "r'^/repositories/(1)(/|$)'"
+  # GraphQL node IDs of the approved repositories (legacy and next-gen forms).
+  gh_ws_node_ids: '["R_example"]'
+  # true when github.other_repos is read; false when it is none.
+  gh_other_read: "true"
+  # GraphQL mutations that change code. They are allowed only when they name
+  # an approved repository; one that identifies its target only by a pull
+  # request, ref, or branch node ID is denied.
+  gh_code_mutations: >-
+    ["createCommitOnBranch", "createRef", "updateRef", "updateRefs", "deleteRef",
+    "mergeBranch", "mergePullRequest", "enablePullRequestAutoMerge",
+    "enqueuePullRequest", "updatePullRequestBranch", "revertPullRequest",
+    "createLinkedBranch"]
+  # GraphQL mutations that create repositories.
+  gh_new_repo_mutations: '["createRepository", "cloneTemplateRepository"]'
+rules:
+  - name: github-path-hygiene
+    description: >-
+      Refuse dot-segments, empty segments, and backslashes in GitHub paths so
+      the path this policy checks is the path GitHub routes.
+    match:
+      when: |-
+        params.host in ['github.com', 'api.github.com'] && params.path.matches(r'//|/\.\.?(/|$)|\\')
+    action: deny
+    message: "GitHub request blocked: the path contains '.', '..', or empty segments."
+
+  - name: github-new-repository
+    description: Creating repositories (forks, template copies) is outside the project.
+    match:
+      when: |-
+        params.host == 'api.github.com' && params.method == 'post' && params.path.matches(r'^/repos/[^/]+/[^/]+/(forks|generate)/?$')
+    action: deny
+    message: "Creating GitHub repositories is blocked: this run's github grant is limited to $REPOS."
+
+  - name: github-git-push-start
+    description: >-
+      Refuse a push at its first request, the ref advertisement
+      (GET .../info/refs?service=git-receive-pack), because git shows this
+      request's error message to the user and does not show one for the pack
+      upload that follows. github-git-write denies the upload itself.
+    match:
+      when: |-
+        params.host == 'github.com' && params.method == 'get' && params.path.endsWith('/info/refs') && has(params.query) && params.query.matches('(^|&)service=git-receive-pack(&|$)') && !params.path.matches(gh_ws_git_path)
+    action: deny
+    message: "Push blocked: this run can only push to $REPOS. To add a repository, the user runs `moat github allow OWNER/REPO` on the host."
+
+  - name: github-git-write
+    description: git push and other writes on github.com outside the approved repositories.
+    match:
+      when: |-
+        params.host == 'github.com' && !params.path.matches(gh_ws_git_path) && !(params.method in ['get', 'head'] || (params.method == 'post' && (params.path.endsWith('/git-upload-pack') || params.path.endsWith('/info/lfs/objects/batch'))))
+    action: deny
+    message: "Push blocked: this run can only push to $REPOS. To add a repository, the user runs `moat github allow OWNER/REPO` on the host."
+
+  - name: github-api-write
+    description: REST writes outside the approved repositories, including account-level writes (SSH keys, gists, new repositories, organization settings).
+    match:
+      when: |-
+        params.host == 'api.github.com' && !(params.method in ['get', 'head']) && !params.path.matches(gh_ws_api_path) && !params.path.matches(gh_ws_id_path) && !(params.method == 'post' && params.path in ['/graphql', '/markdown', '/markdown/raw'])
+    action: deny
+    message: "GitHub API write blocked: this run can only change $REPOS. To add a repository, the user runs `moat github allow OWNER/REPO` on the host."
+
+  - name: github-other-repo-read
+    description: With github.other_repos set to none, reads of other repositories over git and REST, and code search.
+    match:
+      when: |-
+        !gh_other_read && ((params.host == 'github.com' && !params.path.matches(gh_ws_git_path)) || (params.host == 'api.github.com' && ((params.path.startsWith('/repos/') && !params.path.matches(gh_ws_api_path)) || (params.path.startsWith('/repositories/') && !params.path.matches(gh_ws_id_path)) || params.path in ['/search/code', '/search/commits'])))
+    action: deny
+    message: "GitHub read blocked: github.other_repos is none, so this run can only read $REPOS."
+
+  - name: github-graphql-invalid
+    description: A GraphQL request the policy cannot parse cannot be checked.
+    match:
+      operation: "post api.github.com/graphql"
+      when: "!graphql(params.body).valid"
+    action: deny
+    message: "GraphQL request blocked: moat could not parse it to check which repositories it changes."
+
+  - name: github-graphql-new-repository
+    match:
+      operation: "post api.github.com/graphql"
+      when: "graphql(params.body).mutations.exists(m, m.name in gh_new_repo_mutations)"
+    action: deny
+    message: "Creating GitHub repositories is blocked: this run's github grant is limited to $REPOS."
+
+  - name: github-graphql-repository-id
+    description: Mutations whose input.repositoryId is not an approved repository.
+    match:
+      operation: "post api.github.com/graphql"
+      when: |-
+        graphql(params.body).mutations.exists(m, has(m.args.input) && has(m.args.input.repositoryId) && !(m.args.input.repositoryId in gh_ws_node_ids))
+    action: deny
+    message: "GraphQL mutation blocked: it targets a repository outside $REPOS."
+
+  - name: github-graphql-repository-name
+    description: createCommitOnBranch on a branch outside the approved repositories.
+    match:
+      operation: "post api.github.com/graphql"
+      when: |-
+        graphql(params.body).mutations.exists(m, has(m.args.input) && has(m.args.input.branch) && has(m.args.input.branch.repositoryNameWithOwner) && !(lower(m.args.input.branch.repositoryNameWithOwner) in gh_ws_repos))
+    action: deny
+    message: "GraphQL mutation blocked: it commits to a repository outside $REPOS."
+
+  - name: github-graphql-code-change
+    description: >-
+      Code-changing mutations that identify their target only by a node ID
+      (pull request, ref, or branch), which the policy cannot map to a
+      repository.
+    match:
+      operation: "post api.github.com/graphql"
+      when: |-
+        graphql(params.body).mutations.exists(m, m.name in gh_code_mutations && !(has(m.args.input) && (has(m.args.input.repositoryId) || (has(m.args.input.branch) && has(m.args.input.branch.repositoryNameWithOwner) && !has(m.args.input.branch.id)))))
+    action: deny
+    message: "GraphQL mutation blocked: it changes code, and moat cannot tell which repository it targets. Use the REST API with an explicit owner/repo instead, e.g. `gh api -X PUT repos/OWNER/REPO/pulls/NUMBER/merge`."
