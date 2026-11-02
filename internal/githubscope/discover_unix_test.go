@@ -20,13 +20,13 @@ func TestDiscoverSkipsFIFOConfig(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			ws := t.TempDir()
-			require.NoError(t, os.Mkdir(filepath.Join(ws, ".git"), 0700))
+			require.NoError(t, os.Mkdir(filepath.Join(ws, ".git"), 0o700))
 			config := filepath.Join(ws, ".git", "config")
 			fifo := config
 			if symlink {
 				fifo = filepath.Join(t.TempDir(), "fifo")
 			}
-			require.NoError(t, syscall.Mkfifo(fifo, 0600))
+			require.NoError(t, syscall.Mkfifo(fifo, 0o600))
 			if symlink {
 				require.NoError(t, os.Symlink(fifo, config))
 			}
