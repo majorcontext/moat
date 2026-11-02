@@ -52,7 +52,7 @@ func (lc *Lifecycle) EnableTLS() (newCA bool, err error) {
 	_, statErr := os.Stat(certPath)
 	newCA = os.IsNotExist(statErr)
 
-	ca, err := proxy.NewCA(caDir)
+	ca, err := proxy.NewCAWithSubject(caDir, "Moat", "Moat CA")
 	if err != nil {
 		return false, fmt.Errorf("loading/creating CA: %w", err)
 	}

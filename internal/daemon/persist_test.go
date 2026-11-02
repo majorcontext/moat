@@ -643,10 +643,12 @@ type codexRefreshSpy struct {
 	refreshed atomic.Bool
 }
 
-func (s *codexRefreshSpy) Name() string                                                  { return "codex" }
+func (s *codexRefreshSpy) Name() string { return "codex" }
+
 func (s *codexRefreshSpy) Grant(context.Context) (*provider.Credential, error)           { return nil, nil }
 func (s *codexRefreshSpy) ConfigureProxy(provider.ProxyConfigurer, *provider.Credential) {}
 func (s *codexRefreshSpy) ContainerEnv(*provider.Credential) []string                    { return nil }
+
 func (s *codexRefreshSpy) ContainerMounts(*provider.Credential, string) ([]provider.MountConfig, string, error) {
 	return nil, "", nil
 }

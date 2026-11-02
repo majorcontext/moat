@@ -681,7 +681,7 @@ func (r *DockerRuntime) ContainerLogsAll(ctx context.Context, containerID string
 	defer waitCancel()
 	statusCh, errCh := r.cli.ContainerWait(waitCtx, containerID, container.WaitConditionNotRunning)
 	select {
-	case <-errCh:
+	case <-errCh: //nolint:errcheck // see below
 		// Ignore errors — container may already be removed
 	case <-statusCh:
 	}

@@ -209,6 +209,7 @@ func (f *fakeRefreshableProvider) Grant(context.Context) (*provider.Credential, 
 }
 func (f *fakeRefreshableProvider) ConfigureProxy(provider.ProxyConfigurer, *provider.Credential) {}
 func (f *fakeRefreshableProvider) ContainerEnv(*provider.Credential) []string                    { return nil }
+
 func (f *fakeRefreshableProvider) ContainerMounts(*provider.Credential, string) ([]provider.MountConfig, string, error) {
 	return nil, "", nil
 }

@@ -426,7 +426,7 @@ func ExecuteRun(ctx context.Context, opts intcli.ExecOptions) (*run.Run, error) 
 			log.Error("failed to stop run", "id", r.ID, "error", err)
 		}
 		// Wait for monitorContainerExit to finish cleanup
-		<-waitDone
+		<-waitDone //nolint:errcheck // only waiting for cleanup; the run was stopped on purpose
 		fmt.Println()
 		fmt.Println(ui.Dim(fmt.Sprintf("View output: moat logs %s", r.ID)))
 		return r, nil

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -114,8 +115,8 @@ func (rp *ReverseProxy) proxyTo(w http.ResponseWriter, r *http.Request, backendA
 
 	// Wrap the default Director to add standard proxy headers.
 	// httputil.NewSingleHostReverseProxy already sets X-Forwarded-For.
-	defaultDirector := proxy.Director
-	proxy.Director = func(req *http.Request) {
+	defaultDirector := proxy.Director          //nolint:staticcheck // SA1019: Director is deprecated since Go 1.26; moving to Rewrite is a separate change
+	proxy.Director = func(req *http.Request) { //nolint:staticcheck // SA1019: see above
 		defaultDirector(req)
 		// Preserve original proto so backends behind TLS-terminating proxies
 		// can detect the original scheme (needed for secure-context checks).
@@ -203,7 +204,7 @@ func (ps *ProxyServer) Start(port int) error {
 		// Use multiplexing listener for HTTP/HTTPS auto-detection
 		ps.mux = newMuxListener(listener, ps.tlsConfig, ps.rp)
 		go func() {
-			if err := ps.mux.serve(); err != nil && err != net.ErrClosed {
+			if err := ps.mux.serve(); !errors.Is(err, net.ErrClosed) {
 				log.Debug("mux listener error", "error", err)
 			}
 		}()

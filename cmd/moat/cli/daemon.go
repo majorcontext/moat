@@ -68,12 +68,14 @@ func runDaemon(_ *cobra.Command, _ []string) error {
 	// Create API server.
 	apiServer := daemon.NewServer(sockPath, daemonProxyPort)
 
-	// Create credential proxy.
+	// Create credential proxy with moat's wording for blocked responses and
+	// the MCP stub prefix agent configs use.
 	p := proxy.NewProxy()
+	p.SetBranding(daemon.Branding())
 
 	// Set up CA for TLS interception.
 	caDir := filepath.Join(daemonDir, "ca")
-	ca, err := proxy.NewCA(caDir)
+	ca, err := proxy.NewCAWithSubject(caDir, daemon.CAOrganization, daemon.CACommonName)
 	if err != nil {
 		return err
 	}

@@ -796,7 +796,7 @@ func (r *AppleRuntime) ExecInteractive(ctx context.Context, containerID string, 
 		if c.Process != nil {
 			_ = c.Process.Kill()
 		}
-		<-cmdDone
+		<-cmdDone //nolint:errcheck // reap the killed process; its exit error is expected
 		return ctx.Err()
 	case werr := <-cmdDone:
 		// Drain output briefly so nothing is lost on fast exit.
@@ -1493,7 +1493,7 @@ func (r *AppleRuntime) startAttachedWithPTY(ctx context.Context, cmd *exec.Cmd, 
 		if cmd.Process != nil {
 			_ = cmd.Process.Kill()
 		}
-		<-cmdDone
+		<-cmdDone //nolint:errcheck // reap the killed process; its exit error is expected
 		if err != nil {
 			result = err
 		}
@@ -1510,7 +1510,7 @@ func (r *AppleRuntime) startAttachedWithPTY(ctx context.Context, cmd *exec.Cmd, 
 		if cmd.Process != nil {
 			_ = cmd.Process.Kill()
 		}
-		<-cmdDone
+		<-cmdDone //nolint:errcheck // reap the killed process; its exit error is expected
 		result = ctx.Err()
 	}
 
