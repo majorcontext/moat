@@ -91,10 +91,13 @@ type RunContext struct {
 
 	RegisteredAt time.Time `json:"registered_at"`
 
-	KeepEngines   map[string]*keeplib.Engine `json:"-"` // compiled Keep policy engines per scope
-	refreshCancel context.CancelFunc         `json:"-"` // cancels token refresh goroutine
-	awsHandler    http.Handler               `json:"-"` // AWS credential endpoint handler
-	mu            sync.RWMutex
+	// Persist the exact registered policy, never reload it from the workspace.
+	PolicyYAML     map[string][]byte          `json:"policy_yaml,omitempty"`
+	PolicyRuleSets []PolicyRuleSetSpec        `json:"policy_rule_sets,omitempty"`
+	KeepEngines    map[string]*keeplib.Engine `json:"-"` // compiled Keep policy engines per scope
+	refreshCancel  context.CancelFunc         `json:"-"` // cancels token refresh goroutine
+	awsHandler     http.Handler               `json:"-"` // AWS credential endpoint handler
+	mu             sync.RWMutex
 }
 
 // NewRunContext creates a new RunContext for a run.

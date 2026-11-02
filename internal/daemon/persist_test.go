@@ -222,10 +222,11 @@ func TestRestoreRuns_ScopesStoreToRunProfile(t *testing.T) {
 
 	reg := NewRegistry()
 	restored := RestoreRuns(context.Background(), reg, []PersistedRun{{
-		RunID:       "r1",
-		AuthToken:   "tok",
-		Grants:      []string{"github"},
-		CredProfile: "vibrant",
+		RunID:            "r1",
+		AuthToken:        "tok",
+		Grants:           []string{"github"},
+		PolicyStateKnown: true,
+		CredProfile:      "vibrant",
 	}})
 
 	if restored != 1 {
@@ -241,10 +242,11 @@ func TestRestoreRuns_SkipsRunWithInvalidProfile(t *testing.T) {
 
 	reg := NewRegistry()
 	restored := RestoreRuns(context.Background(), reg, []PersistedRun{{
-		RunID:       "evil",
-		AuthToken:   "tok",
-		Grants:      []string{"github"},
-		CredProfile: "../../../etc",
+		RunID:            "evil",
+		AuthToken:        "tok",
+		Grants:           []string{"github"},
+		PolicyStateKnown: true,
+		CredProfile:      "../../../etc",
 	}})
 
 	if restored != 0 {

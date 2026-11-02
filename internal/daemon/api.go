@@ -176,6 +176,9 @@ const (
 	// workspace needs it: its GraphQL body rule would otherwise make git
 	// pushes over HTTPS (non-JSON bodies) fail closed.
 	CapKeepScopedBody = "keep-scoped-body"
+
+	// CapKeepPersistedPolicy means registered policies survive daemon restart.
+	CapKeepPersistedPolicy = "keep-persisted-policy"
 )
 
 // HealthResponse is returned from GET /v1/health.

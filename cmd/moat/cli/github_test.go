@@ -183,3 +183,21 @@ func TestGitHubPreflightReportsEOF(t *testing.T) {
 	assert.Contains(t, out, "could not read GitHub approval")
 	assert.Equal(t, []string{"acme/app"}, grantedRepos(t, ws))
 }
+
+func TestGitHubPreflightReportsStoreError(t *testing.T) {
+	ws := githubTestWorkspace(t, map[string]string{".": "https://github.com/acme/app"})
+	path := githubscope.DefaultStorePath(config.GlobalConfigDir())
+	require.NoError(t, os.WriteFile(path, []byte("invalid json"), 0o600))
+	out := runPreflight(t, ws, []string{"github"}, scopedCfg(), true, "")
+	assert.Contains(t, out, "could not open the approval store")
+	assert.Contains(t, out, "parsing GitHub approvals")
+	assert.Empty(t, runPreflight(t, ws, []string{"claude"}, scopedCfg(), true, ""), "an unrelated grant must not warn about this store")
+}
+
+func TestGitHubPreflightNormalizesCopilotAlias(t *testing.T) {
+	ws := githubTestWorkspace(t, map[string]string{".": "https://github.com/acme/app"})
+	want := runPreflight(t, ws, []string{"github"}, scopedCfg(), false, "")
+	for _, grants := range [][]string{{"copilot"}, {"copilot", "github"}, {"github", "copilot"}} {
+		assert.Equal(t, want, runPreflight(t, ws, grants, scopedCfg(), false, ""))
+	}
+}

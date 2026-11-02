@@ -2311,6 +2311,32 @@ region = %s
 		}()
 	}
 
+	cleanupContainerSetup := func() {
+		// Clean up BuildKit resources on failure
+		if buildkitCfg.Enabled && r.BuildkitContainerID != "" {
+			_ = m.defaultRuntime().StopContainer(ctx, r.BuildkitContainerID)   //nolint:errcheck
+			_ = m.defaultRuntime().RemoveContainer(ctx, r.BuildkitContainerID) //nolint:errcheck
+			netMgr := m.defaultRuntime().NetworkManager()
+			if netMgr != nil {
+				_ = netMgr.RemoveNetwork(ctx, r.NetworkID) //nolint:errcheck
+			}
+		}
+		// Clean up proxy servers if container creation fails
+		cleanupDaemonRun()
+		cleanupSSH(sshServer)
+		cleanupAgentConfig(claudeConfig)
+		cleanupAgentConfig(codexConfig)
+		cleanupAgentConfig(geminiConfig)
+		cleanupAgentConfig(copilotConfig)
+	}
+	// Reject approval changes before paying for container creation, and repeat
+	// validation during the final commit in case they change after this check.
+	if githubPlan != nil {
+		if err := validateGitHubScopePlan(githubPlan, githubMeta); err != nil {
+			cleanupContainerSetup()
+			return nil, err
+		}
+	}
 	// Create container
 	containerID, err := m.defaultRuntime().CreateContainer(ctx, container.Config{
 		Name:         r.ID,
@@ -2335,22 +2361,7 @@ region = %s
 		Ulimits:      ulimits,
 	})
 	if err != nil {
-		// Clean up BuildKit resources on failure
-		if buildkitCfg.Enabled && r.BuildkitContainerID != "" {
-			_ = m.defaultRuntime().StopContainer(ctx, r.BuildkitContainerID)   //nolint:errcheck
-			_ = m.defaultRuntime().RemoveContainer(ctx, r.BuildkitContainerID) //nolint:errcheck
-			netMgr := m.defaultRuntime().NetworkManager()
-			if netMgr != nil {
-				_ = netMgr.RemoveNetwork(ctx, r.NetworkID) //nolint:errcheck
-			}
-		}
-		// Clean up proxy servers if container creation fails
-		cleanupDaemonRun()
-		cleanupSSH(sshServer)
-		cleanupAgentConfig(claudeConfig)
-		cleanupAgentConfig(codexConfig)
-		cleanupAgentConfig(geminiConfig)
-		cleanupAgentConfig(copilotConfig)
+		cleanupContainerSetup()
 		return nil, fmt.Errorf("creating container: %w", err)
 	}
 
@@ -2444,10 +2455,7 @@ region = %s
 		if rmErr := m.defaultRuntime().RemoveContainer(ctx, containerID); rmErr != nil {
 			log.Debug("failed to remove container during cleanup", "error", rmErr)
 		}
-		cleanupDaemonRun()
-		cleanupAgentConfig(claudeConfig)
-		cleanupAgentConfig(codexConfig)
-		cleanupAgentConfig(geminiConfig)
+		cleanupContainerSetup()
 		return nil, fmt.Errorf("opening audit store: %w", err)
 	}
 	r.AuditStore = auditStore
@@ -2460,10 +2468,7 @@ region = %s
 			if rmErr := m.defaultRuntime().RemoveContainer(ctx, containerID); rmErr != nil {
 				log.Debug("failed to remove container during cleanup", "error", rmErr)
 			}
-			cleanupDaemonRun()
-			cleanupAgentConfig(claudeConfig)
-			cleanupAgentConfig(codexConfig)
-			cleanupAgentConfig(geminiConfig)
+			cleanupContainerSetup()
 			return nil, err
 		}
 	}

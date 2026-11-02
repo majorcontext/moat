@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"unicode"
 )
 
 const (
@@ -121,7 +122,7 @@ func Discover(workspace string) (DiscoverResult, error) {
 		configPath, ok := gitConfigPath(path)
 		if ok {
 			for repo, remotes := range remotesIn(configPath) {
-				add(repo, formatSource(rel, remotes))
+				add(repo, discoverySource(root, configPath, rel, remotes))
 			}
 		}
 
@@ -252,5 +253,30 @@ func formatSource(rel string, remotes []string) string {
 	if rel != "." {
 		dir = "./" + filepath.ToSlash(rel)
 	}
-	return fmt.Sprintf("%s (%s)", dir, strings.Join(remotes, ", "))
+	return safeSourceText(fmt.Sprintf("%s (%s)", dir, strings.Join(remotes, ", ")))
+}
+
+func discoverySource(root, configPath, checkout string, remotes []string) string {
+	source := formatSource(checkout, remotes)
+	real, err := filepath.EvalSymlinks(configPath)
+	if err != nil {
+		return formatSource(checkout, remotes)
+	}
+	if resolvedRoot, resolveErr := filepath.EvalSymlinks(root); resolveErr == nil {
+		root = resolvedRoot
+	}
+	relative, err := filepath.Rel(root, real)
+	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		source += " [git config outside workspace: " + real + "]"
+	}
+	return safeSourceText(source)
+}
+
+func safeSourceText(source string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) || unicode.In(r, unicode.Cf) {
+			return '�'
+		}
+		return r
+	}, source)
 }

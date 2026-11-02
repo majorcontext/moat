@@ -9,7 +9,6 @@ import (
 
 	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/githubscope"
-	"github.com/majorcontext/moat/internal/log"
 	"github.com/majorcontext/moat/internal/run"
 	"github.com/majorcontext/moat/internal/ui"
 )
@@ -30,16 +29,19 @@ type githubPreflight struct {
 // It never fails the run: anything wrong (a conflicting grant, an unreadable
 // store) is reported by manager.Create with the full error.
 func preflightGitHubScope(workspace string, grants []string, cfg *config.Config, pf githubPreflight) {
+	if !run.HasGitHubGrant(grants) {
+		return
+	}
 	store, err := run.OpenGitHubScopeStore()
 	if err != nil {
-		log.Debug("github scope pre-flight: could not open store", "error", err)
+		fmt.Fprintf(pf.out, "%s GitHub scope pre-flight could not open the approval store: %v\n", ui.WarnTag(), err)
 		return
 	}
 	defer store.Close()
 
 	plan, err := run.PlanGitHubScope(store, workspace, grants, cfg)
 	if err != nil {
-		log.Debug("github scope pre-flight: could not build plan", "error", err)
+		fmt.Fprintf(pf.out, "%s GitHub scope pre-flight could not build the plan: %v\n", ui.WarnTag(), err)
 		return
 	}
 	if !plan.Enabled || run.GitHubScopeConflict(plan, grants, cfg) != nil {

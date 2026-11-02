@@ -12,8 +12,6 @@ import (
 	"strings"
 	"time"
 
-	keeplib "github.com/majorcontext/keep"
-
 	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/credential"
 	"github.com/majorcontext/moat/internal/log"
@@ -149,7 +147,7 @@ func (s *Server) capabilities() []string {
 	// Credential refs and bundles are unconditional: they are properties of
 	// this binary, not of runtime wiring. Serial is conditional because the
 	// broker may not be running.
-	caps := []string{CapKeepPolicy, CapKeepBodyPolicy, CapKeepScopedBody, CapHostGatewayV2, CapCredentialRefs, CapCredentialBundles}
+	caps := []string{CapKeepPolicy, CapKeepBodyPolicy, CapKeepScopedBody, CapKeepPersistedPolicy, CapHostGatewayV2, CapCredentialRefs, CapCredentialBundles}
 	if s.serial != nil {
 		caps = append(caps, CapSerialDevices)
 	}
@@ -209,63 +207,14 @@ func (s *Server) handleRegisterRun(w http.ResponseWriter, r *http.Request) {
 	// the proxy does not block its own traffic.
 	addProxyPortForLoopback(rc, s.proxyPort)
 
-	// Compile Keep policy engines from YAML and/or RuleSet specs.
-	totalPolicies := len(req.PolicyYAML) + len(req.PolicyRuleSets)
-	if totalPolicies > 0 {
-		engines := make(map[string]*keeplib.Engine, totalPolicies)
-
-		// Helper: build an audit hook for a given scope.
-		auditHook := func(scopeName string) func(keeplib.AuditEntry) {
-			return func(entry keeplib.AuditEntry) {
-				fields := []any{
-					"scope", scopeName,
-					"op", entry.Operation,
-					"decision", string(entry.Decision),
-					"rule", entry.Rule,
-					"message", entry.Message,
-				}
-				if entry.Decision == "deny" {
-					log.Warn("keep policy deny", fields...)
-				} else {
-					log.Info("keep policy evaluation", fields...)
-				}
-			}
-		}
-
-		// Compile YAML-based policies (file/pack rules).
-		for scope, policyBytes := range req.PolicyYAML {
-			eng, err := keeplib.LoadFromBytes(policyBytes, keeplib.WithAuditHook(auditHook(scope)))
-			if err != nil {
-				for _, e := range engines {
-					e.Close()
-				}
-				writeJSON(w, http.StatusBadRequest, RegisterResponse{
-					Error: fmt.Sprintf("keep: compile scope %q: %v", scope, err),
-				})
-				return
-			}
-			engines[scope] = eng
-		}
-
-		// Compile RuleSet-based policies (inline deny lists).
-		for _, spec := range req.PolicyRuleSets {
-			rs := keeplib.NewRuleSet(spec.Scope, spec.Mode)
-			rs.Deny(spec.Deny...)
-			eng, err := rs.Compile(keeplib.WithAuditHook(auditHook(spec.Scope)))
-			if err != nil {
-				for _, e := range engines {
-					e.Close()
-				}
-				writeJSON(w, http.StatusBadRequest, RegisterResponse{
-					Error: fmt.Sprintf("keep: compile ruleset %q: %v", spec.Scope, err),
-				})
-				return
-			}
-			engines[spec.Scope] = eng
-		}
-
-		rc.KeepEngines = engines
+	engines, err := compilePolicies(req.PolicyYAML, req.PolicyRuleSets)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, RegisterResponse{Error: err.Error()})
+		return
 	}
+	rc.KeepEngines = engines
+	rc.PolicyYAML = req.PolicyYAML
+	rc.PolicyRuleSets = req.PolicyRuleSets
 
 	// Create a per-run context for background work (token refresh, AWS).
 	// This context outlives the HTTP request and is canceled when the run

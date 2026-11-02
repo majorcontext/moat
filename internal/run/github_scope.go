@@ -10,6 +10,7 @@ import (
 
 	keeplib "github.com/majorcontext/keep"
 	"github.com/majorcontext/moat/internal/config"
+	"github.com/majorcontext/moat/internal/credential"
 	"github.com/majorcontext/moat/internal/daemon"
 	"github.com/majorcontext/moat/internal/githubscope"
 	"github.com/majorcontext/moat/internal/log"
@@ -42,7 +43,7 @@ func OpenGitHubScopeStore() (*githubscope.Store, error) {
 // The plan is disabled when the run has no github grant: with no token in the
 // proxy there is nothing to scope.
 func PlanGitHubScope(store *githubscope.Store, workspace string, grants []string, cfg *config.Config) (*githubscope.Plan, error) {
-	if !hasGrant(normalizeCopilotGrantNames(grants), "github") {
+	if !HasGitHubGrant(grants) {
 		return &githubscope.Plan{}, nil
 	}
 	key, err := githubscope.ProjectKey(workspace)
@@ -91,7 +92,7 @@ func checkGitHubScopeConflicts(plan *githubscope.Plan, grants []string, cfg *con
 	}
 	if cfg != nil {
 		for _, m := range cfg.MCP {
-			if m.Auth != nil && strings.Split(m.Auth.Grant, ":")[0] == "github" {
+			if m.Auth != nil && credentialStoreKey(strings.Split(m.Auth.Grant, ":")[0], m.Auth.Grant) == credential.ProviderGitHub {
 				return fmt.Errorf("%s, but MCP server %q uses the github grant.\n"+
 					"  Remote MCP servers are not covered by the GitHub scope policy, so its tools could change any repository.\n"+
 					"  %s, or use the gh CLI inside the container instead. See %s", why, m.Name, unlock, githubScopeDocsURL)
@@ -322,8 +323,29 @@ func checkGitBodiesNotInspected(policy []byte) error {
 // rule operation. An older daemon would inspect git's non-JSON bodies and
 // deny every push and fetch.
 func checkGitHubScopeCapability(daemonCapabilities []string) error {
-	if !slices.Contains(daemonCapabilities, daemon.CapKeepScopedBody) {
-		return fmt.Errorf("proxy daemon is too old for github.scope: workspace (missing '%s' capability); run 'moat proxy restart' to upgrade", daemon.CapKeepScopedBody)
+	for _, capability := range []string{daemon.CapKeepScopedBody, daemon.CapKeepPersistedPolicy} {
+		if !slices.Contains(daemonCapabilities, capability) {
+			return fmt.Errorf("proxy daemon is too old for github.scope: workspace (missing '%s' capability); run 'moat proxy restart' to upgrade", capability)
+		}
+	}
+
+	return nil
+}
+
+func validateGitHubScopePlan(plan *githubscope.Plan, meta map[string]githubscope.RepoMeta) error {
+	store, err := OpenGitHubScopeStore()
+	if err != nil {
+		return fmt.Errorf("github.scope: %w", err)
+	}
+	defer store.Close()
+	if err := githubscope.ValidatePlan(store, plan, meta); err != nil {
+		return fmt.Errorf("github.scope: %w", err)
 	}
 	return nil
+}
+
+// HasGitHubGrant reports whether grants contain the GitHub credential,
+// including the Copilot alias. CLI preflight and Create use the same names.
+func HasGitHubGrant(grants []string) bool {
+	return hasGrant(normalizeCopilotGrantNames(grants), "github")
 }

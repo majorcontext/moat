@@ -216,6 +216,11 @@ func TestPolicyGraphQL(t *testing.T) {
 	runCases(t, eng, []httpCase{
 		{name: "query", method: "POST", host: host, path: path, body: gql(t, `query { viewer { login } }`, nil)},
 		{
+			name: "transferring outside issue into workspace is denied", method: "POST", host: host, path: path,
+			body:     gql(t, `mutation($i: TransferIssueInput!) { transferIssue(input: $i) { clientMutationId } }`, map[string]any{"i": map[string]any{"issueId": "I_OTHER", "repositoryId": wsNodeID}}),
+			wantDeny: true, wantRule: "github-graphql-transfer-issue",
+		},
+		{
 			name: "query other repo", method: "POST", host: host, path: path,
 			body: gql(t, `query { repository(owner: "acme", name: "other") { id } }`, nil),
 		},
@@ -519,7 +524,7 @@ func TestPlanPolicyParamsUsesCachedIdentity(t *testing.T) {
 func TestMergeHTTPPolicyRejectsUnsupportedSettings(t *testing.T) {
 	gh, err := RenderPolicy(testParams(OtherReposRead))
 	require.NoError(t, err)
-	for _, setting := range []string{"typo: true", "version: v2", "scope: other", "packs: []", "profile: mine"} {
+	for _, setting := range []string{"typo: true", "defs: [wrong]", "version: v2", "scope: other", "packs: []", "profile: mine"} {
 		_, err := MergeHTTPPolicy(gh, []byte("mode: enforce\nrules: []\n"+setting+"\n"))
 		require.Error(t, err, setting)
 	}

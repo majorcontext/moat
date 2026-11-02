@@ -391,7 +391,7 @@ func TestExplicitAllowPromotesDiscoveredApproval(t *testing.T) {
 }
 
 func TestCommitRunRejectsChangedApprovals(t *testing.T) {
-	for _, change := range []string{"first run", "allow", "forget", "reset"} {
+	for _, change := range []string{"first run", "allow", "forget", "reset", "forget then reapprove"} {
 		t.Run(change, func(t *testing.T) {
 			store := openTestStore(t)
 			ws := t.TempDir()
@@ -410,12 +410,18 @@ func TestCommitRunRejectsChangedApprovals(t *testing.T) {
 			case "forget":
 				_, err := Forget(store, plan.Project, []string{"acme/app"})
 				require.NoError(t, err)
+			case "forget then reapprove":
+				original := plan.ApprovalSnapshot.Repos["acme/app"]
+				_, err := Forget(store, plan.Project, []string{"acme/app"})
+				require.NoError(t, err)
+				require.NoError(t, Approve(store, plan.Project, []Candidate{{Repo: "acme/app", Sources: []string{original.Source}}}, original.ApprovedAt.Add(time.Second)))
 			case "reset":
 				_, err := Reset(store, plan.Project)
 				require.NoError(t, err)
 			}
 			before, err := store.Get(plan.Project)
 			require.NoError(t, err)
+			require.ErrorContains(t, ValidatePlan(store, plan, nil), "approvals changed")
 			require.ErrorContains(t, CommitRun(store, plan, nil, time.Now()), "approvals changed")
 			after, err := store.Get(plan.Project)
 			require.NoError(t, err)
@@ -442,10 +448,14 @@ func TestConcurrentMetadataRefresh(t *testing.T) {
 			first := buildPlan(t, store, ws, workspaceScope)
 			second := buildPlan(t, store, ws, workspaceScope)
 			refreshed := map[string]RepoMeta{"acme/app": {FullName: "acme/app", ID: 42, NodeIDs: []string{"R_A", "R_B"}}}
+			require.NoError(t, ValidatePlan(store, first, refreshed))
 			require.NoError(t, CommitRun(store, first, refreshed, time.Now()))
 			next := map[string]RepoMeta{"acme/app": {FullName: "ACME/APP", ID: 42, NodeIDs: []string{"R_B", "R_A"}}}
 			if !matching {
 				next["acme/app"] = RepoMeta{FullName: "acme/app", ID: 99}
+			}
+			if matching {
+				require.NoError(t, ValidatePlan(store, second, next))
 			}
 			err := CommitRun(store, second, next, time.Now())
 			if matching {
@@ -455,4 +465,24 @@ func TestConcurrentMetadataRefresh(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestProjectKeyCaseAliasesShareScope(t *testing.T) {
+	parent := t.TempDir()
+	real := filepath.Join(parent, "MixedCase")
+	require.NoError(t, os.Mkdir(real, 0o700))
+	alias := filepath.Join(parent, "mixedcase")
+	if _, err := os.Stat(alias); os.IsNotExist(err) {
+		t.Skip("case-sensitive filesystem")
+	}
+	first, err := ProjectKey(real)
+	require.NoError(t, err)
+	second, err := ProjectKey(alias)
+	require.NoError(t, err)
+	assert.Equal(t, first, second)
+	store := openTestStore(t)
+	plan := buildPlan(t, store, real, workspaceScope)
+	require.NoError(t, CommitRun(store, plan, nil, time.Now()))
+	sticky := buildPlan(t, store, alias, Settings{})
+	assert.True(t, sticky.Sticky, "path casing cannot bypass the stored scope")
 }

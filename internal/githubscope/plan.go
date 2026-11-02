@@ -95,8 +95,10 @@ func ProjectKey(workspace string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolving project path %s: %w", workspace, err)
 	}
-	if real, err := filepath.EvalSymlinks(abs); err == nil {
+	if real, err := canonicalProjectPath(abs); err == nil {
 		abs = real
+	} else if !os.IsNotExist(err) {
+		return "", fmt.Errorf("resolving project path %s: %w", workspace, err)
 	}
 	return filepath.Clean(abs), nil
 }
@@ -386,7 +388,7 @@ func approvalSnapshotMatches(plan *Plan, current *Project, fresh map[string]Repo
 	}
 	for repo, a := range old.Repos {
 		b, ok := current.Repos[repo]
-		if !ok || a.Source != b.Source {
+		if !ok || a.Source != b.Source || !a.ApprovedAt.Equal(b.ApprovedAt) {
 			return false
 		}
 	}
@@ -403,4 +405,17 @@ func approvalSnapshotMatches(plan *Plan, current *Project, fresh map[string]Repo
 		}
 	}
 	return true
+}
+
+// ValidatePlan cheaply rejects a stale policy before container creation. The
+// final commit must repeat this check under the write lock to close the race.
+func ValidatePlan(store *Store, plan *Plan, meta map[string]RepoMeta) error {
+	current, err := store.Get(plan.Project)
+	if err != nil {
+		return err
+	}
+	if !approvalSnapshotMatches(plan, current, meta) {
+		return fmt.Errorf("GitHub approvals changed while preparing this run; retry the run to use the current approvals")
+	}
+	return nil
 }

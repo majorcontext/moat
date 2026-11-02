@@ -183,6 +183,14 @@ rules:
     action: deny
     message: "GraphQL mutation blocked: moat cannot tell which repository it targets. Use the REST API with an explicit owner/repo instead (gh api repos/OWNER/REPO/...)."
 
+  - name: github-graphql-transfer-issue
+    description: A destination repository ID does not establish which repository the issue leaves.
+    match:
+      operation: "post api.github.com/graphql"
+      when: "graphql(params.body).mutations.exists(m, m.name == 'transferIssue')"
+    action: deny
+    message: "Moving issues between repositories is blocked because moat cannot verify the source repository."
+
   - name: github-graphql-approve
     description: Approving a pull request through a mutation that names it only by node ID.
     match:

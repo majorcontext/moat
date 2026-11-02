@@ -235,7 +235,17 @@ func MergeHTTPPolicy(github, user []byte) ([]byte, error) {
 	if err := yaml.Unmarshal(github, &gdoc); err != nil {
 		return nil, fmt.Errorf("parsing github policy: %w", err)
 	}
-	if err := yaml.Unmarshal(user, &udoc); err != nil {
+	// Expand aliases and YAML merge keys before inspecting names/actions.
+	// Otherwise a raw node named << could decode into a protected def later.
+	var userFields map[string]any
+	if err := yaml.Unmarshal(user, &userFields); err != nil {
+		return nil, fmt.Errorf("network.keep_policy: %w", err)
+	}
+	normalizedUser, normalizeErr := yaml.Marshal(userFields)
+	if normalizeErr != nil {
+		return nil, fmt.Errorf("network.keep_policy: %w", normalizeErr)
+	}
+	if err := yaml.Unmarshal(normalizedUser, &udoc); err != nil {
 		return nil, fmt.Errorf("network.keep_policy: %w", err)
 	}
 	if len(udoc.Content) == 0 || udoc.Content[0].Kind != yaml.MappingNode {
@@ -277,12 +287,33 @@ func MergeHTTPPolicy(github, user []byte) ([]byte, error) {
 		return nil, fmt.Errorf("network.keep_policy must not set case_sensitive: true when github.scope is workspace%s", fix)
 	}
 
+	// Keep expands defs before compiling and lets redact rules mutate params.
+	// User policy must never rewrite the expressions or input of scope rules.
+	protected := map[string]bool{}
+	identifiers := regexp.MustCompile(`[A-Za-z_][A-Za-z0-9_]*`)
+	for _, rule := range mappingValue(groot, "rules").Content {
+		if when := mappingValue(mappingValue(rule, "match"), "when"); when != nil {
+			for _, name := range identifiers.FindAllString(when.Value, -1) {
+				protected[name] = true
+			}
+		}
+	}
+
+	for _, field := range []struct {
+		name string
+		kind yaml.Kind
+	}{{"defs", yaml.MappingNode}, {"rules", yaml.SequenceNode}} {
+		if node := mappingValue(uroot, field.name); node != nil && node.Tag != "!!null" && node.Kind != field.kind {
+			return nil, fmt.Errorf("network.keep_policy: invalid %s structure", field.name)
+		}
+	}
+
 	if udefs := mappingValue(uroot, "defs"); udefs != nil && len(udefs.Content) > 0 {
 		gdefs := mappingValue(groot, "defs")
 		for i := 0; i+1 < len(udefs.Content); i += 2 {
 			name := udefs.Content[i].Value
-			if mappingValue(gdefs, name) != nil {
-				return nil, fmt.Errorf("network.keep_policy: def %q conflicts with a github.scope def; rename it", name)
+			if mappingValue(gdefs, name) != nil || protected[name] {
+				return nil, fmt.Errorf("network.keep_policy: def %q conflicts with a github.scope identifier; rename it", name)
 			}
 			gdefs.Content = append(gdefs.Content, udefs.Content[i], udefs.Content[i+1])
 		}
@@ -297,6 +328,10 @@ func MergeHTTPPolicy(github, user []byte) ([]byte, error) {
 	}
 	if urules := mappingValue(uroot, "rules"); urules != nil {
 		for _, r := range urules.Content {
+			action := mappingValue(r, "action")
+			if action == nil || (action.Value != "deny" && action.Value != "log") {
+				return nil, fmt.Errorf("network.keep_policy: only deny and log actions are supported with github.scope: workspace; other actions can alter scope enforcement")
+			}
 			if n := mappingValue(r, "name"); n != nil && names[n.Value] {
 				return nil, fmt.Errorf("network.keep_policy: rule name %q conflicts with a github.scope rule; rename it", n.Value)
 			}

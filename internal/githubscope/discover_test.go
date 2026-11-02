@@ -214,3 +214,26 @@ func TestRemoteConfigMatchesGit(t *testing.T) {
 		})
 	}
 }
+
+func TestDiscoveryShowsExternalConfigOrigin(t *testing.T) {
+	ws := t.TempDir()
+	main := t.TempDir()
+	writeRepo(t, main, map[string]string{"origin": "https://github.com/acme/external"})
+	require.NoError(t, os.WriteFile(filepath.Join(ws, ".git"), []byte("gitdir: "+filepath.Join(main, ".git")+"\n"), 0o600))
+	found, err := Discover(ws)
+	require.NoError(t, err)
+	require.Len(t, found.Repos, 1)
+	require.Contains(t, found.Repos[0].Sources[0], "git config outside workspace:")
+	real, err := filepath.EvalSymlinks(filepath.Join(main, ".git", "config"))
+	require.NoError(t, err)
+	require.Contains(t, found.Repos[0].Sources[0], real)
+}
+
+func TestDiscoverySourcesCannotOverwriteApprovalPrompt(t *testing.T) {
+	source := formatSource("repo\r\x1b[2Kfake", []string{"origin\n\u202eevil"})
+	require.NotContains(t, source, "\r")
+	require.NotContains(t, source, "\x1b")
+	require.NotContains(t, source, "\n")
+	require.NotContains(t, source, "\u202e")
+	require.Contains(t, source, "fake")
+}

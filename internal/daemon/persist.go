@@ -25,6 +25,12 @@ import (
 // plaintext, protected by file permissions (0600). On restore, provider
 // credentials are re-resolved from the encrypted credential store.
 type PersistedRun struct {
+	// Older daemons did not save policy inputs. Never silently restore a
+	// GitHub credential when its previous restrictions are unknown.
+	PolicyStateKnown  bool                     `json:"policy_state_known,omitempty"`
+	PolicyYAML        map[string][]byte        `json:"policy_yaml,omitempty"`
+	PolicyRuleSets    []PolicyRuleSetSpec      `json:"policy_rule_sets,omitempty"`
+	PolicyRequired    bool                     `json:"policy_required,omitempty"`
 	AuthToken         string                   `json:"auth_token"`
 	RunID             string                   `json:"run_id"`
 	ContainerID       string                   `json:"container_id,omitempty"`
@@ -57,6 +63,9 @@ type PersistedRun struct {
 type persistedFile struct {
 	Version int            `json:"version"`
 	Runs    []PersistedRun `json:"runs"`
+	// Older daemons only read Runs. Keep policy-bearing auth tokens out of
+	// that field so a stale binary can never restore credentials unscoped.
+	PolicyRuns []PersistedRun `json:"policy_runs,omitempty"`
 }
 
 // RunPersister manages saving and loading the run registry to disk.
@@ -87,6 +96,10 @@ func (p *RunPersister) Save() error {
 	for _, rc := range entries {
 		rc.mu.RLock()
 		pr := PersistedRun{
+			PolicyStateKnown:  true,
+			PolicyYAML:        rc.PolicyYAML,
+			PolicyRuleSets:    rc.PolicyRuleSets,
+			PolicyRequired:    len(rc.KeepEngines) > 0 || len(rc.PolicyYAML) > 0 || len(rc.PolicyRuleSets) > 0,
 			AuthToken:         rc.AuthToken,
 			RunID:             rc.RunID,
 			ContainerID:       rc.ContainerID,
@@ -110,7 +123,14 @@ func (p *RunPersister) Save() error {
 		runs = append(runs, pr)
 	}
 
-	file := persistedFile{Version: 1, Runs: runs}
+	file := persistedFile{Version: 1}
+	for _, run := range runs {
+		if run.PolicyRequired {
+			file.PolicyRuns = append(file.PolicyRuns, run)
+		} else {
+			file.Runs = append(file.Runs, run)
+		}
+	}
 	data, err := json.MarshalIndent(file, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal persisted runs: %w", err)
@@ -195,7 +215,7 @@ func (p *RunPersister) Load() ([]PersistedRun, error) {
 	// Try versioned format first.
 	var file persistedFile
 	if err := json.Unmarshal(data, &file); err == nil && file.Version > 0 {
-		return file.Runs, nil
+		return append(file.Runs, file.PolicyRuns...), nil
 	}
 
 	// Fall back to legacy bare-array format.
@@ -244,7 +264,39 @@ func RestoreRunsWithSerial(ctx context.Context, registry *Registry, runs []Persi
 			continue
 		}
 
+		legacyGitHub := false
+		for _, grant := range pr.Grants {
+			name, _, _ := strings.Cut(grant, ":")
+			if name == "github" || name == "copilot" {
+				legacyGitHub = true
+			}
+		}
+		if legacyGitHub && !pr.PolicyStateKnown && len(pr.PolicyYAML)+len(pr.PolicyRuleSets) == 0 {
+			log.Warn("restore: legacy GitHub run has no policy snapshot; recreate the run", "run_id", pr.RunID)
+			continue
+		}
+
+		if pr.PolicyRequired && len(pr.PolicyYAML)+len(pr.PolicyRuleSets) == 0 {
+			log.Warn("restore: required policy missing, skipping run", "run_id", pr.RunID)
+			continue
+		}
+		engines, policyErr := compilePolicies(pr.PolicyYAML, pr.PolicyRuleSets)
+		if policyErr != nil {
+			log.Warn("restore: invalid policy, skipping run", "run_id", pr.RunID, "error", policyErr)
+			continue
+		}
 		rc := NewRunContext(pr.RunID)
+		rc.PolicyYAML, rc.PolicyRuleSets, rc.KeepEngines = pr.PolicyYAML, pr.PolicyRuleSets, engines
+		// Close compiled engines on any failed restore. Registered runs own them.
+		policyOwned := false
+		defer func() {
+			if !policyOwned {
+				for _, eng := range engines {
+					eng.Close()
+				}
+			}
+		}()
+
 		rc.ContainerID = pr.ContainerID
 		rc.Grants = pr.Grants
 		rc.MCPServers = pr.MCPServers
@@ -334,6 +386,7 @@ func RestoreRunsWithSerial(ctx context.Context, registry *Registry, runs []Persi
 		}
 
 		registry.RegisterWithToken(rc, pr.AuthToken)
+		policyOwned = true
 
 		log.Info("restored run from disk",
 			"run_id", pr.RunID,

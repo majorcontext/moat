@@ -82,9 +82,6 @@ func DefaultStorePath(moatHome string) string {
 // A malformed file is an error rather than an empty store: silently
 // discarding approvals would also discard the project's lock.
 func OpenStore(path string) (*Store, error) {
-	if _, err := readStoreFile(path); err != nil {
-		return nil, err
-	}
 	s := &Store{path: path}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, fmt.Errorf("creating %s: %w", filepath.Dir(path), err)
@@ -94,6 +91,17 @@ func OpenStore(path string) (*Store, error) {
 		return nil, fmt.Errorf("opening GitHub approval lock file %s: %w", path+".lock", err)
 	}
 	s.lf = lf
+	unlock, err := s.lock()
+	if err != nil {
+		_ = s.Close()
+		return nil, err
+	}
+	_, readErr := readStoreFile(path)
+	unlock()
+	if readErr != nil {
+		_ = s.Close()
+		return nil, readErr
+	}
 	return s, nil
 }
 

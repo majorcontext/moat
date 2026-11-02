@@ -59,6 +59,9 @@ func TestCheckGitHubScopeConflicts(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), `MCP server "gh"`)
 
+	cfg.MCP[0].Auth.Grant = "copilot"
+	require.ErrorContains(t, checkGitHubScopeConflicts(plan, []string{"github"}, cfg), "MCP server")
+
 	// Companion: an MCP server with another grant is fine.
 	cfg.MCP[0].Auth.Grant = "linear"
 	require.NoError(t, checkGitHubScopeConflicts(plan, []string{"github"}, cfg))
@@ -302,10 +305,11 @@ func TestMergeGitHubScopePolicy(t *testing.T) {
 }
 
 func TestCheckGitHubScopeCapability(t *testing.T) {
-	require.NoError(t, checkGitHubScopeCapability([]string{daemon.CapKeepPolicy, daemon.CapKeepScopedBody}))
+	require.NoError(t, checkGitHubScopeCapability([]string{daemon.CapKeepPolicy, daemon.CapKeepScopedBody, daemon.CapKeepPersistedPolicy}))
 	err := checkGitHubScopeCapability([]string{daemon.CapKeepPolicy, daemon.CapKeepBodyPolicy})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "moat proxy restart")
+	require.ErrorContains(t, checkGitHubScopeCapability([]string{daemon.CapKeepScopedBody}), daemon.CapKeepPersistedPolicy)
 }
 
 func TestGitHubScopePolicyKeepsPlanSnapshot(t *testing.T) {

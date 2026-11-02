@@ -67,7 +67,7 @@ Approvals are stored in `~/.moat/github-repos.json`, keyed by the project's path
 
 Once a project has run with `github.scope: workspace`, it stays scoped even if `moat.yaml` stops asking for it. An agent can edit `moat.yaml`, so removing the setting is not enough to turn the scope off. Later runs print a note and keep enforcing it, using the `other_repos` setting from the last run that asked for the scope. To turn it off, run `moat github forget --all` in the project.
 
-A run records the project only after its policy is built, so a run that fails before starting (for example, because of an incompatible `network.keep_policy`) does not lock the project.
+A run records the project only after its container and audit store are created, so a run that fails before starting (for example, because of an incompatible `network.keep_policy`) does not lock the project.
 
 ## Managing a project's repositories
 
@@ -158,9 +158,13 @@ A token passed to the container directly, through `env` or `secrets` (`GITHUB_TO
 - **Workflows in approved repositories.** The agent can push changes to `.github/workflows/` in an approved repository. Those workflows run on GitHub with that repository's secrets.
 - **Network policy.** The scope governs requests that carry the github grant's token. Combine it with `network.policy: strict` to limit everything else the container can reach.
 
+GraphQL `transferIssue` is denied even when its destination is approved, because the issue's source repository cannot be verified from that input.
+
+After upgrading, run `moat proxy restart`. Registered policies are saved with the run and recompiled after restart. A run with missing or invalid required policy data is not restored. Legacy GitHub registrations without a policy snapshot must be recreated. Older daemon binaries cannot restore policy-bearing tokens; downgrading the daemon can require recreating those runs.
+
 ## Combining with network.keep_policy
 
-The scope adds its rules to the proxy's `http` Keep scope. A [`network.keep_policy`](../reference/02-moat-yaml.md#networkkeep_policy) is merged into the same rule file, so it must use `mode: enforce`. It must also leave `on_error` and `case_sensitive` at their defaults, and pin every request-body rule to an `operation`. An unpinned body rule would make the proxy read every request body, including `git push` pack data, which is not JSON. Moat reports any of these conflicts when the run starts.
+The scope adds its rules to the proxy's `http` Keep scope. A [`network.keep_policy`](../reference/02-moat-yaml.md#networkkeep_policy) is merged into the same rule file, so it must use `mode: enforce`. It must also leave `on_error` and `case_sensitive` at their defaults, and pin every request-body rule to an `operation`. An unpinned body rule would make the proxy read every request body, including `git push` pack data, which is not JSON. Only `deny` and `log` actions are supported in the merged policy. Mutating actions could change what the scope rules see. User defs must not collide with identifiers in the generated GitHub rules. Moat reports any of these conflicts when the run starts.
 
 ## Upgrading
 
