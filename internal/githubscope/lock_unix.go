@@ -25,3 +25,14 @@ func lockFile(f *os.File) (unlock func(), err error) {
 		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
 	}, nil
 }
+
+// Sync the directory entry as well as the file contents before acknowledging
+// a write, so a power loss cannot silently lose the latest store replacement.
+func syncStoreDir(path string) error {
+	dir, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+	return dir.Sync()
+}

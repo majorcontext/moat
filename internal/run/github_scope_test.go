@@ -326,3 +326,12 @@ func TestGitHubScopePolicyKeepsPlanSnapshot(t *testing.T) {
 	assert.NotContains(t, string(policy), "R_NEW")
 	require.ErrorContains(t, commitGitHubScope(plan, nil), "approvals changed")
 }
+
+func TestInlinePolicyInvalidMode(t *testing.T) {
+	_, err := ruleSetYAML(daemon.PolicyRuleSetSpec{Scope: "http", Mode: "typo"})
+	require.ErrorContains(t, err, "network.keep_policy: invalid mode")
+	for _, mode := range []string{"", "enforce", "audit"} {
+		_, err := ruleSetYAML(daemon.PolicyRuleSetSpec{Scope: "http", Mode: mode})
+		require.NoError(t, err)
+	}
+}

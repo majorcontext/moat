@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -203,7 +204,7 @@ func commitRun(store *Store, plan *Plan, meta map[string]RepoMeta, now time.Time
 		if firstOnly && p != nil && !p.LockedAt.IsZero() {
 			return p, nil
 		}
-		if !reflect.DeepEqual(p, plan.ApprovalSnapshot) {
+		if !approvalSnapshotMatches(plan, p, meta) {
 			return nil, fmt.Errorf("GitHub approvals changed while preparing this run; retry the run to use the current approvals")
 		}
 		if p == nil {
@@ -370,4 +371,36 @@ func sortedKeys[V any](m map[string]V) []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+// Cache-only changes are safe if they describe the same repository identity
+// the rendered policy uses. Grant changes and genuinely different IDs must
+// still force a retry, including when this run fell back to an old cache.
+func approvalSnapshotMatches(plan *Plan, current *Project, fresh map[string]RepoMeta) bool {
+	old := plan.ApprovalSnapshot
+	if old == nil || current == nil {
+		return old == nil && current == nil
+	}
+	if !old.LockedAt.Equal(current.LockedAt) || old.OtherRepos != current.OtherRepos || len(old.Repos) != len(current.Repos) {
+		return false
+	}
+	for repo, a := range old.Repos {
+		b, ok := current.Repos[repo]
+		if !ok || a.Source != b.Source {
+			return false
+		}
+	}
+	identity := func(a Approval) RepoMeta { return RepoMeta{FullName: a.FullName, ID: a.ID, NodeIDs: a.NodeIDs} }
+	same := func(a, b RepoMeta) bool {
+		return strings.EqualFold(a.FullName, b.FullName) && a.ID == b.ID && reflect.DeepEqual(uniqueSorted(a.NodeIDs), uniqueSorted(b.NodeIDs))
+	}
+	for _, c := range plan.Granted {
+		before, after := identity(old.Repos[c.Repo]), identity(current.Repos[c.Repo])
+		if !same(before, after) {
+			if resolved, ok := fresh[c.Repo]; !ok || !same(resolved, after) {
+				return false
+			}
+		}
+	}
+	return true
 }

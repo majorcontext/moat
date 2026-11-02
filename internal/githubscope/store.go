@@ -9,8 +9,6 @@ import (
 	"sort"
 	"sync"
 	"time"
-
-	"github.com/majorcontext/moat/internal/log"
 )
 
 // StoreFileName is the approval store's file name under the moat home
@@ -93,9 +91,7 @@ func OpenStore(path string) (*Store, error) {
 	}
 	lf, err := os.OpenFile(path+".lock", os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
-		log.Debug("opening github approval lock file failed; continuing without cross-process lock",
-			"path", path+".lock", "err", err)
-		return s, nil
+		return nil, fmt.Errorf("opening GitHub approval lock file %s: %w", path+".lock", err)
 	}
 	s.lf = lf
 	return s, nil
@@ -158,7 +154,8 @@ func (s *Store) Update(project string, fn func(*Project) (*Project, error)) erro
 func (s *Store) lock() (func(), error) {
 	s.mu.Lock()
 	if s.lf == nil {
-		return s.mu.Unlock, nil
+		s.mu.Unlock()
+		return nil, fmt.Errorf("GitHub approval store is closed")
 	}
 	u, err := lockFile(s.lf)
 	if err != nil {
@@ -173,11 +170,14 @@ func (s *Store) lock() (func(), error) {
 
 func readStoreFile(path string) (*storeFile, error) {
 	data, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) || (err == nil && len(data) == 0) {
+	if errors.Is(err, os.ErrNotExist) {
 		return &storeFile{Version: 1, Projects: map[string]*Project{}}, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("reading GitHub approvals from %s: %w", path, err)
+	}
+	if len(data) == 0 {
+		return nil, fmt.Errorf("GitHub approval store %s is empty; restore it from a backup or explicitly remove it to re-approve repositories", path)
 	}
 	var f storeFile
 	if err := json.Unmarshal(data, &f); err != nil {
@@ -212,6 +212,11 @@ func (s *Store) write(f *storeFile) error {
 		os.Remove(tmp) //nolint:errcheck
 		return fmt.Errorf("writing GitHub approvals: %w", err)
 	}
+	if err := out.Sync(); err != nil {
+		_ = out.Close()
+		_ = os.Remove(tmp)
+		return fmt.Errorf("syncing GitHub approvals: %w", err)
+	}
 	if err := out.Close(); err != nil {
 		os.Remove(tmp) //nolint:errcheck
 		return fmt.Errorf("writing GitHub approvals: %w", err)
@@ -219,6 +224,9 @@ func (s *Store) write(f *storeFile) error {
 	if err := os.Rename(tmp, s.path); err != nil {
 		os.Remove(tmp) //nolint:errcheck
 		return fmt.Errorf("replacing GitHub approvals at %s: %w", s.path, err)
+	}
+	if err := syncStoreDir(filepath.Dir(s.path)); err != nil {
+		return fmt.Errorf("syncing GitHub approval directory: %w", err)
 	}
 	return nil
 }

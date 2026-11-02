@@ -3,6 +3,9 @@ package githubscope
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -45,4 +48,27 @@ func TestLookupRepos(t *testing.T) {
 	meta, errs = LookupRepos(context.Background(), srv.Client(), srv.URL, "wrong", []string{"old-owner/app"})
 	assert.Empty(t, meta)
 	assert.Contains(t, errs, "old-owner/app")
+}
+
+func TestLookupFailureReason(t *testing.T) {
+	for status, want := range map[int]string{401: "authentication failed", 403: "permissions", 404: "not found", 429: "rate limited", 503: "HTTP 503"} {
+		err := fmt.Errorf("wrapped: %w", &LookupHTTPError{Repo: "acme/app", StatusCode: status})
+		assert.Contains(t, LookupFailureReason(err), want)
+	}
+	assert.Contains(t, LookupFailureReason(context.DeadlineExceeded), "timed out")
+	assert.Contains(t, LookupFailureReason(&net.DNSError{Err: "no such host", Name: "api.github.com"}), "network failure")
+	assert.Contains(t, LookupFailureReason(errors.New("bad response")), "lookup failed")
+}
+
+func TestLookupReposRetainsHTTPStatus(t *testing.T) {
+	for _, status := range []int{401, 403, 404, 429, 503} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(status) }))
+			defer server.Close()
+			_, failures := LookupRepos(context.Background(), server.Client(), server.URL, "test-token", []string{"acme/app"})
+			var lookup *LookupHTTPError
+			require.ErrorAs(t, failures["acme/app"], &lookup)
+			require.Equal(t, status, lookup.StatusCode)
+		})
+	}
 }

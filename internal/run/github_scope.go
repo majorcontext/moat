@@ -200,7 +200,7 @@ func githubScopePolicy(ctx context.Context, plan *githubscope.Plan, token string
 		if len(errs) > 0 {
 			failed := make([]string, 0, len(errs))
 			for repo := range errs {
-				failed = append(failed, repo)
+				failed = append(failed, fmt.Sprintf("%s (%s)", repo, githubscope.LookupFailureReason(errs[repo])))
 			}
 			slices.Sort(failed)
 			ui.Warnf("Could not refresh %s on GitHub; using cached IDs where available. GraphQL mutations for repositories without cached IDs (e.g. gh pr create) may be blocked this run.",
@@ -270,6 +270,8 @@ func ruleSetYAML(rs daemon.PolicyRuleSetSpec) ([]byte, error) {
 		mode = "enforce"
 	case "audit":
 		mode = "audit_only"
+	default:
+		return nil, fmt.Errorf("network.keep_policy: invalid mode %q (expected enforce or audit)", mode)
 	}
 	type match struct {
 		Operation string `yaml:"operation"`

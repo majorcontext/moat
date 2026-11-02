@@ -13,3 +13,6 @@ const discoveryNonblock = 0
 func lockFile(_ *os.File) (unlock func(), err error) {
 	return func() {}, nil
 }
+
+// Windows does not support syncing a directory through os.File.Sync.
+func syncStoreDir(_ string) error { return nil }

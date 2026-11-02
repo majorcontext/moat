@@ -426,3 +426,33 @@ func TestCommitRunRejectsChangedApprovals(t *testing.T) {
 		})
 	}
 }
+
+func TestConcurrentMetadataRefresh(t *testing.T) {
+	for _, matching := range []bool{true, false} {
+		name := "same identity"
+		if !matching {
+			name = "different identity"
+		}
+		t.Run(name, func(t *testing.T) {
+			store := openTestStore(t)
+			ws := t.TempDir()
+			writeRepo(t, ws, map[string]string{"origin": "https://github.com/acme/app"})
+			initial := buildPlan(t, store, ws, workspaceScope)
+			require.NoError(t, CommitRun(store, initial, nil, time.Now()))
+			first := buildPlan(t, store, ws, workspaceScope)
+			second := buildPlan(t, store, ws, workspaceScope)
+			refreshed := map[string]RepoMeta{"acme/app": {FullName: "acme/app", ID: 42, NodeIDs: []string{"R_A", "R_B"}}}
+			require.NoError(t, CommitRun(store, first, refreshed, time.Now()))
+			next := map[string]RepoMeta{"acme/app": {FullName: "ACME/APP", ID: 42, NodeIDs: []string{"R_B", "R_A"}}}
+			if !matching {
+				next["acme/app"] = RepoMeta{FullName: "acme/app", ID: 99}
+			}
+			err := CommitRun(store, second, next, time.Now())
+			if matching {
+				require.NoError(t, err, "equivalent refreshes must not reject concurrent runs")
+			} else {
+				require.ErrorContains(t, err, "approvals changed")
+			}
+		})
+	}
+}

@@ -3,8 +3,10 @@ package githubscope
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"slices"
 	"strings"
@@ -106,7 +108,7 @@ func getRepo(ctx context.Context, client *http.Client, apiURL, token, repo, next
 		return repoResponse{}, err
 	}
 	if resp.StatusCode != http.StatusOK {
-		return repoResponse{}, fmt.Errorf("GET /repos/%s: %s", repo, resp.Status)
+		return repoResponse{}, &LookupHTTPError{Repo: repo, StatusCode: resp.StatusCode}
 	}
 	var r repoResponse
 	if err := json.Unmarshal(body, &r); err != nil {
@@ -116,4 +118,41 @@ func getRepo(ctx context.Context, client *http.Client, apiURL, token, repo, next
 		return repoResponse{}, fmt.Errorf("GET /repos/%s: response has no id", repo)
 	}
 	return r, nil
+}
+
+// LookupHTTPError retains the status without exposing response bodies or credentials.
+type LookupHTTPError struct {
+	Repo       string
+	StatusCode int
+}
+
+func (e *LookupHTTPError) Error() string {
+	return fmt.Sprintf("GET /repos/%s: %d %s", e.Repo, e.StatusCode, http.StatusText(e.StatusCode))
+}
+
+// LookupFailureReason gives actionable, credential-free guidance for lookup failures.
+func LookupFailureReason(err error) string {
+	var status *LookupHTTPError
+	if errors.As(err, &status) {
+		switch status.StatusCode {
+		case http.StatusUnauthorized:
+			return "authentication failed; renew the github grant"
+		case http.StatusForbidden:
+			return "access forbidden or rate limited; check token permissions and GitHub rate limits"
+		case http.StatusNotFound:
+			return "repository not found or not accessible; check its name and token access"
+		case http.StatusTooManyRequests:
+			return "rate limited; retry after the GitHub rate limit resets"
+		default:
+			return fmt.Sprintf("GitHub HTTP %d; retry or check GitHub status", status.StatusCode)
+		}
+	}
+	var network net.Error
+	if errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &network) && network.Timeout()) {
+		return "lookup timed out; check connectivity and retry"
+	}
+	if errors.As(err, &network) {
+		return "network failure; check connectivity and retry"
+	}
+	return "lookup failed; retry with verbose logging for details"
 }
