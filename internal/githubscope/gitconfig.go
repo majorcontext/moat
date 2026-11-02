@@ -25,7 +25,7 @@ func parseRemoteURLs(data []byte) map[string][]string {
 		line := sc.Text()
 		// Join backslash-newline continuations (outside comments, which we
 		// strip later; git only honors continuations in values).
-		if strings.HasSuffix(line, `\`) && !strings.HasSuffix(line, `\\`) {
+		if configLineContinues(line) {
 			pending += strings.TrimSuffix(line, `\`)
 			continue
 		}
@@ -38,8 +38,13 @@ func parseRemoteURLs(data []byte) map[string][]string {
 		}
 
 		if trimmed[0] == '[' {
-			section, subsection = parseSectionHeader(trimmed)
-			continue
+			end := sectionHeaderEnd(trimmed)
+			if end < 0 {
+				section, subsection = "", ""
+				continue
+			}
+			section, subsection = parseSectionHeader(trimmed[:end+1])
+			trimmed = strings.TrimSpace(trimmed[end+1:])
 		}
 		if section != "remote" || subsection == "" {
 			continue
@@ -116,4 +121,41 @@ func parseValue(v string) string {
 		}
 	}
 	return strings.TrimSpace(b.String())
+}
+
+func configLineContinues(s string) bool {
+	quoted := false
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '\\':
+			if i == len(s)-1 {
+				return true
+			}
+			i++
+		case '"':
+			quoted = !quoted
+		case '#', ';':
+			if !quoted {
+				return false
+			}
+		}
+	}
+	return false
+}
+
+func sectionHeaderEnd(s string) int {
+	quoted := false
+	for i := 1; i < len(s); i++ {
+		if s[i] == '\\' {
+			i++
+			continue
+		}
+		if s[i] == '"' {
+			quoted = !quoted
+		}
+		if s[i] == ']' && !quoted {
+			return i
+		}
+	}
+	return -1
 }

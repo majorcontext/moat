@@ -2,6 +2,7 @@ package githubscope
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -190,4 +191,26 @@ func TestDiscoverEmptyAndMalformed(t *testing.T) {
 
 	_, err = Discover(filepath.Join(ws, "missing"))
 	assert.Error(t, err)
+}
+
+func TestRemoteConfigMatchesGit(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git unavailable")
+	}
+	cases := map[string]string{
+		"same line":                "[remote \"origin\"] url = https://github.com/acme/app\n",
+		"continued value":          "[remote \"origin\"]\nurl = https://github.com/acme/\\\napp\n",
+		"odd backslashes":          "[remote \"origin\"]\nurl = https://github.com/acme/\\\\\\\napp\n",
+		"comment is not continued": "[remote \"origin\"]\nurl = https://github.com/acme/one # comment \\\nurl = https://github.com/acme/two\n",
+		"bracket in comment":       "[remote \"origin\"] # ]\nurl = https://github.com/acme/app\n",
+	}
+	for name, data := range cases {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config")
+			require.NoError(t, os.WriteFile(path, []byte(data), 0o600))
+			out, err := exec.Command("git", "config", "--file", path, "--get-all", "remote.origin.url").Output()
+			require.NoError(t, err)
+			assert.Equal(t, strings.Split(strings.TrimSuffix(string(out), "\n"), "\n"), parseRemoteURLs([]byte(data))["origin"])
+		})
+	}
 }

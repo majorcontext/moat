@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"time"
 )
@@ -47,6 +48,9 @@ type Candidate struct {
 // asks about Pending repositories) and run creation (which enforces it), so
 // the two cannot disagree about what a run may change.
 type Plan struct {
+	// ApprovalSnapshot is the store state used to build this plan and its policy.
+	ApprovalSnapshot *Project
+
 	// Project is the store key: the workspace's absolute, symlink-resolved path.
 	Project string
 	// Enabled is true when the run is scoped to its workspace repositories.
@@ -105,9 +109,10 @@ func BuildPlan(workspace string, settings Settings, existing *Project) (*Plan, e
 	}
 	locked := existing != nil && !existing.LockedAt.IsZero()
 	plan := &Plan{
-		Project: key,
-		Enabled: settings.Enabled() || locked,
-		Sticky:  !settings.Enabled() && locked,
+		Project:          key,
+		ApprovalSnapshot: existing,
+		Enabled:          settings.Enabled() || locked,
+		Sticky:           !settings.Enabled() && locked,
 	}
 	if !plan.Enabled {
 		return plan, nil
@@ -177,7 +182,7 @@ func BuildPlan(workspace string, settings Settings, existing *Project) (*Plan, e
 // the plan is a first run. It is a no-op otherwise. If another process locked
 // the project in the meantime, that record wins.
 func RecordFirstRun(store *Store, plan *Plan, now time.Time) error {
-	return CommitRun(store, plan, nil, now)
+	return commitRun(store, plan, nil, now, true)
 }
 
 // CommitRun records what a scoped run established, once the run's policy has
@@ -187,10 +192,20 @@ func RecordFirstRun(store *Store, plan *Plan, now time.Time) error {
 // Call it only after everything that can reject the run's configuration has
 // passed, so a run that never starts does not lock the project.
 func CommitRun(store *Store, plan *Plan, meta map[string]RepoMeta, now time.Time) error {
+	return commitRun(store, plan, meta, now, false)
+}
+
+func commitRun(store *Store, plan *Plan, meta map[string]RepoMeta, now time.Time, firstOnly bool) error {
 	if !plan.Enabled {
 		return nil
 	}
 	return store.Update(plan.Project, func(p *Project) (*Project, error) {
+		if firstOnly && p != nil && !p.LockedAt.IsZero() {
+			return p, nil
+		}
+		if !reflect.DeepEqual(p, plan.ApprovalSnapshot) {
+			return nil, fmt.Errorf("GitHub approvals changed while preparing this run; retry the run to use the current approvals")
+		}
 		if p == nil {
 			p = &Project{}
 		}

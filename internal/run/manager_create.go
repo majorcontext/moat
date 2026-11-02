@@ -32,6 +32,7 @@ import (
 	"github.com/majorcontext/moat/internal/credential"
 	"github.com/majorcontext/moat/internal/daemon"
 	"github.com/majorcontext/moat/internal/deps"
+	"github.com/majorcontext/moat/internal/githubscope"
 	"github.com/majorcontext/moat/internal/image"
 
 	internalkeep "github.com/majorcontext/moat/internal/keep"
@@ -169,6 +170,7 @@ func (m *Manager) Create(ctx context.Context, opts Options) (resRun *Run, retErr
 	// GitHub scope: decide what the github grant may change before any
 	// resources are allocated, so a configuration the policy cannot cover
 	// (ssh:github.com, a github-granted MCP server, Copilot) fails cleanly.
+	var githubMeta map[string]githubscope.RepoMeta
 	githubPlan, ghErr := prepareGitHubScope(opts)
 	if ghErr != nil {
 		return nil, ghErr
@@ -698,6 +700,8 @@ func (m *Manager) Create(ctx context.Context, opts Options) (resRun *Run, retErr
 			if store != nil {
 				if cred, _, credErr := loadCredentialForGrant(store, "github", "github"); credErr == nil {
 					ghToken = cred.Token
+				} else {
+					return nil, fmt.Errorf("github.scope: loading github credential: %w", credErr)
 				}
 			}
 			ghPolicy, ghMeta, ghErr := githubScopePolicy(ctx, githubPlan, ghToken)
@@ -708,11 +712,7 @@ func (m *Manager) Create(ctx context.Context, opts Options) (resRun *Run, retErr
 			if ghErr != nil {
 				return nil, ghErr
 			}
-			// The policy is valid: only now record the run (first-run lock,
-			// approvals, other_repos, cached IDs).
-			if ghErr = commitGitHubScope(githubPlan, ghMeta); ghErr != nil {
-				return nil, ghErr
-			}
+			githubMeta = ghMeta
 		}
 
 		// Determine whether any file/pack policy inspects the request body
@@ -2451,6 +2451,22 @@ region = %s
 		return nil, fmt.Errorf("opening audit store: %w", err)
 	}
 	r.AuditStore = auditStore
+
+	// Persist the scope only after all fallible setup has succeeded. The
+	// store checks that approvals still match the snapshot used by the policy.
+	if githubPlan != nil {
+		if err := commitGitHubScope(githubPlan, githubMeta); err != nil {
+			_ = auditStore.Close()
+			if rmErr := m.defaultRuntime().RemoveContainer(ctx, containerID); rmErr != nil {
+				log.Debug("failed to remove container during cleanup", "error", rmErr)
+			}
+			cleanupDaemonRun()
+			cleanupAgentConfig(claudeConfig)
+			cleanupAgentConfig(codexConfig)
+			cleanupAgentConfig(geminiConfig)
+			return nil, err
+		}
+	}
 
 	// Log container creation event, including privileged mode for security compliance
 	containerAuditData := audit.ContainerData{Action: "created"}

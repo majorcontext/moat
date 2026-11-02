@@ -168,13 +168,24 @@ func TestGitHubScopePolicyUsesLookupAndCache(t *testing.T) {
 	require.NoError(t, commitGitHubScope(plan, meta))
 	assert.Equal(t, 1, calls)
 
-	// Later run: the identity is cached, so there is no lookup at all.
+	// Later run: retry the lookup and fall back to the snapshot while offline.
 	plan, err = prepareGitHubScope(Options{Workspace: ws, Grants: []string{"github"}, Config: scopedConfig()})
 	require.NoError(t, err)
 	policy, _, err = githubScopePolicy(context.Background(), plan, "tok")
 	require.NoError(t, err)
-	assert.Equal(t, 1, calls, "cached repositories are not looked up again")
+	assert.Equal(t, 2, calls, "cached repositories are refreshed on every run")
 	assert.Contains(t, string(policy), "R_kgDOMOAT")
+
+	// A successful refresh replaces stale canonical names and IDs.
+	githubLookupRepos = func(context.Context, string, []string) (map[string]githubscope.RepoMeta, map[string]error) {
+		return map[string]githubscope.RepoMeta{"majorcontext/moat": {FullName: "new-owner/moat", ID: 99, NodeIDs: []string{"R_NEW"}}}, nil
+	}
+	policy, _, err = githubScopePolicy(context.Background(), plan, "tok")
+	require.NoError(t, err)
+	assert.Contains(t, string(policy), "R_NEW")
+	assert.Contains(t, string(policy), "new-owner/moat")
+	assert.NotContains(t, string(policy), "R_kgDOMOAT")
+	assert.NotContains(t, string(policy), "/repositories/(42)")
 
 	// Companion: a failed lookup for an uncached repository still renders.
 	ws2 := gitWorkspace(t, "https://github.com/acme/other.git")
@@ -295,4 +306,23 @@ func TestCheckGitHubScopeCapability(t *testing.T) {
 	err := checkGitHubScopeCapability([]string{daemon.CapKeepPolicy, daemon.CapKeepBodyPolicy})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "moat proxy restart")
+}
+
+func TestGitHubScopePolicyKeepsPlanSnapshot(t *testing.T) {
+	useTempGitHubScopeStore(t)
+	ws := gitWorkspace(t, "https://github.com/acme/app")
+	plan, err := prepareGitHubScope(Options{Workspace: ws, Grants: []string{"github"}, Config: scopedConfig()})
+	require.NoError(t, err)
+	require.NoError(t, commitGitHubScope(plan, map[string]githubscope.RepoMeta{"acme/app": {FullName: "acme/app", ID: 1, NodeIDs: []string{"R_OLD"}}}))
+	plan, err = prepareGitHubScope(Options{Workspace: ws, Grants: []string{"github"}, Config: scopedConfig()})
+	require.NoError(t, err)
+	store, err := OpenGitHubScopeStore()
+	require.NoError(t, err)
+	defer store.Close()
+	require.NoError(t, githubscope.SetRepoMeta(store, plan.Project, map[string]githubscope.RepoMeta{"acme/app": {FullName: "acme/app", ID: 2, NodeIDs: []string{"R_NEW"}}}))
+	policy, _, err := githubScopePolicy(context.Background(), plan, "")
+	require.NoError(t, err)
+	assert.Contains(t, string(policy), "R_OLD")
+	assert.NotContains(t, string(policy), "R_NEW")
+	require.ErrorContains(t, commitGitHubScope(plan, nil), "approvals changed")
 }

@@ -3,6 +3,7 @@ package cli
 import (
 	"bufio"
 	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -158,4 +159,27 @@ func TestWriteGitHubRepos(t *testing.T) {
 	assert.Regexp(t, `majorcontext/moat\s+approved\s+\./ \(origin\)`, out)
 	assert.Regexp(t, `acme/new\s+pending\s+\./x \(origin\)`, out)
 	assert.Contains(t, out, "moat github allow OWNER/REPO")
+}
+
+func TestGitHubApprovalDoesNotConsumeSessionInput(t *testing.T) {
+	input := strings.NewReader("yes\ncontainer input\n")
+	answer, err := readGitHubApproval(input)
+	require.NoError(t, err)
+	assert.Equal(t, "yes", answer)
+	rest, err := io.ReadAll(input)
+	require.NoError(t, err)
+	assert.Equal(t, "container input\n", string(rest))
+	_, err = readGitHubApproval(strings.NewReader("yes"))
+	require.ErrorIs(t, err, io.EOF, "an unterminated answer must not approve")
+}
+
+func TestGitHubPreflightReportsEOF(t *testing.T) {
+	ws := githubTestWorkspace(t, map[string]string{".": "https://github.com/acme/app"})
+	recordFirstRun(t, ws)
+	writeDir := filepath.Join(ws, "extra", ".git")
+	require.NoError(t, os.MkdirAll(writeDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(writeDir, "config"), []byte("[remote \"origin\"]\nurl=https://github.com/acme/extra\n"), 0o644))
+	out := runPreflight(t, ws, []string{"github"}, scopedCfg(), true, "")
+	assert.Contains(t, out, "could not read GitHub approval")
+	assert.Equal(t, []string{"acme/app"}, grantedRepos(t, ws))
 }

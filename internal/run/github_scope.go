@@ -139,7 +139,7 @@ func warnGitHubTokenInEnv(cfg *config.Config, env []string) {
 
 // prepareGitHubScope is Create's gate. It returns the run's plan, or nil when
 // the run is not scoped. It records nothing: commitGitHubScope does that once
-// the run's policy has been built, so a run rejected later in Create does not
+// the container has been created, so a run rejected later in Create does not
 // lock the project.
 func prepareGitHubScope(opts Options) (*githubscope.Plan, error) {
 	if !hasGrant(opts.Grants, "github") {
@@ -183,30 +183,16 @@ func commitGitHubScope(plan *githubscope.Plan, meta map[string]githubscope.RepoM
 
 // githubScopePolicy renders the run's Keep policy for the http scope. It
 // looks up the GitHub identity (numeric and GraphQL node IDs) of granted
-// repositories that have none cached yet, using the run's github credential,
+// repositories on every run, using the run's github credential,
 // and returns what it found so commitGitHubScope can cache it.
 func githubScopePolicy(ctx context.Context, plan *githubscope.Plan, token string) ([]byte, map[string]githubscope.RepoMeta, error) {
-	scopeStore, err := OpenGitHubScopeStore()
-	if err != nil {
-		return nil, nil, fmt.Errorf("github.scope: %w", err)
-	}
-	project, getErr := scopeStore.Get(plan.Project)
-	scopeStore.Close()
-	if getErr != nil {
-		return nil, nil, fmt.Errorf("github.scope: %w", getErr)
-	}
-
-	var uncached []string
-	for _, repo := range plan.GrantedRepos() {
-		if project == nil || project.Repos[repo].ID == 0 {
-			uncached = append(uncached, repo)
-		}
-	}
+	project := plan.ApprovalSnapshot
+	repos := plan.GrantedRepos()
 	var meta map[string]githubscope.RepoMeta
-	if len(uncached) > 0 && token != "" {
+	if len(repos) > 0 && token != "" {
 		lookupCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		var errs map[string]error
-		meta, errs = githubLookupRepos(lookupCtx, token, uncached)
+		meta, errs = githubLookupRepos(lookupCtx, token, repos)
 		cancel()
 		for repo, lookupErr := range errs {
 			log.Debug("github.scope: repository lookup failed", "repo", repo, "error", lookupErr)
@@ -217,7 +203,7 @@ func githubScopePolicy(ctx context.Context, plan *githubscope.Plan, token string
 				failed = append(failed, repo)
 			}
 			slices.Sort(failed)
-			ui.Warnf("Could not look up %s on GitHub. GraphQL mutations that name these repositories by ID (e.g. gh pr create) may be blocked this run.",
+			ui.Warnf("Could not refresh %s on GitHub; using cached IDs where available. GraphQL mutations for repositories without cached IDs (e.g. gh pr create) may be blocked this run.",
 				strings.Join(failed, ", "))
 		}
 	}

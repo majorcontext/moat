@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"bufio"
 	"fmt"
 	"io"
 	"os"
@@ -18,7 +17,7 @@ import (
 // githubPreflight carries what preflightGitHubScope needs besides the run.
 type githubPreflight struct {
 	out         io.Writer
-	in          *bufio.Reader
+	in          io.Reader
 	interactive bool
 	now         func() time.Time
 }
@@ -65,7 +64,11 @@ func preflightGitHubScope(workspace string, grants []string, cfg *config.Config,
 	var approved []githubscope.Candidate
 	for _, c := range plan.Pending {
 		fmt.Fprintf(pf.out, "Allow this run to push to %s? It was found in %s. [y/N]: ", ui.Bold(c.Repo), strings.Join(c.Sources, ", "))
-		answer, _ := pf.in.ReadString('\n')
+		answer, readErr := readGitHubApproval(pf.in)
+		if readErr != nil {
+			fmt.Fprintf(pf.out, "%s could not read GitHub approval (%v); remaining repositories stay unapproved. Approve them with `moat github allow OWNER/REPO`.\n", ui.WarnTag(), readErr)
+			break
+		}
 		answer = strings.ToLower(strings.TrimSpace(answer))
 		if answer == "y" || answer == "yes" {
 			approved = append(approved, c)
@@ -125,8 +128,27 @@ func otherReposPhrase(level string) string {
 func defaultGitHubPreflight(interactive bool) githubPreflight {
 	return githubPreflight{
 		out:         os.Stderr,
-		in:          bufio.NewReader(os.Stdin),
+		in:          os.Stdin,
 		interactive: interactive,
 		now:         time.Now,
+	}
+}
+
+// Read only through the newline: buffered reads from stdin could consume
+// input intended for the container session that starts after this prompt.
+func readGitHubApproval(in io.Reader) (string, error) {
+	var answer strings.Builder
+	var b [1]byte
+	for {
+		if _, err := io.ReadFull(in, b[:]); err != nil {
+			return "", err
+		}
+		if b[0] == '\n' {
+			return answer.String(), nil
+		}
+		if answer.Len() >= 1024 {
+			return "", fmt.Errorf("approval response exceeds 1024 bytes")
+		}
+		answer.WriteByte(b[0])
 	}
 }

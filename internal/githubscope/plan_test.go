@@ -389,3 +389,40 @@ func TestExplicitAllowPromotesDiscoveredApproval(t *testing.T) {
 	assert.Equal(t, []string{"acme/app"}, plan.GrantedRepos())
 	assert.Empty(t, plan.Missing)
 }
+
+func TestCommitRunRejectsChangedApprovals(t *testing.T) {
+	for _, change := range []string{"first run", "allow", "forget", "reset"} {
+		t.Run(change, func(t *testing.T) {
+			store := openTestStore(t)
+			ws := t.TempDir()
+			writeRepo(t, ws, map[string]string{"origin": "https://github.com/acme/app"})
+			plan := buildPlan(t, store, ws, workspaceScope)
+			if change != "first run" {
+				require.NoError(t, CommitRun(store, plan, nil, time.Now()))
+				plan = buildPlan(t, store, ws, workspaceScope)
+			}
+			switch change {
+			case "first run":
+				other := buildPlan(t, store, ws, Settings{Scope: ScopeWorkspace, OtherRepos: OtherReposNone})
+				require.NoError(t, CommitRun(store, other, nil, time.Now()))
+			case "allow":
+				require.NoError(t, Approve(store, plan.Project, []Candidate{{Repo: "acme/extra", Sources: []string{SourceAllowCommand}}}, time.Now()))
+			case "forget":
+				_, err := Forget(store, plan.Project, []string{"acme/app"})
+				require.NoError(t, err)
+			case "reset":
+				_, err := Reset(store, plan.Project)
+				require.NoError(t, err)
+			}
+			before, err := store.Get(plan.Project)
+			require.NoError(t, err)
+			require.ErrorContains(t, CommitRun(store, plan, nil, time.Now()), "approvals changed")
+			after, err := store.Get(plan.Project)
+			require.NoError(t, err)
+			assert.Equal(t, before, after, "a stale run never overwrites newer approvals")
+			// Retrying against the current state succeeds.
+			fresh := buildPlan(t, store, ws, workspaceScope)
+			require.NoError(t, CommitRun(store, fresh, nil, time.Now()))
+		})
+	}
+}

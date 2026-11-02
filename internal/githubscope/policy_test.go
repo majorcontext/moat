@@ -515,3 +515,14 @@ func TestPlanPolicyParamsUsesCachedIdentity(t *testing.T) {
 	assert.Empty(t, p.RepoIDs)
 	assert.Empty(t, p.NodeIDs)
 }
+
+func TestMergeHTTPPolicyRejectsUnsupportedSettings(t *testing.T) {
+	gh, err := RenderPolicy(testParams(OtherReposRead))
+	require.NoError(t, err)
+	for _, setting := range []string{"typo: true", "version: v2", "scope: other", "packs: []", "profile: mine"} {
+		_, err := MergeHTTPPolicy(gh, []byte("mode: enforce\nrules: []\n"+setting+"\n"))
+		require.Error(t, err, setting)
+	}
+	_, err = MergeHTTPPolicy(gh, []byte("version: v1\nscope: http\nmode: enforce\nrules: []\n"))
+	require.NoError(t, err)
+}

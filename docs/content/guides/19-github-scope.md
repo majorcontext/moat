@@ -126,7 +126,7 @@ github:
 gh api -X PUT repos/OWNER/REPO/pulls/NUMBER/merge
 ```
 
-Moat looks up each approved repository's numeric ID and GraphQL node IDs with your token the first time a run grants it, and caches them, so the policy can recognize requests that address a repository by ID.
+Moat looks up each approved repository's numeric ID and GraphQL node IDs with your token on each run, and caches them, so the policy can recognize requests that address a repository by ID. If GitHub is unavailable, the run uses cached IDs and warns that repositories without cached IDs may have GraphQL mutations blocked.
 
 ## Other repositories: read or none
 

@@ -152,7 +152,7 @@ func RenderPolicy(p PolicyParams) ([]byte, error) {
 	for name, value := range defs {
 		if len(value) > maxDefLen {
 			return nil, fmt.Errorf("too many approved GitHub repositories for one policy (%d; the %s list exceeds Keep's %d-character limit)\n"+
-				"  Remove repositories you no longer need with `moat github forget OWNER/REPO`", len(repos), name, maxDefLen)
+				"  Narrow the workspace or remove unnecessary checkouts and github.extra_repos entries; for a locked project, `moat github forget OWNER/REPO` also removes its approval", len(repos), name, maxDefLen)
 		}
 	}
 
@@ -243,24 +243,38 @@ func MergeHTTPPolicy(github, user []byte) ([]byte, error) {
 	}
 	groot, uroot := gdoc.Content[0], udoc.Content[0]
 
+	// Check every scope-wide field before copying rules; dropping an unknown
+	// setting would silently change the meaning of the user's policy.
+	for i := 0; i+1 < len(uroot.Content); i += 2 {
+		key, value := uroot.Content[i].Value, uroot.Content[i+1].Value
+		switch key {
+		case "scope":
+			if value != PolicyScope {
+				return nil, fmt.Errorf("network.keep_policy: expected scope: http, got %q", value)
+			}
+		case "version":
+			if value != "v1" {
+				return nil, fmt.Errorf("network.keep_policy: unsupported version %q", value)
+			}
+		case "mode", "on_error", "case_sensitive", "defs", "rules":
+		default:
+			return nil, fmt.Errorf("network.keep_policy: unsupported top-level field %q when github.scope is workspace", key)
+		}
+	}
+
 	const fix = "\n  github.scope: workspace adds its rules to the same http scope, and Keep applies these settings to every rule in a scope."
 	mode := "audit_only" // Keep's default when a rule file omits mode
 	if v := mappingValue(uroot, "mode"); v != nil {
 		mode = v.Value
 	}
 	if mode != "enforce" {
-		return nil, fmt.Errorf("network.keep_policy must use mode: enforce when github.scope is workspace (it uses %q; Keep defaults to audit_only when mode is omitted)%s", mode, fix)
+		return nil, fmt.Errorf("github.scope: workspace requires enforced HTTP policies; set network.keep_policy mode: enforce instead of %q (audit mode is called audit_only in Keep files)%s", mode, fix)
 	}
 	if v := mappingValue(uroot, "on_error"); v != nil && v.Value != "closed" {
 		return nil, fmt.Errorf("network.keep_policy must not set on_error: %s when github.scope is workspace%s", v.Value, fix)
 	}
 	if v := mappingValue(uroot, "case_sensitive"); v != nil && v.Value == "true" {
 		return nil, fmt.Errorf("network.keep_policy must not set case_sensitive: true when github.scope is workspace%s", fix)
-	}
-	for _, key := range []string{"packs", "profile"} {
-		if mappingValue(uroot, key) != nil {
-			return nil, fmt.Errorf("network.keep_policy: %q is not supported in moat policies", key)
-		}
 	}
 
 	if udefs := mappingValue(uroot, "defs"); udefs != nil && len(udefs.Content) > 0 {
