@@ -54,9 +54,10 @@ const maxMessageRepos = 8
 // literal without escaping.
 var nodeIDPattern = regexp.MustCompile(`^[A-Za-z0-9_=+/-]{1,128}$`)
 
-// PlanPolicyParams builds the policy parameters for a plan, using cached
-// GitHub identity from the project's approvals when present.
-func PlanPolicyParams(plan *Plan, project *Project) PolicyParams {
+// PlanPolicyParams builds the policy parameters for a plan. GitHub identity
+// comes from fresh (this run's lookups) when present, else from the identity
+// cached on the project's approvals.
+func PlanPolicyParams(plan *Plan, project *Project, fresh map[string]RepoMeta) PolicyParams {
 	p := PolicyParams{OtherRepos: plan.OtherRepos}
 	seen := map[string]bool{}
 	addRepo := func(r string) {
@@ -67,18 +68,20 @@ func PlanPolicyParams(plan *Plan, project *Project) PolicyParams {
 	}
 	for _, c := range plan.Granted {
 		addRepo(c.Repo)
-		if project == nil {
-			continue
+		m, ok := fresh[c.Repo]
+		if !ok && project != nil {
+			if a, cached := project.Repos[c.Repo]; cached {
+				m, ok = RepoMeta{FullName: a.FullName, ID: a.ID, NodeIDs: a.NodeIDs}, true
+			}
 		}
-		a, ok := project.Repos[c.Repo]
 		if !ok {
 			continue
 		}
-		addRepo(strings.ToLower(a.FullName))
-		if a.ID > 0 {
-			p.RepoIDs = append(p.RepoIDs, a.ID)
+		addRepo(strings.ToLower(m.FullName))
+		if m.ID > 0 {
+			p.RepoIDs = append(p.RepoIDs, m.ID)
 		}
-		p.NodeIDs = append(p.NodeIDs, a.NodeIDs...)
+		p.NodeIDs = append(p.NodeIDs, m.NodeIDs...)
 	}
 	return p
 }

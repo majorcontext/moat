@@ -980,11 +980,11 @@ github:
 - Values: `any`, `workspace`
 - Default: `any`
 
-With `workspace`, moat finds the GitHub repositories in the workspace when a run starts (the workspace, nested clones, worktrees, and submodules, skipping dependency directories such as `node_modules` and `vendor`). It approves them on the project's first run, and adds a Keep policy to the proxy that denies pushes and other writes to any other repository. A repository that appears in a later run needs approval at a prompt or with [`moat github allow`](./01-cli.md#moat-github). Approvals are stored in `~/.moat/github-repos.json`, outside the workspace.
+With `workspace`, moat finds the GitHub repositories in the workspace when a run starts (the workspace, nested clones, worktrees, and submodules, skipping dependency directories such as `node_modules` and `vendor`). It approves them on the project's first run, and adds a Keep policy to the proxy that denies pushes and other writes to any other repository, including GraphQL mutations it cannot attribute to an approved repository, apart from comments and similar discussion on issues and pull requests. A repository that appears in a later run needs approval at a prompt or with [`moat github allow`](./01-cli.md#moat-github). Approvals are stored in `~/.moat/github-repos.json`, outside the workspace.
 
-Once a project has run with `workspace`, it stays scoped even if `moat.yaml` no longer sets it; `moat github forget --all` turns it off.
+Once a project has run with `workspace`, it stays scoped (with the `other_repos` setting it last had) even if `moat.yaml` no longer sets it; `moat github forget --all` turns it off.
 
-A run with `scope: workspace` fails before it starts if it also has the `ssh:github.com` grant, an `mcp:` server with `auth.grant: github`, or uses GitHub Copilot.
+A run with `scope: workspace` fails before it starts if it also has an `ssh:` grant, an `mcp:` server with `auth.grant: github`, or uses GitHub Copilot.
 
 See [Scoping GitHub access to the workspace](../guides/19-github-scope.md).
 

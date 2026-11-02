@@ -3,7 +3,6 @@ package githubscope
 import (
 	"bufio"
 	"bytes"
-	"sort"
 	"strings"
 )
 
@@ -117,14 +116,4 @@ func parseValue(v string) string {
 		}
 	}
 	return strings.TrimSpace(b.String())
-}
-
-// remoteNames returns the sorted keys of a remote map.
-func remoteNames(m map[string][]string) []string {
-	names := make([]string, 0, len(m))
-	for n := range m {
-		names = append(names, n)
-	}
-	sort.Strings(names)
-	return names
 }

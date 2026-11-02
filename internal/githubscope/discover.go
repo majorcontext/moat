@@ -204,7 +204,7 @@ func remotesIn(path string) map[string][]string {
 	}
 	urls := parseRemoteURLs(data)
 	out := map[string][]string{}
-	for _, name := range remoteNames(urls) {
+	for _, name := range sortedKeys(urls) {
 		seen := map[string]bool{}
 		for _, u := range urls[name] {
 			repo, ok := ParseRemoteURL(u)

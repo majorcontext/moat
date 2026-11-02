@@ -65,11 +65,13 @@ Approvals are stored in `~/.moat/github-repos.json`, keyed by the project's path
 
 ### The scope stays on
 
-Once a project has run with `github.scope: workspace`, it stays scoped even if `moat.yaml` stops asking for it. An agent can edit `moat.yaml`, so removing the setting is not enough to turn the scope off. Later runs print a note and keep enforcing it. To turn it off, run `moat github forget --all` in the project.
+Once a project has run with `github.scope: workspace`, it stays scoped even if `moat.yaml` stops asking for it. An agent can edit `moat.yaml`, so removing the setting is not enough to turn the scope off. Later runs print a note and keep enforcing it, using the `other_repos` setting from the last run that asked for the scope. To turn it off, run `moat github forget --all` in the project.
+
+A run records the project only after its policy is built, so a run that fails before starting (for example, because of an incompatible `network.keep_policy`) does not lock the project.
 
 ## Managing a project's repositories
 
-`moat github` commands act on the current project: the nearest directory at or above the current one that contains `moat.yaml`.
+`moat github` commands act on the current project: the nearest directory at or above the current one that has recorded approvals, or else the nearest one that contains `moat.yaml`.
 
 ```
 $ moat github
@@ -107,13 +109,16 @@ github:
 |---------|----------------------|--------------------|
 | `git push` (`git-receive-pack`) | allowed | denied |
 | `git fetch` / `clone`, LFS download | allowed | allowed with `other_repos: read`; denied with `none` |
+| LFS upload | allowed | denied |
 | REST `GET` under `/repos/{owner}/{repo}` | allowed | allowed with `read`; denied with `none` |
 | REST writes under `/repos/{owner}/{repo}` and `/repositories/{id}` | allowed | denied |
 | REST writes outside `/repos` (SSH keys, gists, new repositories, organization settings) | denied | denied |
 | Forking or generating a repository | denied | denied |
 | GraphQL queries | allowed | allowed |
 | GraphQL mutations with `input.repositoryId` or `input.branch.repositoryNameWithOwner` | allowed | denied |
-| GraphQL mutations that change code without naming a repository (`mergePullRequest`, `updateRef`, `deleteRef`, `enablePullRequestAutoMerge`, `createCommitOnBranch` by branch ID, ...) | denied | denied |
+| GraphQL mutations on issues and pull requests that name their target only by node ID: comments, reactions, labels, assignees, edits, open/closed/draft state, non-approving reviews | allowed | allowed |
+| Approving a pull request through GraphQL | denied | denied |
+| Any other GraphQL mutation that does not name a repository: code changes (`mergePullRequest`, `updateRef`, `enablePullRequestAutoMerge`, ...), branch protection, rulesets, deletions, and mutations GitHub adds later | denied | denied |
 
 `gh pr create`, `gh issue create`, `gh pr view`, and `gh api repos/OWNER/REPO/...` work for approved repositories. `gh pr merge` uses the `mergePullRequest` mutation, which identifies the pull request by node ID only, so it is denied. Merge through REST instead:
 
@@ -121,7 +126,7 @@ github:
 gh api -X PUT repos/OWNER/REPO/pulls/NUMBER/merge
 ```
 
-Moat looks up each approved repository's numeric ID and GraphQL node IDs with your token when a run starts, so it can recognize requests that address a repository by ID. If GitHub is unreachable, it uses IDs cached from earlier runs.
+Moat looks up each approved repository's numeric ID and GraphQL node IDs with your token the first time a run grants it, and caches them, so the policy can recognize requests that address a repository by ID.
 
 ## Other repositories: read or none
 
@@ -141,7 +146,7 @@ The scope only holds if every path to GitHub with your credentials passes throug
 
 | Configuration | Why | Fix |
 |---------------|-----|-----|
-| the `ssh:github.com` grant | `git push` over SSH does not pass through the HTTPS policy | Remove the grant and use `https://github.com/...` remotes |
+| any `ssh:` grant | `git push` over SSH does not pass through the HTTPS policy, and moat's SSH agent cannot limit a key to one destination host: a key granted for `ssh:gitlab.com` also signs a connection to `github.com` | Remove SSH grants and use `https://github.com/...` remotes |
 | an `mcp:` server with `auth.grant: github` | Remote MCP servers are not covered by the policy | Use the `gh` CLI in the container |
 | a Copilot run (`moat copilot`) | Copilot reaches GitHub through Copilot API hosts the policy does not cover | Run without the scope |
 
@@ -149,7 +154,7 @@ A token passed to the container directly, through `env` or `secrets` (`GITHUB_TO
 
 ## Limits
 
-- **GraphQL mutations by node ID.** Mutations that identify their target only by a pull request, issue, or comment node ID (`addComment`, `updatePullRequest`, `addPullRequestReview`, ...) cannot be traced to a repository without a lookup. They are allowed unless they change code. `gh pr comment` and `gh pr edit` therefore keep working, and a comment on another repository's pull request is not blocked.
+- **GraphQL mutations by node ID.** Mutations that identify their target only by a pull request, issue, or comment node ID cannot be traced to a repository without a lookup. A fixed list of discussion mutations (comments, reactions, labels, assignees, edits, non-approving reviews) is allowed for every repository, so `gh pr comment` and `gh pr edit` keep working. A comment on another repository's pull request is therefore not blocked. Every other such mutation is denied.
 - **Workflows in approved repositories.** The agent can push changes to `.github/workflows/` in an approved repository. Those workflows run on GitHub with that repository's secrets.
 - **Network policy.** The scope governs requests that carry the github grant's token. Combine it with `network.policy: strict` to limit everything else the container can reach.
 

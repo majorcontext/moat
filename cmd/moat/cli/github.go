@@ -104,21 +104,23 @@ func openGitHubProject() (*githubProject, error) {
 	if err != nil {
 		return nil, err
 	}
-	dir, err := githubscope.FindProject(cwd)
+	store, err := run.OpenGitHubScopeStore()
 	if err != nil {
+		return nil, err
+	}
+	dir, err := githubscope.FindProject(cwd, store)
+	if err != nil {
+		store.Close()
 		return nil, err
 	}
 	cfg, err := config.Load(dir)
 	if err != nil {
+		store.Close()
 		return nil, fmt.Errorf("loading %s/moat.yaml: %w", dir, err)
 	}
 	var settings githubscope.Settings
 	if cfg != nil {
 		settings = cfg.GitHub.Settings()
-	}
-	store, err := run.OpenGitHubScopeStore()
-	if err != nil {
-		return nil, err
 	}
 	return &githubProject{dir: dir, settings: settings, store: store}, nil
 }
@@ -304,7 +306,7 @@ func githubPolicy(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	policy, err := githubscope.RenderPolicy(githubscope.PlanPolicyParams(plan, existing))
+	policy, err := githubscope.RenderPolicy(githubscope.PlanPolicyParams(plan, existing, nil))
 	if err != nil {
 		return err
 	}

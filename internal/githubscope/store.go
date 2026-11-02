@@ -37,8 +37,13 @@ type Project struct {
 	// LockedAt is when the project was first run with github.scope:
 	// workspace. Once set, later runs keep the scope even if moat.yaml stops
 	// asking for it; `moat github forget --all` clears it.
-	LockedAt time.Time           `json:"locked_at"`
-	Repos    map[string]Approval `json:"repos"`
+	LockedAt time.Time `json:"locked_at"`
+	// OtherRepos is the github.other_repos setting of the latest run whose
+	// moat.yaml asked for the scope. A run that is scoped only because the
+	// project is locked uses it, so deleting the github: block cannot loosen
+	// other_repos: none.
+	OtherRepos string              `json:"other_repos,omitempty"`
+	Repos      map[string]Approval `json:"repos"`
 }
 
 // RepoNames returns the approved repositories, sorted.

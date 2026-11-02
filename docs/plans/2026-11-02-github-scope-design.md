@@ -42,10 +42,10 @@ Configuration lives only in `moat.yaml`. There is no global setting and no CLI f
 ## Decisions
 
 1. **`other_repos` defaults to `read`.** `none` blocks public dependencies fetched from github.com, and reads leak through GraphQL anyway.
-2. **GraphQL mutations that identify their target only by a node ID are allowed unless they change code.** `gh pr comment` and `gh pr edit` keep working. Code-changing ones (`mergePullRequest`, `updateRef`, …) are denied, with a REST alternative in the message. A follow-up could resolve node IDs to repositories with a lookup.
+2. **GraphQL mutations that identify their target only by a node ID are allowed only if they are on a fixed list of discussion mutations** (comments, reactions, labels, assignees, edits, non-approving reviews). `gh pr comment` and `gh pr edit` keep working. Everything else is denied, failing closed for branch protection, rulesets, deletions, and mutations GitHub adds later. That includes code-changing mutations (`mergePullRequest`, `updateRef`, …), whose deny message names a REST alternative. Approving reviews are denied. This follows from code review: a denylist of code mutations let `deleteBranchProtectionRule` through. A follow-up could resolve node IDs to repositories with a lookup.
 3. **The lock is sticky.** `moat.yaml` is writable by the agent, so removing the setting must not lift the scope.
 4. **The config is a `github:` block**, not a `network.keep_policy` pack name: discovery and prompts should not be hidden behind a pack.
-5. **Copilot, `ssh:github.com`, and github-granted MCP servers fail fast** instead of running without the scope.
+5. **Copilot, any `ssh:` grant, and github-granted MCP servers fail fast** instead of running without the scope. The SSH check covers every SSH grant because moat's SSH agent proxy never learns the destination host (`SetCurrentHost` is not called), so a key granted for one host signs connections to any host.
 6. **Moat moves to gatekeeper main.** The body-scoping change lives there.
 
 ## Design
@@ -63,7 +63,9 @@ Discovery can only suggest repositories. Missing one, by skipping a directory or
 
 - `~/.moat/github-repos.json`, keyed by the project's absolute, symlink-resolved path. Cross-process `flock`; atomic write-then-rename.
 - `BuildPlan` is the single source of truth, used by the CLI pre-flight (print and prompt) and by `Create` (enforce). It yields Granted / Pending / Missing.
-- The first run records approvals and `locked_at`. `moat github allow` approves without locking. Repositories it approves are granted even when not checked out; discovered ones are granted only while present.
+- `CommitRun` records the first run's approvals and `locked_at`, the last explicit `other_repos` (used by sticky runs), and cached repository IDs. `Create` calls it only after the policy has been built and merged, so a rejected run doesn't lock the project.
+- `moat github allow` approves without locking. Repositories it approves are granted even when not checked out; discovered ones are granted only while present.
+- `moat github` commands use the nearest ancestor with a stored record, else the nearest `moat.yaml`, so a nested `moat.yaml` doesn't split approvals.
 
 ### Policy (`internal/githubscope/github-workspace.yaml`)
 
@@ -74,14 +76,15 @@ The policy is a Keep rule file in the proxy's `http` scope. Moat fills its `defs
 | `github-path-hygiene` | `.`, `..`, empty segments, or backslashes in GitHub paths |
 | `github-new-repository` | REST fork or generate |
 | `github-git-push-start` | `GET …/info/refs?service=git-receive-pack` outside the workspace. Git shows this request's error body; it does not show the body for the pack POST |
-| `github-git-write` | Non-read github.com requests outside the workspace. Fetch and LFS batch are reads |
+| `github-git-write` | Non-read github.com requests outside the workspace. `/{o}/{r}/git-upload-pack` and `/{o}/{r}/info/lfs/objects/batch` (exact shape) count as reads |
+| `github-lfs-upload` | LFS batch requests outside the workspace whose body is not `operation: download`. The rule is pinned to the batch operation so only these bodies are read |
 | `github-api-write` | Non-GET api.github.com requests outside `/repos/{ws}` and `/repositories/{ws-id}`, except `POST /graphql` and `/markdown` |
 | `github-other-repo-read` | With `other_repos: none`: other repositories over git and REST, and code and commit search |
-| `github-graphql-*` | Unparseable bodies; `createRepository` and `cloneTemplateRepository`; `input.repositoryId` not in the workspace; `branch.repositoryNameWithOwner` not in the workspace; code-changing mutations that cannot be attributed to a repository |
+| `github-graphql-*` | Unparseable bodies; `createRepository` and `cloneTemplateRepository`; `input.repositoryId` not in the workspace; `branch.repositoryNameWithOwner` not in the workspace; unattributable code mutations (specific message); any other unattributable mutation not on `gh_unattributed_ok`; approving reviews |
 
 Each nested GraphQL argument access is guarded with `has()`, because Keep turns missing-key errors into a non-match.
 
-Repository identity (canonical name, numeric ID, and node IDs in both legacy and next-gen formats) is fetched with the run's token at startup and cached in the store as a fallback.
+Repository identity (canonical name, numeric ID, and node IDs in both legacy and next-gen formats) is fetched with the run's token only for granted repositories that have none cached, then cached in the store.
 
 ### Keep changes
 

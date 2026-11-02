@@ -75,13 +75,18 @@ func checkGitHubScopeConflicts(plan *githubscope.Plan, grants []string, cfg *con
 		unlock = "Remove it, or unlock the project with `moat github forget --all`"
 	}
 
+	// Any SSH grant, not only ssh:github.com: the SSH agent bridge cannot
+	// tell which host a signature is for, so a key granted for one host
+	// (ssh:gitlab.com) also signs a connection to github.com or
+	// ssh.github.com:443, and git push over SSH never reaches the HTTPS policy.
 	for _, g := range grants {
-		if host, ok := strings.CutPrefix(g, "ssh:"); ok && strings.EqualFold(host, "github.com") {
-			return fmt.Errorf("%s, but the run also has the ssh:github.com grant.\n"+
-				"  git push over SSH bypasses the HTTPS policy that enforces the scope.\n"+
-				"  Remove ssh:github.com from grants — HTTPS remotes use the github grant automatically.\n"+
+		if strings.HasPrefix(g, "ssh:") {
+			return fmt.Errorf("%s, but the run also has the %s grant.\n"+
+				"  git push over SSH bypasses the HTTPS policy that enforces the scope, and moat's SSH agent\n"+
+				"  cannot limit a key to one destination host — any granted key that GitHub accepts could push.\n"+
+				"  Remove SSH grants from this run; HTTPS remotes use the github grant automatically.\n"+
 				"  If the workspace uses SSH remotes (git@github.com:...), switch them to https://github.com/... .\n"+
-				"  See %s", why, githubScopeDocsURL)
+				"  See %s", why, g, githubScopeDocsURL)
 		}
 	}
 	if cfg != nil {
@@ -108,25 +113,34 @@ func GitHubScopeConflict(plan *githubscope.Plan, grants []string, cfg *config.Co
 	return checkGitHubScopeConflicts(plan, normalizeCopilotGrantNames(grants), cfg)
 }
 
-// warnGitHubTokenInEnv warns when moat.yaml hands a GitHub token to the
+// warnGitHubTokenInEnv warns when moat.yaml or -e hands a GitHub token to the
 // container directly. Such a token never passes through the proxy, so the
 // scope cannot restrict it.
-func warnGitHubTokenInEnv(cfg *config.Config) {
-	if cfg == nil {
-		return
-	}
+func warnGitHubTokenInEnv(cfg *config.Config, env []string) {
 	for _, name := range []string{"GITHUB_TOKEN", "GH_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_PAT"} {
-		_, inEnv := cfg.Env[name]
-		_, inSecrets := cfg.Secrets[name]
-		if inEnv || inSecrets {
-			ui.Warnf("%s is set in moat.yaml. A token passed to the container directly is not limited by github.scope; only the github grant is.", name)
+		where := ""
+		if cfg != nil {
+			_, inEnv := cfg.Env[name]
+			_, inSecrets := cfg.Secrets[name]
+			if inEnv || inSecrets {
+				where = "in moat.yaml"
+			}
+		}
+		for _, kv := range env {
+			if k, _, _ := strings.Cut(kv, "="); k == name {
+				where = "with -e"
+			}
+		}
+		if where != "" {
+			ui.Warnf("%s is set %s. A token passed to the container directly is not limited by github.scope; only the github grant is.", name, where)
 		}
 	}
 }
 
 // prepareGitHubScope is Create's gate. It returns the run's plan, or nil when
-// the run is not scoped. On a first run it records the project's repositories
-// and locks the project.
+// the run is not scoped. It records nothing: commitGitHubScope does that once
+// the run's policy has been built, so a run rejected later in Create does not
+// lock the project.
 func prepareGitHubScope(opts Options) (*githubscope.Plan, error) {
 	if !hasGrant(opts.Grants, "github") {
 		return nil, nil
@@ -147,31 +161,53 @@ func prepareGitHubScope(opts Options) (*githubscope.Plan, error) {
 	if err := checkGitHubScopeConflicts(plan, opts.Grants, opts.Config); err != nil {
 		return nil, err
 	}
-	warnGitHubTokenInEnv(opts.Config)
-	if err := githubscope.RecordFirstRun(store, plan, time.Now()); err != nil {
-		return nil, fmt.Errorf("github.scope: recording approved repositories: %w", err)
-	}
+	warnGitHubTokenInEnv(opts.Config, opts.Env)
 	return plan, nil
 }
 
+// commitGitHubScope records the run in the approval store: on a first run it
+// locks the project and approves what was found; it also remembers
+// other_repos and caches repository identity. Create calls it after the
+// run's policy is built and merged.
+func commitGitHubScope(plan *githubscope.Plan, meta map[string]githubscope.RepoMeta) error {
+	store, err := OpenGitHubScopeStore()
+	if err != nil {
+		return fmt.Errorf("github.scope: %w", err)
+	}
+	defer store.Close()
+	if err := githubscope.CommitRun(store, plan, meta, time.Now()); err != nil {
+		return fmt.Errorf("github.scope: recording approved repositories: %w", err)
+	}
+	return nil
+}
+
 // githubScopePolicy renders the run's Keep policy for the http scope. It
-// refreshes the approved repositories' GitHub identity (numeric and GraphQL
-// node IDs) with the run's github credential, falling back to the identity
-// cached from earlier runs when GitHub is unreachable.
-func githubScopePolicy(ctx context.Context, plan *githubscope.Plan, token string) ([]byte, error) {
+// looks up the GitHub identity (numeric and GraphQL node IDs) of granted
+// repositories that have none cached yet, using the run's github credential,
+// and returns what it found so commitGitHubScope can cache it.
+func githubScopePolicy(ctx context.Context, plan *githubscope.Plan, token string) ([]byte, map[string]githubscope.RepoMeta, error) {
 	scopeStore, err := OpenGitHubScopeStore()
 	if err != nil {
-		return nil, fmt.Errorf("github.scope: %w", err)
+		return nil, nil, fmt.Errorf("github.scope: %w", err)
 	}
-	defer scopeStore.Close()
+	project, getErr := scopeStore.Get(plan.Project)
+	scopeStore.Close()
+	if getErr != nil {
+		return nil, nil, fmt.Errorf("github.scope: %w", getErr)
+	}
 
-	if repos := plan.GrantedRepos(); len(repos) > 0 && token != "" {
-		lookupCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-		meta, errs := githubLookupRepos(lookupCtx, token, repos)
-		cancel()
-		if err := githubscope.SetRepoMeta(scopeStore, plan.Project, meta); err != nil {
-			log.Warn("github.scope: caching repository identity failed", "error", err)
+	var uncached []string
+	for _, repo := range plan.GrantedRepos() {
+		if project == nil || project.Repos[repo].ID == 0 {
+			uncached = append(uncached, repo)
 		}
+	}
+	var meta map[string]githubscope.RepoMeta
+	if len(uncached) > 0 && token != "" {
+		lookupCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		var errs map[string]error
+		meta, errs = githubLookupRepos(lookupCtx, token, uncached)
+		cancel()
 		for repo, lookupErr := range errs {
 			log.Debug("github.scope: repository lookup failed", "repo", repo, "error", lookupErr)
 		}
@@ -181,20 +217,16 @@ func githubScopePolicy(ctx context.Context, plan *githubscope.Plan, token string
 				failed = append(failed, repo)
 			}
 			slices.Sort(failed)
-			ui.Warnf("Could not look up %s on GitHub; using cached IDs if any. GraphQL mutations that name these repositories by ID (e.g. gh pr create) may be blocked this run.",
+			ui.Warnf("Could not look up %s on GitHub. GraphQL mutations that name these repositories by ID (e.g. gh pr create) may be blocked this run.",
 				strings.Join(failed, ", "))
 		}
 	}
 
-	project, getErr := scopeStore.Get(plan.Project)
-	if getErr != nil {
-		return nil, fmt.Errorf("github.scope: %w", getErr)
-	}
-	policy, renderErr := githubscope.RenderPolicy(githubscope.PlanPolicyParams(plan, project))
+	policy, renderErr := githubscope.RenderPolicy(githubscope.PlanPolicyParams(plan, project, meta))
 	if renderErr != nil {
-		return nil, fmt.Errorf("github.scope: %w", renderErr)
+		return nil, nil, fmt.Errorf("github.scope: %w", renderErr)
 	}
-	return policy, nil
+	return policy, meta, nil
 }
 
 // mergeGitHubScopePolicy folds the run's github policy into the http-scope

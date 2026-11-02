@@ -1700,7 +1700,7 @@ moat proxy restart
 
 Manage the GitHub repositories the current project's runs may change when `moat.yaml` sets [`github.scope: workspace`](./02-moat-yaml.md#githubscope). See [Scoping GitHub access to the workspace](../guides/19-github-scope.md).
 
-These commands act on the current project: the nearest directory at or above the current one that contains `moat.yaml`, or the current directory if there is none. They make no network requests.
+These commands act on the current project: the nearest directory at or above the current one that has recorded approvals, else the nearest one that contains `moat.yaml`, else the current directory. They make no network requests.
 
 ### moat github / moat github repos
 

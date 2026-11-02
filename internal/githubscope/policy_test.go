@@ -126,7 +126,30 @@ func TestPolicyGitOverHTTPS(t *testing.T) {
 		},
 		{name: "push ref advertisement of workspace repo", method: "GET", host: "github.com", path: "/majorcontext/moat.git/info/refs?service=git-receive-pack"},
 		{name: "fetch from other repo", method: "POST", host: "github.com", path: "/acme/other.git/git-upload-pack"},
-		{name: "LFS batch on other repo", method: "POST", host: "github.com", path: "/acme/other.git/info/lfs/objects/batch"},
+		{
+			name: "LFS download from other repo", method: "POST", host: "github.com", path: "/acme/other.git/info/lfs/objects/batch",
+			body: `{"operation":"download","objects":[{"oid":"x","size":1}]}`,
+		},
+		{
+			name: "LFS upload to other repo", method: "POST", host: "github.com", path: "/acme/other.git/info/lfs/objects/batch",
+			body: `{"operation":"upload","objects":[{"oid":"x","size":1}]}`, wantDeny: true, wantRule: "github-lfs-upload",
+		},
+		{
+			name: "LFS batch with no body", method: "POST", host: "github.com", path: "/acme/other.git/info/lfs/objects/batch",
+			wantDeny: true, wantRule: "github-lfs-upload",
+		},
+		{
+			name: "LFS upload to workspace repo", method: "POST", host: "github.com", path: "/majorcontext/moat.git/info/lfs/objects/batch",
+			body: `{"operation":"upload","objects":[{"oid":"x","size":1}]}`,
+		},
+		{
+			name: "LFS batch under an extra segment is not a read", method: "POST", host: "github.com", path: "/acme/other.git/x/info/lfs/objects/batch",
+			wantDeny: true, wantRule: "github-git-write",
+		},
+		{
+			name: "upload-pack under an extra segment is not a read", method: "POST", host: "github.com", path: "/acme/other.git/x/git-upload-pack",
+			wantDeny: true, wantRule: "github-git-write",
+		},
 		{
 			name: "LFS lock on other repo", method: "POST", host: "github.com", path: "/acme/other.git/info/lfs/locks",
 			wantDeny: true, wantRule: "github-git-write",
@@ -273,6 +296,45 @@ func TestPolicyGraphQL(t *testing.T) {
 		{
 			name: "comment by subject node ID is allowed", method: "POST", host: host, path: path,
 			body: gql(t, `mutation { addComment(input: {subjectId: "PR_x", body: "hi"}) { clientMutationId } }`, nil),
+		},
+		{
+			name: "PR edit by node ID is allowed", method: "POST", host: host, path: path,
+			body: gql(t, `mutation($i: UpdatePullRequestInput!) { updatePullRequest(input: $i) { clientMutationId } }`,
+				map[string]any{"i": map[string]any{"pullRequestId": "PR_x", "title": "t"}}),
+		},
+		{
+			name: "comment review is allowed", method: "POST", host: host, path: path,
+			body: gql(t, `mutation { addPullRequestReview(input: {pullRequestId: "PR_x", event: COMMENT, body: "b"}) { clientMutationId } }`, nil),
+		},
+		{
+			name: "approving review is denied", method: "POST", host: host, path: path,
+			body:     gql(t, `mutation { addPullRequestReview(input: {pullRequestId: "PR_x", event: APPROVE}) { clientMutationId } }`, nil),
+			wantDeny: true, wantRule: "github-graphql-approve",
+		},
+		{
+			name: "approve via variables is denied", method: "POST", host: host, path: path,
+			body: gql(t, `mutation($i: SubmitPullRequestReviewInput!) { submitPullRequestReview(input: $i) { clientMutationId } }`,
+				map[string]any{"i": map[string]any{"pullRequestReviewId": "PRR_x", "event": "APPROVE"}}),
+			wantDeny: true, wantRule: "github-graphql-approve",
+		},
+		{
+			name: "branch protection deletion by node ID is denied", method: "POST", host: host, path: path,
+			body:     gql(t, `mutation { deleteBranchProtectionRule(input: {branchProtectionRuleId: "BPR_x"}) { clientMutationId } }`, nil),
+			wantDeny: true, wantRule: "github-graphql-unattributed",
+		},
+		{
+			name: "unknown future mutation is denied", method: "POST", host: host, path: path,
+			body:     gql(t, `mutation { someNewMutation(input: {id: "X_1"}) { clientMutationId } }`, nil),
+			wantDeny: true, wantRule: "github-graphql-unattributed",
+		},
+		{
+			name: "settings change on workspace repo by repositoryId is allowed", method: "POST", host: host, path: path,
+			body: gql(t, `mutation { updateRepository(input: {repositoryId: "`+wsNodeID+`", hasWikiEnabled: false}) { clientMutationId } }`, nil),
+		},
+		{
+			name: "settings change on other repo by repositoryId is denied", method: "POST", host: host, path: path,
+			body:     gql(t, `mutation { updateRepository(input: {repositoryId: "`+otherNodeID+`", hasWikiEnabled: false}) { clientMutationId } }`, nil),
+			wantDeny: true, wantRule: "github-graphql-repository-id",
 		},
 		{
 			name: "create repository", method: "POST", host: host, path: path,
@@ -433,13 +495,22 @@ func TestPlanPolicyParamsUsesCachedIdentity(t *testing.T) {
 	project := &Project{Repos: map[string]Approval{
 		"old-owner/app": {FullName: "New-Owner/App", ID: 5, NodeIDs: []string{"R_a", "MDEw"}},
 	}}
-	p := PlanPolicyParams(plan, project)
+	p := PlanPolicyParams(plan, project, nil)
 	assert.ElementsMatch(t, []string{"old-owner/app", "new-owner/app", "majorcontext/keep"}, p.Repos)
 	assert.Equal(t, []int64{5}, p.RepoIDs)
 	assert.ElementsMatch(t, []string{"R_a", "MDEw"}, p.NodeIDs)
 
+	// Fresh lookups take precedence over the cache, and fill uncached repos.
+	p = PlanPolicyParams(plan, project, map[string]RepoMeta{
+		"old-owner/app":     {FullName: "newest/app", ID: 6, NodeIDs: []string{"R_b"}},
+		"majorcontext/keep": {FullName: "majorcontext/keep", ID: 7},
+	})
+	assert.ElementsMatch(t, []string{"old-owner/app", "newest/app", "majorcontext/keep"}, p.Repos)
+	assert.ElementsMatch(t, []int64{6, 7}, p.RepoIDs)
+	assert.Equal(t, []string{"R_b"}, p.NodeIDs)
+
 	// Companion: with no stored identity, names alone still populate.
-	p = PlanPolicyParams(plan, nil)
+	p = PlanPolicyParams(plan, nil, nil)
 	assert.ElementsMatch(t, []string{"old-owner/app", "majorcontext/keep"}, p.Repos)
 	assert.Empty(t, p.RepoIDs)
 	assert.Empty(t, p.NodeIDs)

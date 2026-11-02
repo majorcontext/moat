@@ -41,11 +41,17 @@ func scopedConfig() *config.Config {
 
 func TestCheckGitHubScopeConflicts(t *testing.T) {
 	plan := &githubscope.Plan{Enabled: true}
-	require.NoError(t, checkGitHubScopeConflicts(plan, []string{"github", "ssh:gitlab.com"}, scopedConfig()))
+	require.NoError(t, checkGitHubScopeConflicts(plan, []string{"github", "claude"}, scopedConfig()))
 
-	err := checkGitHubScopeConflicts(plan, []string{"github", "ssh:github.com"}, scopedConfig())
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "ssh:github.com")
+	// Every SSH grant conflicts, not only ssh:github.com: the agent bridge
+	// cannot tell which host a signature is for, so ssh:gitlab.com's key also
+	// signs for github.com, and ssh.github.com serves git over port 443.
+	var err error
+	for _, g := range []string{"ssh:github.com", "ssh:ssh.github.com", "ssh:GitHub.com.", "ssh:gitlab.com"} {
+		err = checkGitHubScopeConflicts(plan, []string{"github", g}, scopedConfig())
+		require.Error(t, err, g)
+		assert.Contains(t, err.Error(), g)
+	}
 
 	cfg := scopedConfig()
 	cfg.MCP = []config.MCPServerConfig{{Name: "gh", URL: "https://api.githubcopilot.com/mcp/", Auth: &config.MCPAuthConfig{Grant: "github"}}}
@@ -87,12 +93,24 @@ func TestPrepareGitHubScope(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, plan)
 
-	// First scoped run records and locks.
+	// The gate plans a first run but records nothing: a run that fails later
+	// in Create (an incompatible network.keep_policy, an old daemon) must not
+	// lock the project.
 	plan, err = prepareGitHubScope(Options{Workspace: ws, Grants: []string{"github"}, Config: scopedConfig()})
 	require.NoError(t, err)
 	require.NotNil(t, plan)
 	assert.True(t, plan.FirstRun)
 	assert.Equal(t, []string{"majorcontext/moat"}, plan.GrantedRepos())
+	_, statErr = os.Stat(path)
+	require.ErrorIs(t, statErr, os.ErrNotExist, "the gate does not record the first run")
+	plan, err = prepareGitHubScope(Options{Workspace: ws, Grants: []string{"github"}, Config: &config.Config{}})
+	require.NoError(t, err)
+	assert.Nil(t, plan, "without a commit, dropping the scope is not sticky yet")
+
+	// Committing the run records and locks.
+	plan, err = prepareGitHubScope(Options{Workspace: ws, Grants: []string{"github"}, Config: scopedConfig()})
+	require.NoError(t, err)
+	require.NoError(t, commitGitHubScope(plan, nil))
 
 	// moat.yaml drops the scope (or the config is missing entirely): still scoped.
 	for _, cfg := range []*config.Config{{}, nil} {
@@ -141,21 +159,41 @@ func TestGitHubScopePolicyUsesLookupAndCache(t *testing.T) {
 		return nil, map[string]error{"majorcontext/moat": errors.New("offline")}
 	}
 
-	for i := 0; i < 2; i++ {
-		policy, err := githubScopePolicy(context.Background(), plan, "tok")
-		require.NoError(t, err)
-		// The second call fails the lookup and must fall back to the cache.
-		assert.Contains(t, string(policy), "R_kgDOMOAT", "call %d", i+1)
-		assert.Contains(t, string(policy), "/repositories/(42)", "call %d", i+1)
-	}
-	assert.Equal(t, 2, calls)
+	// First run: nothing cached, so the repository is looked up, and the
+	// fresh identity reaches the policy before anything is recorded.
+	policy, meta, err := githubScopePolicy(context.Background(), plan, "tok")
+	require.NoError(t, err)
+	assert.Contains(t, string(policy), "R_kgDOMOAT")
+	assert.Contains(t, string(policy), "/repositories/(42)")
+	require.NoError(t, commitGitHubScope(plan, meta))
+	assert.Equal(t, 1, calls)
 
-	// Companion: no token means no lookup, and the policy still renders.
+	// Later run: the identity is cached, so there is no lookup at all.
+	plan, err = prepareGitHubScope(Options{Workspace: ws, Grants: []string{"github"}, Config: scopedConfig()})
+	require.NoError(t, err)
+	policy, _, err = githubScopePolicy(context.Background(), plan, "tok")
+	require.NoError(t, err)
+	assert.Equal(t, 1, calls, "cached repositories are not looked up again")
+	assert.Contains(t, string(policy), "R_kgDOMOAT")
+
+	// Companion: a failed lookup for an uncached repository still renders.
+	ws2 := gitWorkspace(t, "https://github.com/acme/other.git")
+	plan2, err := prepareGitHubScope(Options{Workspace: ws2, Grants: []string{"github"}, Config: scopedConfig()})
+	require.NoError(t, err)
+	githubLookupRepos = func(context.Context, string, []string) (map[string]githubscope.RepoMeta, map[string]error) {
+		return nil, map[string]error{"acme/other": errors.New("offline")}
+	}
+	policy, meta, err = githubScopePolicy(context.Background(), plan2, "tok")
+	require.NoError(t, err)
+	assert.Empty(t, meta)
+	assert.Contains(t, string(policy), "acme/other")
+
+	// Companion: no token means no lookup.
 	githubLookupRepos = func(context.Context, string, []string) (map[string]githubscope.RepoMeta, map[string]error) {
 		t.Fatal("lookup must not run without a token")
 		return nil, nil
 	}
-	_, err = githubScopePolicy(context.Background(), plan, "")
+	_, _, err = githubScopePolicy(context.Background(), plan2, "")
 	require.NoError(t, err)
 }
 

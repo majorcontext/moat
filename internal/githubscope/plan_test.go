@@ -119,7 +119,7 @@ func TestPlanStickyLock(t *testing.T) {
 		plan := buildPlan(t, store, ws, s)
 		assert.True(t, plan.Enabled, "locked project stays scoped")
 		assert.True(t, plan.Sticky)
-		assert.Equal(t, OtherReposRead, plan.OtherRepos)
+		assert.Equal(t, OtherReposNone, plan.OtherRepos, "the locked run's other_repos: none survives")
 		// extra_repos are not honored once moat.yaml no longer asks for the scope.
 		assert.Equal(t, []string{"majorcontext/moat"}, candidates(plan, false))
 	}
@@ -234,7 +234,7 @@ func TestFindProject(t *testing.T) {
 
 	want, err := ProjectKey(root)
 	require.NoError(t, err)
-	got, err := FindProject(sub)
+	got, err := FindProject(sub, nil)
 	require.NoError(t, err)
 	assert.Equal(t, want, got)
 
@@ -242,9 +242,35 @@ func TestFindProject(t *testing.T) {
 	bare := t.TempDir()
 	want, err = ProjectKey(bare)
 	require.NoError(t, err)
-	got, err = FindProject(bare)
+	got, err = FindProject(bare, nil)
 	require.NoError(t, err)
 	assert.Equal(t, want, got)
+}
+
+// TestFindProjectPrefersRecordedProject: a nested clone with its own
+// moat.yaml must not capture `moat github allow` run from inside it when the
+// enclosing project is the one runs use.
+func TestFindProjectPrefersRecordedProject(t *testing.T) {
+	store := openTestStore(t)
+	root := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(root, "moat.yaml"), []byte("agent: claude\n"), 0o644))
+	nested := filepath.Join(root, "keep")
+	require.NoError(t, os.MkdirAll(nested, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(nested, "moat.yaml"), []byte("agent: claude\n"), 0o644))
+
+	rootKey, err := ProjectKey(root)
+	require.NoError(t, err)
+	nestedKey, err := ProjectKey(nested)
+	require.NoError(t, err)
+
+	got, err := FindProject(nested, store)
+	require.NoError(t, err)
+	assert.Equal(t, nestedKey, got, "no records yet: nearest moat.yaml")
+
+	require.NoError(t, Approve(store, rootKey, []Candidate{{Repo: "a/b"}}, time.Now()))
+	got, err = FindProject(nested, store)
+	require.NoError(t, err)
+	assert.Equal(t, rootKey, got, "the recorded enclosing project wins")
 }
 
 func TestStoreRejectsMalformedFile(t *testing.T) {
@@ -292,4 +318,51 @@ func TestSetRepoMeta(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(7), p.Repos["a/b"].ID)
 	assert.Len(t, p.Repos, 1, "metadata never adds approvals")
+}
+
+// TestCommitRun covers what a committed run records, and that nothing is
+// recorded before CommitRun (the run gate must not lock a project for a run
+// that never starts).
+func TestCommitRun(t *testing.T) {
+	store := openTestStore(t)
+	ws := t.TempDir()
+	writeRepo(t, ws, map[string]string{"origin": "https://github.com/majorcontext/moat"})
+
+	plan := buildPlan(t, store, ws, Settings{Scope: ScopeWorkspace, OtherRepos: OtherReposNone})
+	p, err := store.Get(plan.Project)
+	require.NoError(t, err)
+	assert.Nil(t, p, "building a plan records nothing")
+
+	now := time.Date(2026, 11, 2, 9, 0, 0, 0, time.UTC)
+	meta := map[string]RepoMeta{"majorcontext/moat": {FullName: "majorcontext/moat", ID: 9, NodeIDs: []string{"R_x"}}}
+	require.NoError(t, CommitRun(store, plan, meta, now))
+	p, err = store.Get(plan.Project)
+	require.NoError(t, err)
+	require.NotNil(t, p)
+	assert.Equal(t, now, p.LockedAt)
+	assert.Equal(t, OtherReposNone, p.OtherRepos)
+	assert.Equal(t, int64(9), p.Repos["majorcontext/moat"].ID)
+
+	// Sticky: the github: block is gone, but other_repos: none survives.
+	plan = buildPlan(t, store, ws, Settings{})
+	require.True(t, plan.Sticky)
+	assert.Equal(t, OtherReposNone, plan.OtherRepos)
+	require.NoError(t, CommitRun(store, plan, nil, now.Add(time.Hour)))
+	p, _ = store.Get(plan.Project)
+	assert.Equal(t, OtherReposNone, p.OtherRepos, "a sticky run does not overwrite other_repos")
+	assert.Equal(t, now, p.LockedAt, "the lock time is kept")
+
+	// Companion: a run whose moat.yaml sets other_repos updates it.
+	plan = buildPlan(t, store, ws, Settings{Scope: ScopeWorkspace, OtherRepos: OtherReposRead})
+	require.NoError(t, CommitRun(store, plan, nil, now.Add(2*time.Hour)))
+	p, _ = store.Get(plan.Project)
+	assert.Equal(t, OtherReposRead, p.OtherRepos)
+
+	// A disabled plan records nothing and never creates an empty record.
+	other := t.TempDir()
+	disabled := buildPlan(t, store, other, Settings{})
+	require.NoError(t, CommitRun(store, disabled, nil, now))
+	p, err = store.Get(disabled.Project)
+	require.NoError(t, err)
+	assert.Nil(t, p)
 }

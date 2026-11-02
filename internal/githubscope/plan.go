@@ -113,6 +113,9 @@ func BuildPlan(workspace string, settings Settings, existing *Project) (*Plan, e
 		return plan, nil
 	}
 	plan.OtherRepos = settings.OtherRepos
+	if plan.Sticky {
+		plan.OtherRepos = existing.OtherRepos
+	}
 	if plan.OtherRepos == "" {
 		plan.OtherRepos = OtherReposRead
 	}
@@ -174,23 +177,50 @@ func BuildPlan(workspace string, settings Settings, existing *Project) (*Plan, e
 // the plan is a first run. It is a no-op otherwise. If another process locked
 // the project in the meantime, that record wins.
 func RecordFirstRun(store *Store, plan *Plan, now time.Time) error {
-	if !plan.Enabled || !plan.FirstRun {
+	return CommitRun(store, plan, nil, now)
+}
+
+// CommitRun records what a scoped run established, once the run's policy has
+// been built: on a first run it locks the project and approves the granted
+// repositories; when moat.yaml asked for the scope it remembers other_repos
+// for later sticky runs; and it caches the repositories' GitHub identity.
+// Call it only after everything that can reject the run's configuration has
+// passed, so a run that never starts does not lock the project.
+func CommitRun(store *Store, plan *Plan, meta map[string]RepoMeta, now time.Time) error {
+	if !plan.Enabled {
 		return nil
 	}
 	return store.Update(plan.Project, func(p *Project) (*Project, error) {
-		if p != nil && !p.LockedAt.IsZero() {
-			return p, nil
-		}
 		if p == nil {
 			p = &Project{}
 		}
 		if p.Repos == nil {
 			p.Repos = map[string]Approval{}
 		}
-		p.LockedAt = now
-		for _, c := range plan.Granted {
-			if _, ok := p.Repos[c.Repo]; !ok {
-				p.Repos[c.Repo] = Approval{ApprovedAt: now, Source: firstSource(c.Sources)}
+		if p.LockedAt.IsZero() && plan.FirstRun {
+			p.LockedAt = now
+			for _, c := range plan.Granted {
+				if _, ok := p.Repos[c.Repo]; !ok {
+					p.Repos[c.Repo] = Approval{ApprovedAt: now, Source: firstSource(c.Sources)}
+				}
+			}
+		}
+		if p.LockedAt.IsZero() {
+			// Not locked and not a first run: nothing to record. Keep an
+			// existing record (approvals from `moat github allow`) as is,
+			// and do not create an empty one.
+			if len(p.Repos) == 0 {
+				return nil, nil
+			}
+			return p, nil
+		}
+		if !plan.Sticky {
+			p.OtherRepos = plan.OtherRepos
+		}
+		for repo, m := range meta {
+			if a, ok := p.Repos[repo]; ok {
+				a.FullName, a.ID, a.NodeIDs = m.FullName, m.ID, m.NodeIDs
+				p.Repos[repo] = a
 			}
 		}
 		return p, nil
@@ -270,24 +300,39 @@ func SetRepoMeta(store *Store, project string, meta map[string]RepoMeta) error {
 	})
 }
 
-// FindProject walks up from dir to the nearest directory containing
-// moat.yaml, which is the project `moat github` commands act on. When no
-// moat.yaml is found, dir itself is the project.
-func FindProject(dir string) (string, error) {
-	start, err := filepath.Abs(dir)
+// FindProject returns the project `moat github` commands act on, walking up
+// from dir: the nearest directory with a stored record (so a command run from
+// a subdirectory — even one with its own moat.yaml — reaches the project its
+// runs use), else the nearest directory containing moat.yaml, else dir.
+func FindProject(dir string, store *Store) (string, error) {
+	start, err := ProjectKey(dir)
 	if err != nil {
 		return "", err
 	}
+	nearestConfig := ""
 	for d := start; ; {
-		if fi, statErr := os.Stat(filepath.Join(d, "moat.yaml")); statErr == nil && fi.Mode().IsRegular() {
-			return ProjectKey(d)
+		if store != nil {
+			if p, getErr := store.Get(d); getErr != nil {
+				return "", getErr
+			} else if p != nil {
+				return d, nil
+			}
+		}
+		if nearestConfig == "" {
+			if fi, statErr := os.Stat(filepath.Join(d, "moat.yaml")); statErr == nil && fi.Mode().IsRegular() {
+				nearestConfig = d
+			}
 		}
 		parent := filepath.Dir(d)
 		if parent == d {
-			return ProjectKey(start)
+			break
 		}
 		d = parent
 	}
+	if nearestConfig != "" {
+		return nearestConfig, nil
+	}
+	return start, nil
 }
 
 func firstSource(sources []string) string {

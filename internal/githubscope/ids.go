@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -71,7 +72,7 @@ func lookupRepo(ctx context.Context, client *http.Client, apiURL, token, repo st
 		}
 		m.FullName = strings.ToLower(r.FullName)
 		m.ID = r.ID
-		if r.NodeID != "" && !containsString(m.NodeIDs, r.NodeID) {
+		if r.NodeID != "" && !slices.Contains(m.NodeIDs, r.NodeID) {
 			m.NodeIDs = append(m.NodeIDs, r.NodeID)
 		}
 	}
@@ -115,13 +116,4 @@ func getRepo(ctx context.Context, client *http.Client, apiURL, token, repo, next
 		return repoResponse{}, fmt.Errorf("GET /repos/%s: response has no id", repo)
 	}
 	return r, nil
-}
-
-func containsString(list []string, s string) bool {
-	for _, v := range list {
-		if v == s {
-			return true
-		}
-	}
-	return false
 }

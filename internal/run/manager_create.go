@@ -700,12 +700,17 @@ func (m *Manager) Create(ctx context.Context, opts Options) (resRun *Run, retErr
 					ghToken = cred.Token
 				}
 			}
-			ghPolicy, ghErr := githubScopePolicy(ctx, githubPlan, ghToken)
+			ghPolicy, ghMeta, ghErr := githubScopePolicy(ctx, githubPlan, ghToken)
 			if ghErr != nil {
 				return nil, ghErr
 			}
 			policyYAML, policyRuleSets, ghErr = mergeGitHubScopePolicy(ghPolicy, policyYAML, policyRuleSets)
 			if ghErr != nil {
+				return nil, ghErr
+			}
+			// The policy is valid: only now record the run (first-run lock,
+			// approvals, other_repos, cached IDs).
+			if ghErr = commitGitHubScope(githubPlan, ghMeta); ghErr != nil {
 				return nil, ghErr
 			}
 		}
