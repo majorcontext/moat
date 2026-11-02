@@ -6,18 +6,28 @@ Moat is pre-1.0. The CLI interface and `moat.yaml` schema may change between min
 
 ## Unreleased
 
-Adds a Supabase CLI grant and fixes Vercel CLI token injection.
+Adds a Supabase CLI grant and `github.scope: workspace`, which limits what the github grant can change to the repositories checked out in the workspace, and fixes Vercel CLI token injection. The proxy moves to gatekeeper v0.36, so building moat from source needs Go 1.27.3; run `moat proxy restart` after upgrading.
 
 ### Added
 
+- **GitHub workspace scope** — `github.scope: workspace` in `moat.yaml` limits pushes and other GitHub writes made with the github grant to the repositories checked out in the workspace (nested clones, worktrees, and submodules included; dependency directories such as `node_modules` and `vendor` skipped). The proxy enforces it with a Keep policy covering `git push`, the REST API, and GraphQL mutations; `github.other_repos: none` also blocks reads of other repositories over git and REST. The first run approves what it finds. A repository that appears later — a new clone, or a re-pointed remote — stays read-only until you approve it at a prompt or with `moat github allow`. Approvals live in `~/.moat/github-repos.json`, outside the workspace, and a scoped project stays scoped after `moat.yaml` drops the setting until `moat github forget --all`. Runs that also have `ssh:github.com`, a github-granted MCP server, or Copilot fail before starting. See [Scoping GitHub access to the workspace](https://majorcontext.com/moat/guides/github-scope). ([#NNN](https://github.com/majorcontext/moat/pull/NNN))
+- `moat github` commands — `repos`, `allow`, `forget`, and `policy` show and change the current project's approved repositories and print the Keep policy its runs use. ([#NNN](https://github.com/majorcontext/moat/pull/NNN))
+- `params.query` in `network.keep_policy` rules — the raw query string of each HTTPS request. ([#NNN](https://github.com/majorcontext/moat/pull/NNN))
 - **Supabase CLI grant** — `moat grant supabase` can import an existing host Supabase CLI login with confirmation, use `SUPABASE_ACCESS_TOKEN`, or prompt for a personal access token. Runs with this grant install the Supabase CLI automatically. The container receives a CLI-compatible placeholder while the proxy injects the real token for the Management API. ([#487](https://github.com/majorcontext/moat/pull/487))
 
 ### Changed
 
+- The proxy daemon is built on gatekeeper v0.36 (previously v0.23.2), and moat now requires Go 1.27.3 to build. Run `moat proxy restart` after upgrading so the daemon runs the new binary. Blocked responses keep moat's wording, and new installs keep the "Moat CA" certificate name. ([#NNN](https://github.com/majorcontext/moat/pull/NNN))
+- A `network.keep_policy` body rule (one that reads `params.body`) with an `operation` now makes only matching requests JSON-only. Previously any body rule made every request in the `http` scope fail closed on a non-JSON body. Body rules without an `operation` behave as before. ([#NNN](https://github.com/majorcontext/moat/pull/NNN))
 - The Vercel grant now installs the Vercel CLI automatically and injects credentials only for `api.vercel.com`, removing the previous `*.vercel.com` match. If you need injection for another Vercel host, open an issue with the hostname. ([#487](https://github.com/majorcontext/moat/pull/487))
+
+### Security
+
+- The proxy no longer sends a credential over plain HTTP to a remote host. Previously, a `claude.base_url` such as `http://gateway.example.com` received the key unencrypted; the request is now refused with `403`. `localhost` endpoints and host-local `http://localhost` MCP servers are unaffected because their traffic stays on the machine. If you use a remote `http://` endpoint, switch it to `https://`. ([#NNN](https://github.com/majorcontext/moat/pull/NNN))
 
 ### Fixed
 
+- Fix `network.keep_policy` files that use `defs` failing to load — previously, validation compiled each `when` expression without substituting defs and reported "undeclared reference". ([#NNN](https://github.com/majorcontext/moat/pull/NNN))
 - Fix Vercel CLI token rejection — previously, the CLI rejected Moat's placeholder before making an API request; the grant now supplies a CLI-compatible value. ([#487](https://github.com/majorcontext/moat/pull/487))
 
 ## v0.9.0 — 2026-10-27

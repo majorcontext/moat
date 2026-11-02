@@ -1696,6 +1696,68 @@ moat proxy restart
 
 ---
 
+## moat github
+
+Manage the GitHub repositories the current project's runs may change when `moat.yaml` sets [`github.scope: workspace`](./02-moat-yaml.md#githubscope). See [Scoping GitHub access to the workspace](../guides/19-github-scope.md).
+
+These commands act on the current project: the nearest directory at or above the current one that contains `moat.yaml`, or the current directory if there is none. They make no network requests.
+
+### moat github / moat github repos
+
+```
+moat github
+moat github repos
+```
+
+Show the project's scope and its repositories: approved, pending (found but not approved), and approved but no longer in the workspace.
+
+```
+$ moat github
+Project: /Users/me/code/moat
+Scope:   workspace (since 2026-11-02)
+Other repositories: read-only
+
+REPOSITORY         STATUS    FOUND IN
+acme/payments      pending   ./scratch/payments (origin)
+majorcontext/keep  approved  ./keep (origin)
+majorcontext/moat  approved  ./ (origin)
+
+Pending repositories are read-only. Approve one with: moat github allow OWNER/REPO
+```
+
+When the project is not scoped, it lists the repositories a scoped run would approve.
+
+### moat github allow
+
+```
+moat github allow <owner/repo>...
+```
+
+Approve repositories for the project. An approved repository is writable by scoped runs whether or not it is checked out in the workspace. Approving does not turn the scope on.
+
+### moat github forget
+
+```
+moat github forget <owner/repo>...
+moat github forget --all
+```
+
+Revoke approved repositories; the project stays scoped. With `--all`, delete the project's approvals and its lock. If `moat.yaml` still sets `github.scope: workspace`, the next run approves the repositories it finds, as on a first run.
+
+| Flag | Description |
+|------|-------------|
+| `--all` | Forget every approval and unlock the project |
+
+### moat github policy
+
+```
+moat github policy
+```
+
+Print the Keep rule file the proxy evaluates for the project's runs, with the approved repositories and their cached GitHub IDs filled in. A run merges any `network.keep_policy` rules into the same file; they are not shown.
+
+---
+
 ## moat device
 
 Inspect serial devices attached to this machine and manage which ones runs may use. See
