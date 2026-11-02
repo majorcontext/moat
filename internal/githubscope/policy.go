@@ -332,8 +332,11 @@ func MergeHTTPPolicy(github, user []byte) ([]byte, error) {
 			if action == nil || (action.Value != "deny" && action.Value != "log") {
 				return nil, fmt.Errorf("network.keep_policy: only deny and log actions are supported with github.scope: workspace; other actions can alter scope enforcement")
 			}
-			if n := mappingValue(r, "name"); n != nil && names[n.Value] {
-				return nil, fmt.Errorf("network.keep_policy: rule name %q conflicts with a github.scope rule; rename it", n.Value)
+			if n := mappingValue(r, "name"); n != nil {
+				if names[n.Value] {
+					return nil, fmt.Errorf("network.keep_policy: duplicate rule name %q; names must be unique across GitHub and user rules", n.Value)
+				}
+				names[n.Value] = true
 			}
 			grules.Content = append(grules.Content, r)
 		}

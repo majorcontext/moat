@@ -162,6 +162,54 @@ func TestPolicyThroughProxy(t *testing.T) {
 		assert.NoError(t, err, "reading another repository is allowed with other_repos: read")
 	})
 
+	t.Run("encoded paths", func(t *testing.T) {
+		pu := *proxyURL
+		pu.User = url.UserPassword("u", "api")
+		cas := x509.NewCertPool()
+		pem, err := os.ReadFile(filepath.Join(caDir, "ca.crt"))
+		require.NoError(t, err)
+		cas.AppendCertsFromPEM(pem)
+		transport := &http.Transport{Proxy: http.ProxyURL(&pu), TLSClientConfig: &tls.Config{RootCAs: cas}}
+		defer transport.CloseIdleConnections()
+		client := &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+		for _, suffix := range []string{
+			"/%2e%2e/%2E%2E/acme/other/contents/x",
+			"/%252e%252e/%252e%252e/acme/other/contents/x",
+			"/%25252e%25252e/x",
+			"/contents/a%2F..%2F..%2Facme%2Fother/x",
+			"/contents/a%5C..%5Cx",
+			"/contents/a%252Fx", "/contents/a%255Cx",
+		} {
+			request, err := http.NewRequest("PUT", "https://api.github.com:"+strconv.Itoa(port)+"/repos/majorcontext/moat"+suffix, nil)
+			require.NoError(t, err)
+			response, err := client.Do(request)
+			require.NoError(t, err)
+			_, _ = io.Copy(io.Discard, response.Body)
+			response.Body.Close()
+			assert.Equal(t, http.StatusForbidden, response.StatusCode, suffix)
+			assert.Equal(t, "keep-policy", response.Header.Get("X-Moat-Blocked"), suffix)
+		}
+		// Ordinary escaping stays usable; it must reach the backend rather than
+		// be mistaken for traversal. The fake git backend may reject this REST URL.
+		request, err := http.NewRequest("PUT", "https://api.github.com:"+strconv.Itoa(port)+"/repos/majorcontext/moat/contents/file%20name", nil)
+		require.NoError(t, err)
+		response, err := client.Do(request)
+		require.NoError(t, err)
+		defer response.Body.Close()
+		assert.Empty(t, response.Header.Get("X-Moat-Blocked"))
+		gitProxy := *proxyURL
+		gitProxy.User = url.UserPassword("u", "gh")
+		gitTransport := transport.Clone()
+		gitTransport.Proxy = http.ProxyURL(&gitProxy)
+		defer gitTransport.CloseIdleConnections()
+		gitClient := &http.Client{Transport: gitTransport, CheckRedirect: client.CheckRedirect}
+		response, err = gitClient.Get("https://github.com:" + strconv.Itoa(port) + "/majorcontext/moat.git/%2e%2e/%2e%2e/acme/other.git/info/refs?service=git-receive-pack")
+		require.NoError(t, err)
+		defer response.Body.Close()
+		assert.Equal(t, http.StatusForbidden, response.StatusCode)
+		assert.Equal(t, "keep-policy", response.Header.Get("X-Moat-Blocked"))
+	})
+
 	t.Run("graphql", func(t *testing.T) {
 		pu := *proxyURL
 		pu.User = url.UserPassword("u", "api")

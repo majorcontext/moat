@@ -531,3 +531,10 @@ func TestMergeHTTPPolicyRejectsUnsupportedSettings(t *testing.T) {
 	_, err = MergeHTTPPolicy(gh, []byte("version: v1\nscope: http\nmode: enforce\nrules: []\n"))
 	require.NoError(t, err)
 }
+
+func TestMergeHTTPPolicyReportsDuplicateUserRules(t *testing.T) {
+	policy, err := RenderPolicy(testParams(OtherReposRead))
+	require.NoError(t, err)
+	_, err = MergeHTTPPolicy(policy, []byte("scope: http\nmode: enforce\nrules:\n- {name: repeated, action: log}\n- {name: repeated, action: deny}\n"))
+	require.ErrorContains(t, err, `network.keep_policy: duplicate rule name "repeated"`)
+}

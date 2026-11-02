@@ -63,12 +63,14 @@ rules:
   - name: github-path-hygiene
     description: >-
       Refuse dot-segments, empty segments, and backslashes in GitHub paths so
-      the path this policy checks is the path GitHub routes.
+      the path this policy checks is the path GitHub routes. The proxy decodes
+      once; reject encoded routing characters that remain after that decode
+      to prevent an upstream second decode from changing the checked path.
     match:
       when: |-
-        params.host in ['github.com', 'api.github.com'] && params.path.matches(r'//|/\.\.?(/|$)|\\')
+        params.host in ['github.com', 'api.github.com'] && params.path.matches(r'//|/\.\.?(/|$)|\\|%(2e|2f|5c|25)')
     action: deny
-    message: "GitHub request blocked: the path contains '.', '..', or empty segments."
+    message: "GitHub request blocked: the path contains ambiguous routing characters, '.', '..', or empty segments."
 
   - name: github-new-repository
     description: Creating repositories (forks, template copies) is outside the project.

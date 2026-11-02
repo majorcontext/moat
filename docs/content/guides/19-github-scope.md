@@ -150,9 +150,11 @@ The scope only holds if every path to GitHub with your credentials passes throug
 | an `mcp:` server with `auth.grant: github` | Remote MCP servers are not covered by the policy | Use the `gh` CLI in the container |
 | a Copilot run (`moat copilot`) | Copilot reaches GitHub through Copilot API hosts the policy does not cover | Run without the scope |
 
-A token passed to the container directly, through `env` or `secrets` (`GITHUB_TOKEN`, `GH_TOKEN`), never reaches the proxy, so the scope cannot limit it. Moat warns when it sees one.
+A separate token supplied through `env`, `-e`, a `secrets:` resolver, or the environment of a local MCP server is outside the scope of the injected github grant. The agent or MCP tool can use that token independently. Moat warns about recognized token variable names in top-level configuration and `-e`; it cannot detect every credential in resolver output or local MCP environments.
 
 ## Limits
+
+Each generated Keep def is limited to 2,048 characters. The combined legacy and next-generation node-ID list can reach that limit at roughly 30 repositories, depending on ID lengths; long names can hit a different def limit sooner. If startup reports this limit, narrow the workspace or remove unneeded checkouts and `extra_repos` entries. This is a size limit, not a fixed repository count.
 
 - **GraphQL mutations by node ID.** Mutations that identify their target only by a pull request, issue, or comment node ID cannot be traced to a repository without a lookup. A fixed list of discussion mutations (comments, reactions, labels, assignees, edits, non-approving reviews) is allowed for every repository, so `gh pr comment` and `gh pr edit` keep working. A comment on another repository's pull request is therefore not blocked. Every other such mutation is denied.
 - **Workflows in approved repositories.** The agent can push changes to `.github/workflows/` in an approved repository. Those workflows run on GitHub with that repository's secrets.

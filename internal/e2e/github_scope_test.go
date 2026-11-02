@@ -4,8 +4,13 @@ package e2e
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/githubscope"
@@ -49,4 +54,52 @@ func TestGitHubScopeCreateCommit(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, project)
 	require.False(t, project.LockedAt.IsZero(), "successful creation commits the scope")
+}
+
+func TestAuditFailureCleansOnlyRunBuildkitResources(t *testing.T) {
+	skipIfNoDocker(t)
+	skipIfNoPrivileged(t)
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
+	shared := fmt.Sprintf("moat-review-shared-%d", time.Now().UnixNano())
+	output, err := exec.CommandContext(ctx, "docker", "network", "create", shared).CombinedOutput()
+	require.NoError(t, err, string(output))
+	defer exec.Command("docker", "network", "rm", shared).Run()
+	noSandbox := true
+	manager, err := run.NewManagerWithOptions(run.ManagerOptions{NoSandbox: &noSandbox})
+	require.NoError(t, err)
+	defer manager.Close()
+	var runID string
+	t.Cleanup(func() {
+		if runID != "" {
+			_ = exec.Command("docker", "rm", "-f", "moat-buildkit-"+runID, runID).Run()
+			_ = exec.Command("docker", "network", "rm", "moat-"+runID).Run()
+		}
+	})
+	since := time.Now().Add(-time.Minute).UTC().Format(time.RFC3339Nano)
+	_, err = manager.Create(ctx, run.Options{
+		Name: "audit-cleanup", Workspace: createTestWorkspace(t), Cmd: []string{"true"},
+		Config: &config.Config{Dependencies: []string{"docker:dind"}},
+		OnRunIDAssigned: func(id, _ string) {
+			runID = id
+			// Force sqlite open to fail only after the main container and sidecar exist.
+			require.NoError(t, os.MkdirAll(filepath.Join(config.GlobalConfigDir(), "runs", id, "audit.db"), 0o700))
+		},
+	})
+	require.ErrorContains(t, err, "opening audit store")
+	require.NotEmpty(t, runID)
+	// Observe creation events, so the absence checks below cannot pass merely
+	// because a reordered failure happened before resource allocation.
+	until := time.Now().UTC().Format(time.RFC3339Nano)
+	for _, resource := range []struct{ kind, name string }{{"container", "moat-buildkit-" + runID}, {"network", "moat-" + runID}} {
+		events, eventErr := exec.CommandContext(ctx, "docker", "events", "--since", since, "--until", until, "--filter", "type="+resource.kind, "--filter", resource.kind+"="+resource.name, "--filter", "event=create").CombinedOutput()
+		require.NoError(t, eventErr, string(events))
+		require.NotEmpty(t, strings.TrimSpace(string(events)), "must observe %s creation before asserting cleanup", resource.name)
+	}
+	output, err = exec.CommandContext(ctx, "docker", "ps", "-aq", "--filter", "name=^moat-buildkit-"+runID+"$").CombinedOutput()
+	require.NoError(t, err, string(output))
+	require.Empty(t, strings.TrimSpace(string(output)), "the run's BuildKit sidecar must be removed")
+	require.Error(t, exec.CommandContext(ctx, "docker", "network", "inspect", "moat-"+runID).Run(), "the run's network must be removed")
+	require.NoError(t, exec.CommandContext(ctx, "docker", "network", "inspect", shared).Run(), "unrelated networks must survive")
+	require.NoDirExists(t, filepath.Join(config.GlobalConfigDir(), "runs", runID))
 }
