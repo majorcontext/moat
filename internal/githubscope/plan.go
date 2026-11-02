@@ -240,7 +240,13 @@ func Approve(store *Store, project string, cands []Candidate, now time.Time) err
 			p.Repos = map[string]Approval{}
 		}
 		for _, c := range cands {
-			if _, ok := p.Repos[c.Repo]; ok {
+			if a, ok := p.Repos[c.Repo]; ok {
+				// Explicit host approval persists even after the checkout is
+				// removed. Preserve the approval time and cached identity.
+				if firstSource(c.Sources) == SourceAllowCommand {
+					a.Source = SourceAllowCommand
+					p.Repos[c.Repo] = a
+				}
 				continue
 			}
 			p.Repos[c.Repo] = Approval{ApprovedAt: now, Source: firstSource(c.Sources)}

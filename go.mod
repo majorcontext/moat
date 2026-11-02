@@ -15,8 +15,8 @@ require (
 	github.com/go-git/go-git/v5 v5.17.1
 	github.com/gofrs/flock v0.13.0
 	github.com/jezek/xgb v1.1.1
-	github.com/majorcontext/gatekeeper v0.36.1-0.20261102071533-cb587dc23c28
-	github.com/majorcontext/keep v0.6.1-0.20261102070113-4630cf024c06
+	github.com/majorcontext/gatekeeper v0.37.0
+	github.com/majorcontext/keep v0.7.0
 	github.com/mattn/go-isatty v0.0.20
 	github.com/moby/buildkit v0.28.1
 	github.com/pelletier/go-toml/v2 v2.2.4

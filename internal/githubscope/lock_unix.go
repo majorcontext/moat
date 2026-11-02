@@ -11,6 +11,8 @@ import (
 // following it.
 const noFollow = syscall.O_NOFOLLOW
 
+const discoveryNonblock = syscall.O_NONBLOCK
+
 // lockFile takes an exclusive advisory lock on the store's lock file so
 // concurrent moat processes serialize their read-modify-write cycles. Without
 // it, two runs approving repositories at once could each write back their own

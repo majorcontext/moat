@@ -366,3 +366,26 @@ func TestCommitRun(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, p)
 }
+
+func TestExplicitAllowPromotesDiscoveredApproval(t *testing.T) {
+	store := openTestStore(t)
+	ws := t.TempDir()
+	writeRepo(t, ws, map[string]string{"origin": "https://github.com/acme/app"})
+	plan := buildPlan(t, store, ws, workspaceScope)
+	approvedAt := time.Now().UTC()
+	meta := RepoMeta{FullName: "acme/app", ID: 42, NodeIDs: []string{"R_app"}}
+	require.NoError(t, CommitRun(store, plan, map[string]RepoMeta{"acme/app": meta}, approvedAt))
+	require.NoError(t, Approve(store, plan.Project, []Candidate{{Repo: "acme/app", Sources: []string{SourceAllowCommand}}}, approvedAt.Add(time.Hour)))
+	project, err := store.Get(plan.Project)
+	require.NoError(t, err)
+	approval := project.Repos["acme/app"]
+	assert.Equal(t, SourceAllowCommand, approval.Source)
+	assert.True(t, approvedAt.Equal(approval.ApprovedAt))
+	assert.Equal(t, meta.FullName, approval.FullName)
+	assert.Equal(t, meta.ID, approval.ID)
+	assert.Equal(t, meta.NodeIDs, approval.NodeIDs)
+	require.NoError(t, os.RemoveAll(filepath.Join(ws, ".git")))
+	plan = buildPlan(t, store, ws, workspaceScope)
+	assert.Equal(t, []string{"acme/app"}, plan.GrantedRepos())
+	assert.Empty(t, plan.Missing)
+}

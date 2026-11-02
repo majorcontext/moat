@@ -220,12 +220,21 @@ func remotesIn(path string) map[string][]string {
 
 // readSmallFile reads a regular file, refusing anything larger than limit.
 func readSmallFile(path string, limit int64) ([]byte, error) {
-	f, err := os.Open(path)
+	fi, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	if !fi.Mode().IsRegular() {
+		return nil, errors.New("not a regular file")
+	}
+	// Nonblocking open also protects against replacement with a FIFO
+	// between Stat and OpenFile. Recheck the opened file before reading.
+	f, err := os.OpenFile(path, os.O_RDONLY|discoveryNonblock, 0)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
-	fi, err := f.Stat()
+	fi, err = f.Stat()
 	if err != nil {
 		return nil, err
 	}
