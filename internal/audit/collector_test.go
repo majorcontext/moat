@@ -261,14 +261,24 @@ func TestCollector_UnixSocket_MultipleMessages(t *testing.T) {
 			Type: string(EntryConsole),
 			Data: map[string]any{"line": i},
 		}
-		json.NewEncoder(conn).Encode(msg)
+		if err := json.NewEncoder(conn).Encode(msg); err != nil {
+			t.Fatalf("Encode message %d: %v", i, err)
+		}
 	}
 
-	time.Sleep(100 * time.Millisecond)
-
-	count, err := store.Count()
-	if err != nil {
-		t.Fatalf("Count: %v", err)
+	// Wait for asynchronous ingestion rather than assuming the CI runner can
+	// persist all messages within a fixed sleep (especially with -race).
+	deadline := time.Now().Add(5 * time.Second)
+	var count uint64
+	for {
+		count, err = store.Count()
+		if err != nil {
+			t.Fatalf("Count: %v", err)
+		}
+		if count >= 10 || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 	if count != 10 {
 		t.Errorf("Count = %d, want 10", count)
