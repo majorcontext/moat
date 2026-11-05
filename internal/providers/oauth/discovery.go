@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/majorcontext/moat/internal/log"
@@ -119,31 +121,47 @@ func discoverProtectedResourceMetadata(ctx context.Context, serverURL string) (*
 }
 
 // discoverAuthServerMetadata fetches RFC 8414 authorization server metadata.
-// It tries the standard endpoint first, then falls back to OpenID Connect discovery.
+// The well-known component precedes the issuer path. OIDC discovery tries
+// the RFC 8414 location before the legacy OIDC suffix location.
 func discoverAuthServerMetadata(ctx context.Context, authServerURL string) (*AuthServerMetadata, error) {
-	// Try RFC 8414 first.
-	asmURL := authServerURL + "/.well-known/oauth-authorization-server"
-	log.Debug("trying OAuth AS metadata", "url", asmURL)
-	asm, asmErr := fetchJSON[AuthServerMetadata](ctx, asmURL)
-	if asmErr == nil {
-		if valErr := validateAuthServerMetadata(asm); valErr != nil {
-			return nil, valErr
+	issuer, err := url.Parse(authServerURL)
+	if err != nil {
+		return nil, fmt.Errorf("parsing authorization server URL: %w", err)
+	}
+	if issuer.Host == "" || issuer.User != nil || issuer.RawQuery != "" || issuer.ForceQuery || issuer.Fragment != "" {
+		return nil, fmt.Errorf("authorization server URL must have a host and no userinfo, query, or fragment")
+	}
+	origin := issuer.Scheme + "://" + issuer.Host
+	path := strings.TrimSuffix(issuer.EscapedPath(), "/")
+	candidates := []string{
+		origin + "/.well-known/oauth-authorization-server" + path,
+		origin + "/.well-known/openid-configuration" + path,
+	}
+	if path != "" {
+		candidates = append(candidates,
+			origin+path+"/.well-known/openid-configuration",
+			// Compatibility with servers that worked with Moat's former suffix lookup.
+			origin+path+"/.well-known/oauth-authorization-server",
+		)
+	}
+	var failures []error
+	for _, candidate := range candidates {
+		log.Debug("trying authorization server metadata", "url", candidate)
+		metadata, fetchErr := fetchJSON[AuthServerMetadata](ctx, candidate)
+		if fetchErr != nil {
+			failures = append(failures, fetchErr)
+			if ctx.Err() != nil {
+				break
+			}
+			continue
 		}
-		return asm, nil
+		if err := validateAuthServerMetadata(metadata); err != nil {
+			failures = append(failures, fmt.Errorf("invalid metadata from %s: %w", candidate, err))
+			continue
+		}
+		return metadata, nil
 	}
-	log.Debug("OAuth AS metadata failed, trying OIDC", "error", asmErr)
-
-	// Fall back to OIDC.
-	oidcURL := authServerURL + "/.well-known/openid-configuration"
-	log.Debug("trying OIDC discovery", "url", oidcURL)
-	asm, oidcErr := fetchJSON[AuthServerMetadata](ctx, oidcURL)
-	if oidcErr != nil {
-		return nil, fmt.Errorf("fetching auth server metadata: %w", oidcErr)
-	}
-	if valErr := validateAuthServerMetadata(asm); valErr != nil {
-		return nil, valErr
-	}
-	return asm, nil
+	return nil, fmt.Errorf("fetching auth server metadata: %w", errors.Join(failures...))
 }
 
 // validateAuthServerMetadata checks that required fields are present.
