@@ -6,7 +6,9 @@ Moat is pre-1.0. The CLI interface and `moat.yaml` schema may change between min
 
 ## Unreleased
 
-Adds a Supabase CLI grant and fixes Vercel CLI token injection.
+## v0.9.1 — 2026-11-05
+
+Fixes OAuth discovery for path-based issuers such as Datadog MCP, Vercel CLI authentication, and interactive Codex joins. Adds the Supabase CLI grant.
 
 ### Added
 
@@ -18,6 +20,8 @@ Adds a Supabase CLI grant and fixes Vercel CLI token injection.
 
 ### Fixed
 
+- Fix OAuth discovery for authorization servers with issuer paths — previously, `moat grant oauth datadog --url https://mcp.us5.datadoghq.com/v1/mcp` failed with a metadata 404 because discovery appended the well-known path after `/v1/mcp`. Discovery now uses the RFC 8414 location first and retains legacy OAuth and OIDC fallbacks. ([#489](https://github.com/majorcontext/moat/pull/489))
+- Fix interactive Codex joins being rejected by background-server feature mismatches — joined sessions now use an embedded server when the installed Codex supports it, without restarting the primary session's daemon. ([#486](https://github.com/majorcontext/moat/pull/486))
 - Fix Vercel CLI token rejection — previously, the CLI rejected Moat's placeholder before making an API request; the grant now supplies a CLI-compatible value. ([#487](https://github.com/majorcontext/moat/pull/487))
 
 ## v0.9.0 — 2026-10-27
