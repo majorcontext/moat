@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -26,6 +27,7 @@ type ProtectedResourceMetadata struct {
 
 // AuthServerMetadata represents RFC 8414 authorization server metadata.
 type AuthServerMetadata struct {
+	Issuer                string `json:"issuer"`
 	AuthorizationEndpoint string `json:"authorization_endpoint"`
 	TokenEndpoint         string `json:"token_endpoint"`
 	RegistrationEndpoint  string `json:"registration_endpoint,omitempty"`
@@ -131,6 +133,15 @@ func discoverAuthServerMetadata(ctx context.Context, authServerURL string) (*Aut
 	if issuer.Host == "" || issuer.User != nil || issuer.RawQuery != "" || issuer.ForceQuery || issuer.Fragment != "" {
 		return nil, fmt.Errorf("authorization server URL must have a host and no userinfo, query, or fragment")
 	}
+	// Public MCP discovery enforces HTTPS before this helper. Keep HTTP
+	// available only for loopback fixtures, never for remote issuer discovery.
+	loopback := strings.EqualFold(issuer.Hostname(), "localhost")
+	if ip := net.ParseIP(issuer.Hostname()); ip != nil {
+		loopback = ip.IsLoopback()
+	}
+	if issuer.Scheme != "https" && (issuer.Scheme != "http" || !loopback) {
+		return nil, fmt.Errorf("authorization server URL must use HTTPS (HTTP is only allowed on loopback)")
+	}
 	origin := issuer.Scheme + "://" + issuer.Host
 	path := strings.TrimSuffix(issuer.EscapedPath(), "/")
 	candidates := []string{
@@ -155,7 +166,7 @@ func discoverAuthServerMetadata(ctx context.Context, authServerURL string) (*Aut
 			}
 			continue
 		}
-		if err := validateAuthServerMetadata(metadata); err != nil {
+		if err := validateAuthServerMetadata(metadata, authServerURL); err != nil {
 			failures = append(failures, fmt.Errorf("invalid metadata from %s: %w", candidate, err))
 			continue
 		}
@@ -164,8 +175,15 @@ func discoverAuthServerMetadata(ctx context.Context, authServerURL string) (*Aut
 	return nil, fmt.Errorf("fetching auth server metadata: %w", errors.Join(failures...))
 }
 
-// validateAuthServerMetadata checks that required fields are present.
-func validateAuthServerMetadata(asm *AuthServerMetadata) error {
+// validateAuthServerMetadata binds metadata to the requested issuer (RFC 8414
+// section 3.3) and checks the endpoints required for authorization-code grants.
+func validateAuthServerMetadata(asm *AuthServerMetadata, expectedIssuer string) error {
+	if asm.Issuer == "" {
+		return fmt.Errorf("auth server metadata missing issuer")
+	}
+	if asm.Issuer != expectedIssuer {
+		return fmt.Errorf("auth server metadata issuer %q does not match requested issuer %q", asm.Issuer, expectedIssuer)
+	}
 	if asm.AuthorizationEndpoint == "" {
 		return fmt.Errorf("auth server metadata missing authorization_endpoint")
 	}

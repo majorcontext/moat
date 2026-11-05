@@ -4,8 +4,6 @@ Moat runs AI coding agents in isolated containers with credential injection, net
 
 Moat is pre-1.0. The CLI interface and `moat.yaml` schema may change between minor versions. Breaking changes are listed under **Breaking** headings below.
 
-## Unreleased
-
 ## v0.9.1 — 2026-11-05
 
 Adds GitHub workspace access restrictions and the Supabase CLI grant, and fixes Datadog OAuth discovery, Vercel authentication, and interactive Codex joins. The proxy moves to gatekeeper v0.37; building from source now requires Go 1.27.3, and existing installations should run `moat proxy restart` after upgrading.
@@ -30,7 +28,7 @@ Adds GitHub workspace access restrictions and the Supabase CLI grant, and fixes 
 
 ### Fixed
 
-- Fix OAuth discovery for authorization servers with issuer paths — previously, `moat grant oauth datadog --url https://mcp.us5.datadoghq.com/v1/mcp` failed with a metadata 404 because discovery appended the well-known path after `/v1/mcp`. Discovery now uses the RFC 8414 location first and retains legacy OAuth and OIDC fallbacks. ([#489](https://github.com/majorcontext/moat/pull/489))
+- Fix OAuth discovery for authorization servers with issuer paths — previously, `moat grant oauth datadog --url https://mcp.us5.datadoghq.com/v1/mcp` failed with a metadata 404 because discovery appended the well-known path after `/v1/mcp`. Discovery now uses the RFC 8414 location first and retains legacy OAuth and OIDC fallbacks. Discovered metadata must declare the requested issuer exactly. ([#489](https://github.com/majorcontext/moat/pull/489))
 - Fix interactive Codex joins being rejected by background-server feature mismatches — joined sessions now use an embedded server when the installed Codex supports it, without restarting the primary session's daemon. ([#486](https://github.com/majorcontext/moat/pull/486))
 - Fix `network.keep_policy` files that use `defs` failing to load — previously, validation compiled each `when` expression without substituting defs and reported "undeclared reference". ([#488](https://github.com/majorcontext/moat/pull/488))
 - Fix Vercel CLI token rejection — previously, the CLI rejected Moat's placeholder before making an API request; the grant now supplies a CLI-compatible value. ([#487](https://github.com/majorcontext/moat/pull/487))
