@@ -5,7 +5,9 @@ import (
 	"context"
 	"net"
 	"net/http"
+	"net/url"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -89,10 +91,13 @@ type RunContext struct {
 
 	RegisteredAt time.Time `json:"registered_at"`
 
-	KeepEngines   map[string]*keeplib.Engine `json:"-"` // compiled Keep policy engines per scope
-	refreshCancel context.CancelFunc         `json:"-"` // cancels token refresh goroutine
-	awsHandler    http.Handler               `json:"-"` // AWS credential endpoint handler
-	mu            sync.RWMutex
+	// Persist the exact registered policy, never reload it from the workspace.
+	PolicyYAML     map[string][]byte          `json:"policy_yaml,omitempty"`
+	PolicyRuleSets []PolicyRuleSetSpec        `json:"policy_rule_sets,omitempty"`
+	KeepEngines    map[string]*keeplib.Engine `json:"-"` // compiled Keep policy engines per scope
+	refreshCancel  context.CancelFunc         `json:"-"` // cancels token refresh goroutine
+	awsHandler     http.Handler               `json:"-"` // AWS credential endpoint handler
+	mu             sync.RWMutex
 }
 
 // NewRunContext creates a new RunContext for a run.
@@ -365,11 +370,15 @@ func (rc *RunContext) ToProxyContextData() *proxy.RunContextData {
 		Policy: rc.NetworkPolicy,
 	}
 
-	// Convert credentials.
+	// Convert credentials. The proxy refuses to inject a credential into a
+	// plain-HTTP request unless it allows that; moat allows it only for the
+	// run's host gateway, where the request never leaves this machine (e.g. a
+	// claude.base_url on localhost, rewritten to the gateway name).
 	d.Credentials = make(map[string][]proxy.CredentialHeader, len(rc.Credentials))
 	for host, creds := range rc.Credentials {
+		local := rc.isHostGatewayKey(host)
 		for _, c := range creds {
-			d.Credentials[host] = append(d.Credentials[host], proxy.CredentialHeader{Name: c.Name, Value: c.Value, Grant: c.Grant})
+			d.Credentials[host] = append(d.Credentials[host], proxy.CredentialHeader{Name: c.Name, Value: c.Value, Grant: c.Grant, AllowInsecure: local})
 		}
 	}
 	for _, bundles := range rc.CredentialBundles {
@@ -409,7 +418,9 @@ func (rc *RunContext) ToProxyContextData() *proxy.RunContextData {
 	// Convert token substitutions.
 	d.TokenSubstitutions = make(map[string]*proxy.TokenSubstitution, len(rc.TokenSubstitutions))
 	for host, ts := range rc.TokenSubstitutions {
-		d.TokenSubstitutions[host] = proxy.NewTokenSubstitution(ts.Placeholder, ts.RealToken)
+		sub := proxy.NewTokenSubstitution(ts.Placeholder, ts.RealToken)
+		sub.AllowInsecure = rc.isHostGatewayKey(host)
+		d.TokenSubstitutions[host] = sub
 	}
 
 	// Reconstruct response transformers from serializable specs.
@@ -462,6 +473,10 @@ func (rc *RunContext) ToProxyContextData() *proxy.RunContextData {
 				d.MCPServers[i].Auth = &proxy.MCPAuthConfig{
 					Grant:  s.Auth.Grant,
 					Header: s.Auth.Header,
+					// Host-local MCP servers (http://localhost and other
+					// loopback URLs, the only http:// URLs moat.yaml accepts)
+					// are reached by the relay on this machine.
+					AllowInsecure: isLoopbackHTTPURL(s.URL),
 				}
 			}
 		}
@@ -519,4 +534,31 @@ func (rc *RunContext) ToProxyContextData() *proxy.RunContextData {
 func hostMatchAdapter(pattern, host string, port int) bool {
 	hp := proxy.ParseHostPattern(pattern)
 	return proxy.MatchesHostPattern(hp, host, port)
+}
+
+// isHostGatewayKey reports whether a credential host key (bare or host:port)
+// names this run's host gateway.
+func (rc *RunContext) isHostGatewayKey(key string) bool {
+	if rc.HostGateway == "" {
+		return false
+	}
+	host := key
+	if h, _, err := net.SplitHostPort(key); err == nil {
+		host = h
+	}
+	return strings.EqualFold(host, rc.HostGateway)
+}
+
+// isLoopbackHTTPURL reports whether raw is an http:// URL on a loopback host.
+func isLoopbackHTTPURL(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme != "http" {
+		return false
+	}
+	host := u.Hostname()
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }

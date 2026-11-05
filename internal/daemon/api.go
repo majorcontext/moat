@@ -170,6 +170,15 @@ const (
 	CapCredentialRefs    = "credential-refs-v1"
 	CapCredentialBundles = "credential-bundles-v1"
 	CapSerialDevices     = "serial-devices"
+	// CapKeepScopedBody means the daemon reads a request body only for the
+	// requests a body rule's operation matches (keep RequiresBodyFor), rather
+	// than for every request once any body rule exists. github.scope:
+	// workspace needs it: its GraphQL body rule would otherwise make git
+	// pushes over HTTPS (non-JSON bodies) fail closed.
+	CapKeepScopedBody = "keep-scoped-body"
+
+	// CapKeepPersistedPolicy means registered policies survive daemon restart.
+	CapKeepPersistedPolicy = "keep-persisted-policy"
 )
 
 // HealthResponse is returned from GET /v1/health.

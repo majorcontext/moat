@@ -69,6 +69,15 @@ linters:
         - G401  # sha1 usage (used for X.509 subject key IDs per RFC 5280)
         - G101  # Hardcoded credentials (false positive on URL constants)
         - G602  # Slice bounds out of range (false positives on Read() buffers)
+        # Rules added in the gosec bundled with golangci-lint v2.15. They fire on
+        # code that predates the linter upgrade; each excluded for the same
+        # reason as an existing rule above.
+        - G117  # Struct field named like a secret (moat's API types carry tokens by design; see G101)
+        - G703  # Taint-based path traversal (paths come from workspaces and config; see G304)
+        - G704  # Taint-based SSRF (URLs come from config and credential endpoints)
+        - G115  # Integer conversion overflow (byte/rune conversions on bounded values)
+        - G118  # Goroutine uses context.Background (deliberate for cleanup that must outlive a request)
+        - G122  # Filesystem op in Walk callback (walks of moat-owned trees)
 
     revive:
       rules:

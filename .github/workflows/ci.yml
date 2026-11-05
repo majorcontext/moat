@@ -51,7 +51,11 @@ jobs:
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.8.0
+          version: v2.15.0
+          # Build golangci-lint with the Go version from go.mod: a release
+          # binary built with an older Go refuses to lint a module that
+          # targets a newer one.
+          install-mode: goinstall
 
   test:
     name: Test

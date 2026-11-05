@@ -747,11 +747,18 @@ func validateTokenViaProxy(ctx context.Context, token string) *validationLevelRe
 	p := proxy.NewProxy()
 	p.SetCA(ca)
 
-	// Configure credential injection matching the Claude provider logic
+	// Configure credential injection matching the Claude provider logic.
+	// The proxy refuses to inject a credential into a plain-HTTP request
+	// unless the credential opts in. The validation URL is HTTPS in
+	// production; only tests point it at a plain-HTTP server.
+	header, value := "x-api-key", token
 	if credential.IsOAuthToken(token) {
-		p.SetCredential(targetHost, "Bearer "+token)
+		header, value = "Authorization", "Bearer "+token
+	}
+	if targetURL.Scheme == "http" {
+		p.SetInsecureCredentialWithGrant(targetHost, header, value, "claude")
 	} else {
-		p.SetCredentialHeader(targetHost, "x-api-key", token)
+		p.SetCredentialWithGrant(targetHost, header, value, "claude")
 	}
 
 	// Start proxy server

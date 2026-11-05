@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/credential"
 )
 
@@ -103,5 +104,46 @@ func TestRunContext_GetCredentialWithPort(t *testing.T) {
 	}
 	if cred.Value != "token abc" {
 		t.Errorf("unexpected value: %s", cred.Value)
+	}
+}
+
+// TestRunContext_ToProxyContextData_CleartextOnlyOnThisMachine: the proxy
+// refuses to inject credentials over plain HTTP unless allowed. moat allows it
+// for the host gateway (a localhost claude.base_url is rewritten to it) and
+// for loopback MCP servers — traffic that never leaves the machine — and for
+// nothing else.
+func TestRunContext_ToProxyContextData_CleartextOnlyOnThisMachine(t *testing.T) {
+	rc := NewRunContext("run_cleartext")
+	rc.HostGateway = "moat-host"
+	rc.SetCredentialWithGrant("moat-host", "Authorization", "Bearer local", "claude")
+	rc.SetCredentialWithGrant("api.anthropic.com", "Authorization", "Bearer remote", "claude")
+	rc.SetTokenSubstitution("moat-host:4000", "ph", "real")
+	rc.SetTokenSubstitution("api.example.com", "ph2", "real2")
+	rc.MCPServers = []config.MCPServerConfig{
+		{Name: "local", URL: "http://localhost:3000/mcp", Auth: &config.MCPAuthConfig{Grant: "mcp-local", Header: "Authorization"}},
+		{Name: "local-ip", URL: "http://127.0.0.1:3000/mcp", Auth: &config.MCPAuthConfig{Grant: "mcp-ip", Header: "Authorization"}},
+		{Name: "remote", URL: "https://mcp.example.com/mcp", Auth: &config.MCPAuthConfig{Grant: "mcp-remote", Header: "Authorization"}},
+		{Name: "remote-http", URL: "http://mcp.example.com/mcp", Auth: &config.MCPAuthConfig{Grant: "mcp-http", Header: "Authorization"}},
+	}
+
+	d := rc.ToProxyContextData()
+
+	if c := d.Credentials["moat-host"]; len(c) != 1 || !c[0].AllowInsecure {
+		t.Errorf("host-gateway credential AllowInsecure = %+v, want true", c)
+	}
+	if c := d.Credentials["api.anthropic.com"]; len(c) != 1 || c[0].AllowInsecure {
+		t.Errorf("remote credential AllowInsecure = %+v, want false", c)
+	}
+	if ts := d.TokenSubstitutions["moat-host:4000"]; ts == nil || !ts.AllowInsecure {
+		t.Errorf("host-gateway token substitution AllowInsecure = %+v, want true", ts)
+	}
+	if ts := d.TokenSubstitutions["api.example.com"]; ts == nil || ts.AllowInsecure {
+		t.Errorf("remote token substitution AllowInsecure = %+v, want false", ts)
+	}
+	want := map[string]bool{"local": true, "local-ip": true, "remote": false, "remote-http": false}
+	for _, s := range d.MCPServers {
+		if s.Auth.AllowInsecure != want[s.Name] {
+			t.Errorf("MCP %s AllowInsecure = %v, want %v", s.Name, s.Auth.AllowInsecure, want[s.Name])
+		}
 	}
 }

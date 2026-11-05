@@ -15,6 +15,7 @@ import (
 
 	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/credential"
+	"github.com/majorcontext/moat/internal/daemon"
 	"github.com/majorcontext/moat/internal/log"
 	"github.com/majorcontext/moat/internal/provider"
 	"github.com/majorcontext/moat/internal/providers/claude"
@@ -224,7 +225,7 @@ func buildMCPRelayServers(mcps []config.MCPServerConfig, proxyPort int, authToke
 		}
 		if mcp.Auth != nil {
 			mcpCfg.Headers = map[string]string{
-				mcp.Auth.Header: "moat-stub-" + mcp.Auth.Grant,
+				mcp.Auth.Header: daemon.MCPStubPrefix + mcp.Auth.Grant,
 			}
 		}
 		servers[mcp.Name] = mcpCfg

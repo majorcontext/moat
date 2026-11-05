@@ -336,6 +336,12 @@ func ExecuteRun(ctx context.Context, opts intcli.ExecOptions) (*run.Run, error) 
 		preflightDevices(ctx, opts.Config.Devices, devicePreflight{out: os.Stderr})
 	}
 
+	// GitHub scope pre-flight: show which repositories this run may push to
+	// and, on a terminal, ask about repositories that appeared since the last
+	// approved run. manager.Create recomputes the same plan and enforces it.
+	preflightGitHubScope(opts.Workspace, run.AppendMCPGrants(opts.Flags.Grants, opts.Config), opts.Config,
+		defaultGitHubPreflight(!noPrompt && stdinIsInteractive()))
+
 	// Create run
 	r, err := manager.Create(ctx, runOpts)
 	if err != nil {
@@ -426,7 +432,7 @@ func ExecuteRun(ctx context.Context, opts intcli.ExecOptions) (*run.Run, error) 
 			log.Error("failed to stop run", "id", r.ID, "error", err)
 		}
 		// Wait for monitorContainerExit to finish cleanup
-		<-waitDone
+		<-waitDone //nolint:errcheck // only waiting for cleanup; the run was stopped on purpose
 		fmt.Println()
 		fmt.Println(ui.Dim(fmt.Sprintf("View output: moat logs %s", r.ID)))
 		return r, nil

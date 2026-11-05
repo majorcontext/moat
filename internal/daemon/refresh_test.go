@@ -89,17 +89,16 @@ func TestToRunContext_CarriesProfile(t *testing.T) {
 }
 
 func TestRefreshTokensForRun_NoRefreshableProviders(t *testing.T) {
-	// With no providers registered (test environment), refreshTokensForRun
-	// should be a no-op and not panic.
+	// Unknown providers must be a no-op even when other tests register real providers.
 	rc := NewRunContext("test-run")
 	store := &nullStore{}
 
 	// Should complete without error or panic.
-	refreshTokensForRun(context.Background(), rc, []string{"github", "claude"}, store)
+	refreshTokensForRun(context.Background(), rc, []string{"unregistered-test-provider"}, store)
 }
 
 func TestStartTokenRefresh_NoRefreshable(t *testing.T) {
-	// With no refreshable providers, StartTokenRefresh should return
+	// With no refreshable providers among the requested grants, StartTokenRefresh should return
 	// immediately without spawning a goroutine.
 	rc := NewRunContext("test-run")
 
@@ -108,7 +107,7 @@ func TestStartTokenRefresh_NoRefreshable(t *testing.T) {
 
 	// Should return immediately — no goroutine spawned since no providers
 	// are registered in the test environment.
-	StartTokenRefresh(ctx, rc, []string{"github", "claude"})
+	StartTokenRefresh(ctx, rc, []string{"unregistered-test-provider"})
 }
 
 func TestStartTokenRefresh_EmptyGrants(t *testing.T) {
@@ -209,6 +208,7 @@ func (f *fakeRefreshableProvider) Grant(context.Context) (*provider.Credential, 
 }
 func (f *fakeRefreshableProvider) ConfigureProxy(provider.ProxyConfigurer, *provider.Credential) {}
 func (f *fakeRefreshableProvider) ContainerEnv(*provider.Credential) []string                    { return nil }
+
 func (f *fakeRefreshableProvider) ContainerMounts(*provider.Credential, string) ([]provider.MountConfig, string, error) {
 	return nil, "", nil
 }

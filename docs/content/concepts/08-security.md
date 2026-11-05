@@ -111,6 +111,7 @@ Audit logs can be exported as self-contained proof bundles for offline verificat
 
 Moat provides one layer of protection: container isolation with network-layer credential injection. For higher-security workloads, combine Moat with additional controls:
 
+- **GitHub workspace scope** -- `github.scope: workspace` limits what the `github` grant can change to the repositories checked out in the workspace, even when the token can write to more. See [Scoping GitHub access to the workspace](../guides/19-github-scope.md).
 - **Service-level controls** -- Branch protection rules, scoped IAM roles with explicit denies, read-only API tokens, repository permission boundaries. These limit what an agent can do even with valid credentials.
 - **Read-only mounts** -- Mount the workspace as read-only (`ro`) when the agent only needs to read code, not modify it. See [Sandboxing](./01-sandboxing.md) for mount configuration.
 - **Worktree isolation** -- Use git worktrees to give each agent its own branch and working directory. Agents cannot modify each other's files or the main branch. See [Git worktrees](../guides/12-worktrees.md).
