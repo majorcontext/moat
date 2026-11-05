@@ -4,9 +4,9 @@ Moat runs AI coding agents in isolated containers with credential injection, net
 
 Moat is pre-1.0. The CLI interface and `moat.yaml` schema may change between minor versions. Breaking changes are listed under **Breaking** headings below.
 
-## Unreleased
+## v0.9.1 — 2026-11-05
 
-Adds a Supabase CLI grant and `github.scope: workspace`, which limits what the github grant can change to the repositories checked out in the workspace, and fixes Vercel CLI token injection. The proxy moves to gatekeeper v0.37, so building moat from source needs Go 1.27.3; run `moat proxy restart` after upgrading.
+Adds GitHub workspace access restrictions and the Supabase CLI grant, and fixes Datadog OAuth discovery, Vercel authentication, and interactive Codex joins. The proxy moves to gatekeeper v0.37; building from source now requires Go 1.27.3, and existing installations should run `moat proxy restart` after upgrading.
 
 ### Added
 
@@ -17,6 +17,7 @@ Adds a Supabase CLI grant and `github.scope: workspace`, which limits what the g
 
 ### Changed
 
+- Registered Keep policies now persist across proxy restarts. After upgrading and running `moat proxy restart`, recreate legacy GitHub runs that have no saved policy snapshot; they are not restored with unrestricted credentials. ([#488](https://github.com/majorcontext/moat/pull/488))
 - The proxy daemon is built on gatekeeper v0.37 (previously v0.23.2), and moat now requires Go 1.27.3 to build. Run `moat proxy restart` after upgrading so the daemon runs the new binary. Blocked responses keep moat's wording, and new installs keep the "Moat CA" certificate name. ([#488](https://github.com/majorcontext/moat/pull/488))
 - A `network.keep_policy` body rule (one that reads `params.body`) with an `operation` now makes only matching requests JSON-only. Previously any body rule made every request in the `http` scope fail closed on a non-JSON body. Body rules without an `operation` behave as before. ([#488](https://github.com/majorcontext/moat/pull/488))
 - The Vercel grant now installs the Vercel CLI automatically and injects credentials only for `api.vercel.com`, removing the previous `*.vercel.com` match. If you need injection for another Vercel host, open an issue with the hostname. ([#487](https://github.com/majorcontext/moat/pull/487))
@@ -27,6 +28,8 @@ Adds a Supabase CLI grant and `github.scope: workspace`, which limits what the g
 
 ### Fixed
 
+- Fix OAuth discovery for authorization servers with issuer paths — previously, `moat grant oauth datadog --url https://mcp.us5.datadoghq.com/v1/mcp` failed with a metadata 404 because discovery appended the well-known path after `/v1/mcp`. Discovery now uses the RFC 8414 location first and retains legacy OAuth and OIDC fallbacks. Discovered metadata must declare the requested issuer exactly. Servers that omit `issuer` or differ from the protected resource `authorization_servers` value (including trailing slashes, host casing, or port spelling) must correct their metadata before discovery can succeed. ([#489](https://github.com/majorcontext/moat/pull/489))
+- Fix interactive Codex joins being rejected by background-server feature mismatches — joined sessions now use an embedded server when the installed Codex supports it, without restarting the primary session's daemon. ([#486](https://github.com/majorcontext/moat/pull/486))
 - Fix `network.keep_policy` files that use `defs` failing to load — previously, validation compiled each `when` expression without substituting defs and reported "undeclared reference". ([#488](https://github.com/majorcontext/moat/pull/488))
 - Fix Vercel CLI token rejection — previously, the CLI rejected Moat's placeholder before making an API request; the grant now supplies a CLI-compatible value. ([#487](https://github.com/majorcontext/moat/pull/487))
 

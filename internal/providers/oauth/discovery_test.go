@@ -6,6 +6,10 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
+	"strconv"
+	"strings"
+	"sync"
 	"testing"
 )
 
@@ -77,9 +81,11 @@ func TestDiscoverProtectedResourceMetadataNotFound(t *testing.T) {
 }
 
 func TestDiscoverAuthServerMetadata(t *testing.T) {
+	var base string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/.well-known/oauth-authorization-server" {
 			json.NewEncoder(w).Encode(AuthServerMetadata{
+				Issuer:                base,
 				AuthorizationEndpoint: "https://auth.example.com/authorize",
 				TokenEndpoint:         "https://auth.example.com/token",
 				RegistrationEndpoint:  "https://auth.example.com/register",
@@ -89,6 +95,7 @@ func TestDiscoverAuthServerMetadata(t *testing.T) {
 		http.NotFound(w, r)
 	}))
 	defer srv.Close()
+	base = srv.URL
 
 	asm, err := discoverAuthServerMetadata(context.Background(), srv.URL)
 	if err != nil {
@@ -106,9 +113,11 @@ func TestDiscoverAuthServerMetadata(t *testing.T) {
 }
 
 func TestDiscoverAuthServerMetadataOIDCFallback(t *testing.T) {
+	var base string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/.well-known/openid-configuration" {
 			json.NewEncoder(w).Encode(AuthServerMetadata{
+				Issuer:                base,
 				AuthorizationEndpoint: "https://auth.example.com/authorize",
 				TokenEndpoint:         "https://auth.example.com/token",
 			})
@@ -117,6 +126,7 @@ func TestDiscoverAuthServerMetadataOIDCFallback(t *testing.T) {
 		http.NotFound(w, r)
 	}))
 	defer srv.Close()
+	base = srv.URL
 
 	asm, err := discoverAuthServerMetadata(context.Background(), srv.URL)
 	if err != nil {
@@ -183,6 +193,7 @@ func TestDiscoverFromMCPServer(t *testing.T) {
 	authMux := http.NewServeMux()
 	authMux.HandleFunc("/.well-known/oauth-authorization-server", func(w http.ResponseWriter, _ *http.Request) {
 		json.NewEncoder(w).Encode(AuthServerMetadata{
+			Issuer:                authSrv.URL,
 			AuthorizationEndpoint: authSrv.URL + "/authorize",
 			TokenEndpoint:         authSrv.URL + "/token",
 			RegistrationEndpoint:  authSrv.URL + "/register",
@@ -237,5 +248,312 @@ func TestDiscoverFromMCPServer(t *testing.T) {
 	}
 	if resource != mcpSrv.URL {
 		t.Errorf("resource = %q, want %q", resource, mcpSrv.URL)
+	}
+}
+
+func TestDiscoverAuthServerMetadataIssuerPaths(t *testing.T) {
+	for _, tc := range []struct {
+		name, issuerPath, published string
+		want                        []string
+	}{
+		{"path issuer", "/v1/mcp", "/.well-known/oauth-authorization-server/v1/mcp", []string{"/.well-known/oauth-authorization-server/v1/mcp"}},
+		{"trailing slash", "/v1/mcp/", "/.well-known/oauth-authorization-server/v1/mcp", []string{"/.well-known/oauth-authorization-server/v1/mcp"}},
+		{"root trailing slash", "/", "/.well-known/oauth-authorization-server", []string{"/.well-known/oauth-authorization-server"}},
+		{"escaped issuer path", "/tenant%2Fname", "/.well-known/oauth-authorization-server/tenant%2Fname", []string{"/.well-known/oauth-authorization-server/tenant%2Fname"}},
+		{"RFC OIDC fallback", "/tenant", "/.well-known/openid-configuration/tenant", []string{"/.well-known/oauth-authorization-server/tenant", "/.well-known/openid-configuration/tenant"}},
+		{"legacy OIDC fallback", "/tenant/", "/tenant/.well-known/openid-configuration", []string{"/.well-known/oauth-authorization-server/tenant", "/.well-known/openid-configuration/tenant", "/tenant/.well-known/openid-configuration"}},
+		{"legacy OAuth fallback", "/tenant", "/tenant/.well-known/oauth-authorization-server", []string{"/.well-known/oauth-authorization-server/tenant", "/.well-known/openid-configuration/tenant", "/tenant/.well-known/openid-configuration", "/tenant/.well-known/oauth-authorization-server"}},
+		{"root OIDC fallback", "", "/.well-known/openid-configuration", []string{"/.well-known/oauth-authorization-server", "/.well-known/openid-configuration"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var paths []string
+			var issuerURL string
+			var mu sync.Mutex
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				path := r.URL.EscapedPath()
+				mu.Lock()
+				paths = append(paths, path)
+				mu.Unlock()
+				if path != tc.published {
+					http.NotFound(w, r)
+					return
+				}
+				json.NewEncoder(w).Encode(AuthServerMetadata{Issuer: issuerURL, AuthorizationEndpoint: "https://auth.example.com/authorize", TokenEndpoint: "https://auth.example.com/token"})
+			}))
+			defer srv.Close()
+			issuerURL = srv.URL + tc.issuerPath
+			metadata, err := discoverAuthServerMetadata(context.Background(), srv.URL+tc.issuerPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if metadata.TokenEndpoint != "https://auth.example.com/token" {
+				t.Fatalf("unexpected metadata: %+v", metadata)
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			if !reflect.DeepEqual(paths, tc.want) {
+				t.Fatalf("requests = %v, want %v", paths, tc.want)
+			}
+		})
+	}
+}
+
+func TestDiscoverDatadogShapedMetadata(t *testing.T) {
+	var base string
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/.well-known/oauth-protected-resource/v1/mcp":
+			json.NewEncoder(w).Encode(ProtectedResourceMetadata{Resource: base + "/v1/mcp", AuthorizationServers: []string{base + "/v1/mcp"}})
+		case "/.well-known/oauth-authorization-server/v1/mcp":
+			json.NewEncoder(w).Encode(AuthServerMetadata{
+				Issuer:                base + "/v1/mcp",
+				AuthorizationEndpoint: "https://us5.datadoghq.com/oauth2/v1/authorize",
+				TokenEndpoint:         "https://us5.datadoghq.com/api/v2/oauth2/token",
+				RegistrationEndpoint:  "https://us5.datadoghq.com/api/v2/oauth2/register",
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	base = server.URL
+	original := discoveryClient
+	discoveryClient = server.Client()
+	t.Cleanup(func() { discoveryClient = original })
+	cfg, resource, err := DiscoverFromMCPServer(context.Background(), base+"/v1/mcp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resource != base+"/v1/mcp" || cfg.TokenURL != "https://us5.datadoghq.com/api/v2/oauth2/token" || cfg.RegistrationEndpoint != "https://us5.datadoghq.com/api/v2/oauth2/register" {
+		t.Fatalf("incorrect discovery: resource=%s, config=%+v", resource, cfg)
+	}
+	if cfg.ClientID != "" {
+		t.Fatal("discovery must not register a client")
+	}
+}
+
+func TestAuthMetadataIncompleteResponseFallsBack(t *testing.T) {
+	var base string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/.well-known/oauth-authorization-server/tenant" {
+			w.Write([]byte(`{}`))
+			return
+		}
+		if r.URL.Path == "/.well-known/openid-configuration/tenant" {
+			json.NewEncoder(w).Encode(AuthServerMetadata{Issuer: base + "/tenant", AuthorizationEndpoint: "https://auth.example.com/authorize", TokenEndpoint: "https://auth.example.com/token"})
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+	base = srv.URL
+	_, err := discoverAuthServerMetadata(context.Background(), srv.URL+"/tenant")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAuthMetadataAllCandidatesFail(t *testing.T) {
+	var paths []string
+	var mu sync.Mutex
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		paths = append(paths, r.URL.Path)
+		mu.Unlock()
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+	_, err := discoverAuthServerMetadata(context.Background(), srv.URL+"/tenant")
+	if err == nil {
+		t.Fatal("expected discovery failure")
+	}
+	want := []string{"/.well-known/oauth-authorization-server/tenant", "/.well-known/openid-configuration/tenant", "/tenant/.well-known/openid-configuration", "/tenant/.well-known/oauth-authorization-server"}
+	mu.Lock()
+	defer mu.Unlock()
+	if !reflect.DeepEqual(paths, want) {
+		t.Fatalf("requests = %v, want %v", paths, want)
+	}
+	for _, path := range want {
+		if !strings.Contains(err.Error(), path) {
+			t.Errorf("error does not include failed endpoint %s: %v", path, err)
+		}
+	}
+}
+
+func TestAuthMetadataRejectsInvalidIssuer(t *testing.T) {
+	for _, issuer := range []string{"https:missing-host", "ftp://issuer.example", "//issuer.example", "http://issuer.example", "https://issuer.example?q=1", "https://issuer.example?", "https://issuer.example#fragment", "https://user@issuer.example", "://invalid"} {
+		t.Run(issuer, func(t *testing.T) {
+			_, err := discoverAuthServerMetadata(context.Background(), issuer)
+			if err == nil {
+				t.Fatal("expected invalid issuer error")
+			}
+		})
+	}
+}
+
+func TestDiscoveryRequiresMatchingMetadataIssuer(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		issuer    func(string) string
+		wantError bool
+	}{
+		{"exact match", func(want string) string { return want }, false},
+		{"missing issuer", func(string) string { return "" }, true},
+		{"other origin", func(string) string { return "https://other.example/tenant" }, true},
+		{"other path", func(want string) string { return want + "-other" }, true},
+		{"trailing slash differs", func(want string) string { return want + "/" }, true},
+		{"escaped spelling differs", func(want string) string { return strings.Replace(want, "tenant", "ten%61nt", 1) }, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var expected string
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				json.NewEncoder(w).Encode(AuthServerMetadata{Issuer: tc.issuer(expected), AuthorizationEndpoint: "https://auth.example/authorize", TokenEndpoint: "https://auth.example/token"})
+			}))
+			defer srv.Close()
+			expected = srv.URL + "/tenant"
+			metadata, err := discoverAuthServerMetadata(context.Background(), expected)
+			if tc.wantError {
+				if err == nil || metadata != nil {
+					t.Fatalf("accepted unbound metadata: %+v, %v", metadata, err)
+				}
+				if !strings.Contains(err.Error(), "issuer") {
+					t.Fatalf("error omitted issuer problem: %v", err)
+				}
+			} else if err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestMatchingIssuerDoesNotAllowMissingEndpoints(t *testing.T) {
+	for _, missing := range []string{"authorization_endpoint", "token_endpoint"} {
+		t.Run(missing, func(t *testing.T) {
+			var issuer string
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				metadata := AuthServerMetadata{Issuer: issuer, AuthorizationEndpoint: "https://auth.example/authorize", TokenEndpoint: "https://auth.example/token"}
+				if missing == "authorization_endpoint" {
+					metadata.AuthorizationEndpoint = ""
+				} else {
+					metadata.TokenEndpoint = ""
+				}
+				json.NewEncoder(w).Encode(metadata)
+			}))
+			defer srv.Close()
+			issuer = srv.URL
+			_, err := discoverAuthServerMetadata(context.Background(), issuer)
+			if err == nil || !strings.Contains(err.Error(), "missing "+missing) {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+// discoveryTransport lets scheme validation run without DNS or network access.
+type discoveryTransport func(*http.Request) (*http.Response, error)
+
+func (f discoveryTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestAuthMetadataSchemeValidationBeforeFetch(t *testing.T) {
+	original := discoveryClient
+	t.Cleanup(func() { discoveryClient = original })
+	for _, tc := range []struct {
+		issuer  string
+		allowed bool
+	}{
+		{"https://auth.example/tenant", true},
+		{"http://localhost:123/tenant", true},
+		{"http://LOCALHOST:123/tenant", true},
+		{"http://127.0.0.1:123/tenant", true},
+		{"http://[::1]:123/tenant", true},
+		{"http://localhost.evil.example/tenant", false},
+		{"http://127.0.0.1.nip.io/tenant", false},
+		{"ftp://localhost/tenant", false},
+		{"//localhost/tenant", false},
+	} {
+		t.Run(tc.issuer, func(t *testing.T) {
+			calls := 0
+			discoveryClient = &http.Client{Transport: discoveryTransport(func(*http.Request) (*http.Response, error) {
+				calls++
+				body, err := json.Marshal(AuthServerMetadata{Issuer: tc.issuer, AuthorizationEndpoint: "https://auth.example/authorize", TokenEndpoint: "https://auth.example/token"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(string(body))), Header: make(http.Header)}, nil
+			})}
+			_, err := discoverAuthServerMetadata(context.Background(), tc.issuer)
+			if tc.allowed {
+				if err != nil || calls != 1 {
+					t.Fatalf("expected one successful fetch; calls=%d, error=%v", calls, err)
+				}
+			} else if err == nil || calls != 0 {
+				t.Fatalf("expected rejection before fetch; calls=%d, error=%v", calls, err)
+			}
+		})
+	}
+}
+
+func TestAuthMetadataMismatchedIssuerFallsBack(t *testing.T) {
+	var issuer string
+	var paths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		metadata := AuthServerMetadata{Issuer: issuer, AuthorizationEndpoint: "https://auth.example/authorize", TokenEndpoint: "https://auth.example/token"}
+		if r.URL.Path == "/.well-known/oauth-authorization-server/tenant" {
+			metadata.Issuer += "/other"
+		}
+		json.NewEncoder(w).Encode(metadata)
+	}))
+	defer srv.Close()
+	issuer = srv.URL + "/tenant"
+	metadata, err := discoverAuthServerMetadata(context.Background(), issuer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if metadata.Issuer != issuer || !reflect.DeepEqual(paths, []string{"/.well-known/oauth-authorization-server/tenant", "/.well-known/openid-configuration/tenant"}) {
+		t.Fatalf("incorrect fallback: metadata=%+v, paths=%v", metadata, paths)
+	}
+}
+
+func TestDiscoverFromMCPServerIssuerTrailingSlash(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		advertisedSuffix string
+		metadataSuffix   string
+		wantError        bool
+	}{
+		{"both slashless", "", "", false},
+		{"both trailing slash", "/", "/", false},
+		{"advertised trailing slash", "/", "", true},
+		{"metadata trailing slash", "", "/", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var base string
+			srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/.well-known/oauth-protected-resource/mcp" {
+					json.NewEncoder(w).Encode(ProtectedResourceMetadata{Resource: base + "/mcp", AuthorizationServers: []string{base + tc.advertisedSuffix}})
+					return
+				}
+				json.NewEncoder(w).Encode(AuthServerMetadata{Issuer: base + tc.metadataSuffix, AuthorizationEndpoint: "https://auth.example/authorize", TokenEndpoint: "https://auth.example/token"})
+			}))
+			defer srv.Close()
+			base = srv.URL
+			original := discoveryClient
+			discoveryClient = srv.Client()
+			t.Cleanup(func() { discoveryClient = original })
+			cfg, resource, err := DiscoverFromMCPServer(context.Background(), base+"/mcp")
+			if tc.wantError {
+				if err == nil || cfg != nil || resource != "" {
+					t.Fatalf("accepted mismatched metadata: config=%+v, resource=%q, error=%v", cfg, resource, err)
+				}
+				for _, detail := range []string{strconv.Quote(base + tc.advertisedSuffix), strconv.Quote(base + tc.metadataSuffix), "must match exactly, including trailing slashes", "server operator"} {
+					if !strings.Contains(err.Error(), detail) {
+						t.Errorf("error missing %q: %v", detail, err)
+					}
+				}
+			} else if err != nil || cfg == nil || resource != base+"/mcp" {
+				t.Fatalf("matching metadata rejected: config=%+v, resource=%q, error=%v", cfg, resource, err)
+			}
+		})
 	}
 }

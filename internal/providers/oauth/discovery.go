@@ -4,10 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/majorcontext/moat/internal/log"
@@ -24,6 +27,7 @@ type ProtectedResourceMetadata struct {
 
 // AuthServerMetadata represents RFC 8414 authorization server metadata.
 type AuthServerMetadata struct {
+	Issuer                string `json:"issuer"`
 	AuthorizationEndpoint string `json:"authorization_endpoint"`
 	TokenEndpoint         string `json:"token_endpoint"`
 	RegistrationEndpoint  string `json:"registration_endpoint,omitempty"`
@@ -119,35 +123,67 @@ func discoverProtectedResourceMetadata(ctx context.Context, serverURL string) (*
 }
 
 // discoverAuthServerMetadata fetches RFC 8414 authorization server metadata.
-// It tries the standard endpoint first, then falls back to OpenID Connect discovery.
+// The well-known component precedes the issuer path. OIDC discovery tries
+// the RFC 8414 location before the legacy OIDC suffix location.
 func discoverAuthServerMetadata(ctx context.Context, authServerURL string) (*AuthServerMetadata, error) {
-	// Try RFC 8414 first.
-	asmURL := authServerURL + "/.well-known/oauth-authorization-server"
-	log.Debug("trying OAuth AS metadata", "url", asmURL)
-	asm, asmErr := fetchJSON[AuthServerMetadata](ctx, asmURL)
-	if asmErr == nil {
-		if valErr := validateAuthServerMetadata(asm); valErr != nil {
-			return nil, valErr
+	issuer, err := url.Parse(authServerURL)
+	if err != nil {
+		return nil, fmt.Errorf("parsing authorization server URL: %w", err)
+	}
+	if issuer.Host == "" || issuer.User != nil || issuer.RawQuery != "" || issuer.ForceQuery || issuer.Fragment != "" {
+		return nil, fmt.Errorf("authorization server URL must have a host and no userinfo, query, or fragment")
+	}
+	// DiscoverFromMCPServer requires HTTPS before calling this helper.
+	// HTTP loopback support is only reachable from tests using this helper directly.
+	loopback := strings.EqualFold(issuer.Hostname(), "localhost")
+	if ip := net.ParseIP(issuer.Hostname()); ip != nil {
+		loopback = ip.IsLoopback()
+	}
+	if issuer.Scheme != "https" && (issuer.Scheme != "http" || !loopback) {
+		return nil, fmt.Errorf("authorization server URL must use HTTPS (HTTP is only allowed on loopback)")
+	}
+	origin := issuer.Scheme + "://" + issuer.Host
+	path := strings.TrimSuffix(issuer.EscapedPath(), "/")
+	candidates := []string{
+		origin + "/.well-known/oauth-authorization-server" + path,
+		origin + "/.well-known/openid-configuration" + path,
+	}
+	if path != "" {
+		candidates = append(candidates,
+			origin+path+"/.well-known/openid-configuration",
+			// Compatibility with servers that worked with Moat's former suffix lookup.
+			origin+path+"/.well-known/oauth-authorization-server",
+		)
+	}
+	var failures []error
+	for _, candidate := range candidates {
+		log.Debug("trying authorization server metadata", "url", candidate)
+		metadata, fetchErr := fetchJSON[AuthServerMetadata](ctx, candidate)
+		if fetchErr != nil {
+			failures = append(failures, fetchErr)
+			if ctx.Err() != nil {
+				break
+			}
+			continue
 		}
-		return asm, nil
+		if err := validateAuthServerMetadata(metadata, authServerURL); err != nil {
+			failures = append(failures, fmt.Errorf("invalid metadata from %s: %w", candidate, err))
+			continue
+		}
+		return metadata, nil
 	}
-	log.Debug("OAuth AS metadata failed, trying OIDC", "error", asmErr)
-
-	// Fall back to OIDC.
-	oidcURL := authServerURL + "/.well-known/openid-configuration"
-	log.Debug("trying OIDC discovery", "url", oidcURL)
-	asm, oidcErr := fetchJSON[AuthServerMetadata](ctx, oidcURL)
-	if oidcErr != nil {
-		return nil, fmt.Errorf("fetching auth server metadata: %w", oidcErr)
-	}
-	if valErr := validateAuthServerMetadata(asm); valErr != nil {
-		return nil, valErr
-	}
-	return asm, nil
+	return nil, fmt.Errorf("fetching auth server metadata: %w", errors.Join(failures...))
 }
 
-// validateAuthServerMetadata checks that required fields are present.
-func validateAuthServerMetadata(asm *AuthServerMetadata) error {
+// validateAuthServerMetadata binds metadata to the requested issuer (RFC 8414
+// section 3.3) and checks the endpoints required for authorization-code grants.
+func validateAuthServerMetadata(asm *AuthServerMetadata, expectedIssuer string) error {
+	if asm.Issuer == "" {
+		return fmt.Errorf("auth server metadata missing issuer: the authorization server must publish issuer %q to match authorization_servers in the MCP server protected resource metadata", expectedIssuer)
+	}
+	if asm.Issuer != expectedIssuer {
+		return fmt.Errorf("auth server metadata issuer %q does not match requested issuer %q: the MCP server authorization_servers value and the authorization server metadata issuer must match exactly, including trailing slashes; ask the server operator to correct the metadata", asm.Issuer, expectedIssuer)
+	}
 	if asm.AuthorizationEndpoint == "" {
 		return fmt.Errorf("auth server metadata missing authorization_endpoint")
 	}

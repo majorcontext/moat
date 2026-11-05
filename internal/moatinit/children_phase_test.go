@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -263,7 +264,7 @@ func TestDindSetupTimeoutFatal(t *testing.T) {
 func TestHostSocketSetup(t *testing.T) {
 	// DOCKER-10/12/13: GID detected from an in-container stat; group
 	// created when the GID is unowned; moatuser joins the owning group.
-	newSockSys := func(t *testing.T) *testSys {
+	newSockSys := func(t *testing.T) (*testSys, string) {
 		ts := newTestSys(t, 0, true)
 		dir := filepath.Join(ts.Root, "var/run")
 		if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -274,12 +275,21 @@ func TestHostSocketSetup(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Cleanup(func() { l.Close() })
-		return ts
+		info, err := os.Lstat(filepath.Join(dir, "docker.sock"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		stat, ok := info.Sys().(*syscall.Stat_t)
+		if !ok {
+			t.Fatal("socket stat has no ownership data")
+		}
+		// A socket can inherit its parent directory's group, which need not be
+		// the test process's primary GID (notably under macOS temp directories).
+		return ts, strconv.FormatUint(uint64(stat.Gid), 10)
 	}
-	gid := strconv.Itoa(os.Getgid()) // the test socket's actual gid
 
 	// Case A: a group already owns the GID — reused, no groupadd.
-	ts := newSockSys(t)
+	ts, gid := newSockSys(t)
 	ts.groupsByGID[gid] = "staff"
 	ctx, stderr := newTestContext(ts, Config{DockerGID: "999"})
 	if err := dockerSetupPhase(ctx); err != nil {
@@ -301,7 +311,7 @@ func TestHostSocketSetup(t *testing.T) {
 
 	// Case B: unowned GID — groupadd -g <gid> moat-docker; the group map
 	// updates when groupadd runs (as the real getent re-resolution would).
-	ts2 := newSockSys(t)
+	ts2, gid2 := newSockSys(t)
 	ts2.runHook = func(c Cmd) (int, error) {
 		if c.Argv[0] == "groupadd" {
 			ts2.groupsByGID[c.Argv[2]] = "moat-docker"
@@ -317,7 +327,7 @@ func TestHostSocketSetup(t *testing.T) {
 		cmds2 = append(cmds2, strings.Join(c.Argv, " "))
 	}
 	joined := strings.Join(cmds2, "\n")
-	if !strings.Contains(joined, "groupadd -g "+gid+" moat-docker") {
+	if !strings.Contains(joined, "groupadd -g "+gid2+" moat-docker") {
 		t.Errorf("groupadd missing/wrong: %v", cmds2)
 	}
 	if !strings.Contains(joined, "usermod -aG moat-docker moatuser") {
