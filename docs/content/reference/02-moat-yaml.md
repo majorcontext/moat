@@ -912,11 +912,11 @@ rules:
 
 Behavior and limits:
 
-- **Operation matching (important).** Keep matches a rule's `operation` **case-insensitively** against the runtime operation string `"<method> <host><path>"` (e.g. `"post api.example.com/repos"` — the method is lowercased) using `path.Match`, where `*` does **not** cross `/`. So `operation: "POST api.example.com/*"` never matches an HTTP request (uppercase method, and `*` stops at the first `/`). For HTTP body rules, match in the `when` clause on the lowercased `params.host` / `params.method` / `params.path` and omit `operation` (an empty `operation` is a catch-all), as shown above.
+- **Operation matching (important).** Keep matches a rule's `operation` **case-insensitively** against the runtime operation string `"<method> <host><path>"` (e.g. `"post api.example.com/repos"` — the method is lowercased) using `path.Match`, where `*` does **not** cross `/`. So `operation: "POST api.example.com/*"` never matches an HTTP request (uppercase method, and `*` stops at the first `/`). Match hosts and paths in the `when` clause on the lowercased `params.host` / `params.method` / `params.path`, as shown above. An exact `operation` with a lowercase method, such as `operation: "post api.example.com/graphql"`, also works, and narrows which requests have their body read (next item).
 - **Authoring guard:** `has(params.body)` is always true for body-carrying requests, so test for a populated body with `params.body != null`. An empty/whitespace body is passed as `null`. A rule that compiles can still evaluate falsy and fail open — validate that your rule actually *denies* a matching request, not just that the policy loads.
-- **JSON only, fail-closed.** Bodies are inspected only when `Content-Type` is `application/json`. Once **any** rule in the `http` scope references `params.body`, every non-JSON, `Content-Encoding`-compressed (e.g. gzip), duplicate-key, malformed, or oversized body is **denied** — for *all* hosts in the scope, not just the host a body rule targets. Adding one body rule effectively makes the whole `http` scope JSON-only. Scope body rules deliberately.
+- **JSON only, fail-closed.** Bodies are inspected only when `Content-Type` is `application/json`. When a body rule applies to a request, a non-JSON, `Content-Encoding`-compressed (e.g. gzip), duplicate-key, malformed, or oversized body is **denied**. A body rule applies to every request whose operation matches its `operation`; a body rule **without** an `operation` applies to every request in the `http` scope, for all hosts, which makes the whole scope JSON-only. Pin body rules to an `operation` to keep other traffic (for example `git push`, whose body is not JSON) unaffected. With [`github.scope: workspace`](#githubscope), an unpinned body rule is rejected at run start.
 - **HTTPS only.** Body inspection runs on intercepted HTTPS (CONNECT) requests. Plain `http://` requests are not inspected — rely on `network.policy`/`network.rules` to disallow plaintext egress to sensitive hosts.
-- **Not covered.** `params` exposes `method`, `host`, `path`, and `body` only — not URL query parameters, request headers, response bodies, or non-HTTP egress. Pair body rules with strict host/path rules and a restrictive `network.policy` as the primary exfil control; body inspection is a narrow opt-in hardening primitive, not a complete DLP control.
+- **Not covered.** `params` exposes `method`, `host`, `path`, `query` (the raw, undecoded query string; `""` when there is none), and `body` only — not request headers, response bodies, or non-HTTP egress. Pair body rules with strict host/path rules and a restrictive `network.policy` as the primary exfil control; body inspection is a narrow opt-in hardening primitive, not a complete DLP control.
 - **Daemon upgrade.** Request-body rules require a proxy daemon built with body-inspection support. If the running daemon is older, `moat run` fails with a clear error — run `moat proxy restart` to replace it with a fresh daemon.
 
 ### network.host
@@ -961,6 +961,64 @@ Inside the container:
 ```sh
 OLLAMA_HOST=http://$MOAT_HOST_GATEWAY:11434 ollama run llama3
 ```
+
+---
+
+## GitHub
+
+### github.scope
+
+Limits what the `github` grant can change on GitHub to the repositories checked out in the workspace.
+
+```yaml
+grants: [github]
+github:
+  scope: workspace
+```
+
+- Type: `string`
+- Values: `any`, `workspace`
+- Default: `any`
+
+With `workspace`, moat finds the GitHub repositories in the workspace when a run starts (the workspace, nested clones, worktrees, and submodules, skipping dependency directories such as `node_modules` and `vendor`). It approves them on the project's first run, and adds a Keep policy to the proxy that denies pushes and other writes to any other repository, including GraphQL mutations it cannot attribute to an approved repository, apart from comments and similar discussion on issues and pull requests. A repository that appears in a later run needs approval at a prompt or with [`moat github allow`](./01-cli.md#moat-github). Approvals are stored in `~/.moat/github-repos.json`, outside the workspace.
+
+Once a project has run with `workspace`, it stays scoped (with the `other_repos` setting it last had) even if `moat.yaml` no longer sets it; `moat github forget --all` turns it off.
+
+A run with `scope: workspace` fails before it starts if it also has an `ssh:` grant, an `mcp:` server with `auth.grant: github`, or uses GitHub Copilot.
+
+See [Scoping GitHub access to the workspace](../guides/19-github-scope.md).
+
+### github.other_repos
+
+Access to repositories outside the workspace when `github.scope` is `workspace`.
+
+```yaml
+github:
+  scope: workspace
+  other_repos: none
+```
+
+- Type: `string`
+- Values: `read`, `none`
+- Default: `read`
+
+`read` allows fetching and reading other repositories. `none` also denies git fetches, REST reads, and code search for them; GraphQL queries are still allowed, so `none` is not a confidentiality boundary.
+
+### github.extra_repos
+
+Additional repositories runs may write to when `github.scope` is `workspace`.
+
+```yaml
+github:
+  scope: workspace
+  extra_repos:
+    - majorcontext/docs
+```
+
+- Type: `array[string]` (`owner/repo`)
+- Default: `[]`
+
+Each entry is approved the same way as a discovered repository: on the project's first run, or at the prompt on a later run.
 
 ---
 
@@ -1308,6 +1366,8 @@ An ordinary Anthropic key is injected for `api.anthropic.com` as well. A gateway
 Trailing slashes are stripped, so `https://gw.example.com/` and `https://gw.example.com` behave identically.
 
 A `localhost` (or `127.0.0.1`) URL names a service on your machine, which the container cannot reach at its own loopback address. Moat rewrites it to the container's host-gateway address and allows that port for the run, so you do not need a matching `network.host` entry.
+
+The proxy injects a credential over plain `http://` only for a `localhost` endpoint, where the request never leaves your machine. For any other host, use `https://`: an `http://` request to a remote endpoint that would carry a credential is refused with `403`.
 
 Setting `base_url` starts the proxy on its own — a run needs no grants and no strict policy for it to take effect. Without a grant nothing is injected, so the endpoint's key has to come from `env` or `secrets` instead.
 

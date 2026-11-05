@@ -73,6 +73,8 @@ The proxy injects an `Authorization` header, using the scheme each host expects:
 
 The container receives `GH_TOKEN` set to a format-valid placeholder so the gh CLI works without prompting. Git is configured with `http.proxyAuthMethod=basic` so it authenticates to the proxy and can establish the HTTPS tunnel.
 
+To limit what a run can change on GitHub to the repositories checked out in its workspace, set `github.scope: workspace` in `moat.yaml`. See [Scoping GitHub access to the workspace](../guides/19-github-scope.md).
+
 For `moat copilot` runs, the same GitHub grant is also injected for Copilot API hosts, and the container receives a format-valid `COPILOT_GITHUB_TOKEN` placeholder. The GitHub token must be Copilot-capable: use a GitHub CLI OAuth token from an account with Copilot access, or a fine-grained PAT from your personal account with the **Copilot Requests** account permission.
 
 Moat validates Copilot access before starting a Copilot run by calling `api.github.com/copilot_internal/user` with the stored GitHub credential.

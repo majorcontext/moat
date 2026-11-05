@@ -222,10 +222,11 @@ func TestRestoreRuns_ScopesStoreToRunProfile(t *testing.T) {
 
 	reg := NewRegistry()
 	restored := RestoreRuns(context.Background(), reg, []PersistedRun{{
-		RunID:       "r1",
-		AuthToken:   "tok",
-		Grants:      []string{"github"},
-		CredProfile: "vibrant",
+		RunID:            "r1",
+		AuthToken:        "tok",
+		Grants:           []string{"github"},
+		PolicyStateKnown: true,
+		CredProfile:      "vibrant",
 	}})
 
 	if restored != 1 {
@@ -241,10 +242,11 @@ func TestRestoreRuns_SkipsRunWithInvalidProfile(t *testing.T) {
 
 	reg := NewRegistry()
 	restored := RestoreRuns(context.Background(), reg, []PersistedRun{{
-		RunID:       "evil",
-		AuthToken:   "tok",
-		Grants:      []string{"github"},
-		CredProfile: "../../../etc",
+		RunID:            "evil",
+		AuthToken:        "tok",
+		Grants:           []string{"github"},
+		PolicyStateKnown: true,
+		CredProfile:      "../../../etc",
 	}})
 
 	if restored != 0 {
@@ -643,10 +645,12 @@ type codexRefreshSpy struct {
 	refreshed atomic.Bool
 }
 
-func (s *codexRefreshSpy) Name() string                                                  { return "codex" }
+func (s *codexRefreshSpy) Name() string { return "codex" }
+
 func (s *codexRefreshSpy) Grant(context.Context) (*provider.Credential, error)           { return nil, nil }
 func (s *codexRefreshSpy) ConfigureProxy(provider.ProxyConfigurer, *provider.Credential) {}
 func (s *codexRefreshSpy) ContainerEnv(*provider.Credential) []string                    { return nil }
+
 func (s *codexRefreshSpy) ContainerMounts(*provider.Credential, string) ([]provider.MountConfig, string, error) {
 	return nil, "", nil
 }

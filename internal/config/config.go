@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/majorcontext/moat/internal/githubscope"
 	"github.com/majorcontext/moat/internal/keep"
 	"github.com/majorcontext/moat/internal/langserver"
 	"github.com/majorcontext/moat/internal/mcpcatalog"
@@ -43,6 +44,7 @@ type Config struct {
 	Devices      []DeviceEntry     `yaml:"devices,omitempty" doc:"host serial devices to expose, e.g. an ESP32 dev board. Each entry is matched by USB vendor/product ID and pinned to a specific device on first use."`
 	Ports        map[string]int    `yaml:"ports,omitempty"`
 	Network      NetworkConfig     `yaml:"network,omitempty"`
+	GitHub       GitHubConfig      `yaml:"github,omitempty"`
 	Command      []string          `yaml:"command,omitempty"`
 	Claude       ClaudeConfig      `yaml:"claude,omitempty"`
 	Copilot      CopilotConfig     `yaml:"copilot,omitempty"`
@@ -261,6 +263,18 @@ func (c *Config) ValidateServices(serviceNames []string) error {
 		}
 	}
 	return nil
+}
+
+// GitHubConfig scopes what the github grant can change on GitHub.
+//
+// With Scope set to "workspace", moat finds the GitHub repositories checked
+// out in the workspace, records them outside the workspace on the first run,
+// and adds a Keep policy to the proxy that denies writes to any other
+// repository. Repositories that appear in later runs need the user's approval.
+type GitHubConfig struct {
+	Scope      string   `yaml:"scope,omitempty" doc:"any (default) or workspace. workspace limits what the github grant can change on GitHub to the repositories checked out in the workspace."`
+	OtherRepos string   `yaml:"other_repos,omitempty" doc:"read (default) or none: access to GitHub repositories outside the workspace when scope is workspace."`
+	ExtraRepos []string `yaml:"extra_repos,omitempty" doc:"additional owner/repo names the run may write to when scope is workspace; each is approved on first use like a discovered repository."`
 }
 
 // NetworkConfig configures network access policies for the agent.
@@ -686,6 +700,10 @@ func Load(dir string) (*Config, error) {
 		return nil, fmt.Errorf("\"network.allow\" is no longer supported, use \"network.rules\" instead\n\nExample:\n  network:\n    rules:\n      - \"api.github.com\"")
 	}
 
+	if err := cfg.GitHub.validate(); err != nil {
+		return nil, err
+	}
+
 	// Validate network.host ports
 	seen := make(map[int]bool, len(cfg.Network.Host))
 	for _, port := range cfg.Network.Host {
@@ -1078,4 +1096,42 @@ func ValidateHTTPURL(raw string) (*url.URL, string, error) {
 		return nil, "", fmt.Errorf("missing host in %q", raw)
 	}
 	return u, normalized, nil
+}
+
+// validate checks the github: block and normalizes extra_repos to lowercase
+// owner/repo names.
+func (g *GitHubConfig) validate() error {
+	switch g.Scope {
+	case "", githubscope.ScopeAny, githubscope.ScopeWorkspace:
+	default:
+		return fmt.Errorf("github.scope: invalid value %q — use \"workspace\" to limit GitHub writes to this workspace's repositories, or \"any\"", g.Scope)
+	}
+	switch g.OtherRepos {
+	case "", githubscope.OtherReposRead, githubscope.OtherReposNone:
+	default:
+		return fmt.Errorf("github.other_repos: invalid value %q — use \"read\" or \"none\"", g.OtherRepos)
+	}
+	if g.Scope != githubscope.ScopeWorkspace && (g.OtherRepos != "" || len(g.ExtraRepos) > 0) {
+		return fmt.Errorf("github.other_repos and github.extra_repos only apply with github.scope: workspace\n\n" +
+			"  github:\n    scope: workspace")
+	}
+	seen := map[string]bool{}
+	normalized := make([]string, 0, len(g.ExtraRepos))
+	for _, r := range g.ExtraRepos {
+		n, err := githubscope.NormalizeRepo(r)
+		if err != nil {
+			return fmt.Errorf("github.extra_repos: %w", err)
+		}
+		if !seen[n] {
+			seen[n] = true
+			normalized = append(normalized, n)
+		}
+	}
+	g.ExtraRepos = normalized
+	return nil
+}
+
+// Settings converts the github: block for the githubscope package.
+func (g GitHubConfig) Settings() githubscope.Settings {
+	return githubscope.Settings{Scope: g.Scope, OtherRepos: g.OtherRepos, ExtraRepos: g.ExtraRepos}
 }

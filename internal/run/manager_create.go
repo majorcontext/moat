@@ -32,6 +32,7 @@ import (
 	"github.com/majorcontext/moat/internal/credential"
 	"github.com/majorcontext/moat/internal/daemon"
 	"github.com/majorcontext/moat/internal/deps"
+	"github.com/majorcontext/moat/internal/githubscope"
 	"github.com/majorcontext/moat/internal/image"
 
 	internalkeep "github.com/majorcontext/moat/internal/keep"
@@ -164,6 +165,15 @@ func (m *Manager) Create(ctx context.Context, opts Options) (resRun *Run, retErr
 		if err := validateCopilotGitHubGrant(ctx, opts.Config, opts.Grants, store); err != nil {
 			return nil, err
 		}
+	}
+
+	// GitHub scope: decide what the github grant may change before any
+	// resources are allocated, so a configuration the policy cannot cover
+	// (ssh:github.com, a github-granted MCP server, Copilot) fails cleanly.
+	var githubMeta map[string]githubscope.RepoMeta
+	githubPlan, ghErr := prepareGitHubScope(opts)
+	if ghErr != nil {
+		return nil, ghErr
 	}
 
 	// Get ports from config
@@ -678,6 +688,31 @@ func (m *Manager) Create(ctx context.Context, opts Options) (resRun *Run, retErr
 					policyYAML["llm-gateway"] = yamlBytes
 				}
 			}
+		}
+
+		// github.scope: workspace adds its rules to the http scope, merged with
+		// any network.keep_policy (Keep evaluates one rule file per scope).
+		if githubPlan != nil {
+			if err := checkGitHubScopeCapability(daemonCapabilities); err != nil {
+				return nil, err
+			}
+			var ghToken string
+			if store != nil {
+				if cred, _, credErr := loadCredentialForGrant(store, "github", "github"); credErr == nil {
+					ghToken = cred.Token
+				} else {
+					return nil, fmt.Errorf("github.scope: loading github credential: %w", credErr)
+				}
+			}
+			ghPolicy, ghMeta, ghErr := githubScopePolicy(ctx, githubPlan, ghToken)
+			if ghErr != nil {
+				return nil, ghErr
+			}
+			policyYAML, policyRuleSets, ghErr = mergeGitHubScopePolicy(ghPolicy, policyYAML, policyRuleSets)
+			if ghErr != nil {
+				return nil, ghErr
+			}
+			githubMeta = ghMeta
 		}
 
 		// Determine whether any file/pack policy inspects the request body
@@ -2276,6 +2311,32 @@ region = %s
 		}()
 	}
 
+	cleanupContainerSetup := func() {
+		// Clean up BuildKit resources on failure
+		if buildkitCfg.Enabled && r.BuildkitContainerID != "" {
+			_ = m.defaultRuntime().StopContainer(ctx, r.BuildkitContainerID)   //nolint:errcheck
+			_ = m.defaultRuntime().RemoveContainer(ctx, r.BuildkitContainerID) //nolint:errcheck
+			netMgr := m.defaultRuntime().NetworkManager()
+			if netMgr != nil {
+				_ = netMgr.RemoveNetwork(ctx, r.NetworkID) //nolint:errcheck
+			}
+		}
+		// Clean up proxy servers if container creation fails
+		cleanupDaemonRun()
+		cleanupSSH(sshServer)
+		cleanupAgentConfig(claudeConfig)
+		cleanupAgentConfig(codexConfig)
+		cleanupAgentConfig(geminiConfig)
+		cleanupAgentConfig(copilotConfig)
+	}
+	// Reject approval changes before paying for container creation, and repeat
+	// validation during the final commit in case they change after this check.
+	if githubPlan != nil {
+		if err := validateGitHubScopePlan(githubPlan, githubMeta); err != nil {
+			cleanupContainerSetup()
+			return nil, err
+		}
+	}
 	// Create container
 	containerID, err := m.defaultRuntime().CreateContainer(ctx, container.Config{
 		Name:         r.ID,
@@ -2300,22 +2361,7 @@ region = %s
 		Ulimits:      ulimits,
 	})
 	if err != nil {
-		// Clean up BuildKit resources on failure
-		if buildkitCfg.Enabled && r.BuildkitContainerID != "" {
-			_ = m.defaultRuntime().StopContainer(ctx, r.BuildkitContainerID)   //nolint:errcheck
-			_ = m.defaultRuntime().RemoveContainer(ctx, r.BuildkitContainerID) //nolint:errcheck
-			netMgr := m.defaultRuntime().NetworkManager()
-			if netMgr != nil {
-				_ = netMgr.RemoveNetwork(ctx, r.NetworkID) //nolint:errcheck
-			}
-		}
-		// Clean up proxy servers if container creation fails
-		cleanupDaemonRun()
-		cleanupSSH(sshServer)
-		cleanupAgentConfig(claudeConfig)
-		cleanupAgentConfig(codexConfig)
-		cleanupAgentConfig(geminiConfig)
-		cleanupAgentConfig(copilotConfig)
+		cleanupContainerSetup()
 		return nil, fmt.Errorf("creating container: %w", err)
 	}
 
@@ -2409,13 +2455,23 @@ region = %s
 		if rmErr := m.defaultRuntime().RemoveContainer(ctx, containerID); rmErr != nil {
 			log.Debug("failed to remove container during cleanup", "error", rmErr)
 		}
-		cleanupDaemonRun()
-		cleanupAgentConfig(claudeConfig)
-		cleanupAgentConfig(codexConfig)
-		cleanupAgentConfig(geminiConfig)
+		cleanupContainerSetup()
 		return nil, fmt.Errorf("opening audit store: %w", err)
 	}
 	r.AuditStore = auditStore
+
+	// Persist the scope only after all fallible setup has succeeded. The
+	// store checks that approvals still match the snapshot used by the policy.
+	if githubPlan != nil {
+		if err := commitGitHubScope(githubPlan, githubMeta); err != nil {
+			_ = auditStore.Close()
+			if rmErr := m.defaultRuntime().RemoveContainer(ctx, containerID); rmErr != nil {
+				log.Debug("failed to remove container during cleanup", "error", rmErr)
+			}
+			cleanupContainerSetup()
+			return nil, err
+		}
+	}
 
 	// Log container creation event, including privileged mode for security compliance
 	containerAuditData := audit.ContainerData{Action: "created"}

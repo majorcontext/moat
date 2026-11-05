@@ -64,7 +64,7 @@ func walkStruct(t reflect.Type, prefix string, b *strings.Builder) {
 
 // unwrapPtr dereferences pointer types to their element type.
 func unwrapPtr(t reflect.Type) reflect.Type {
-	for t.Kind() == reflect.Ptr {
+	for t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
 	return t

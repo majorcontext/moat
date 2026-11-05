@@ -25,6 +25,12 @@ import (
 // plaintext, protected by file permissions (0600). On restore, provider
 // credentials are re-resolved from the encrypted credential store.
 type PersistedRun struct {
+	// Older daemons did not save policy inputs. Never silently restore a
+	// GitHub credential when its previous restrictions are unknown.
+	PolicyStateKnown  bool                     `json:"policy_state_known,omitempty"`
+	PolicyYAML        map[string][]byte        `json:"policy_yaml,omitempty"`
+	PolicyRuleSets    []PolicyRuleSetSpec      `json:"policy_rule_sets,omitempty"`
+	PolicyRequired    bool                     `json:"policy_required,omitempty"`
 	AuthToken         string                   `json:"auth_token"`
 	RunID             string                   `json:"run_id"`
 	ContainerID       string                   `json:"container_id,omitempty"`
@@ -57,6 +63,9 @@ type PersistedRun struct {
 type persistedFile struct {
 	Version int            `json:"version"`
 	Runs    []PersistedRun `json:"runs"`
+	// Older daemons only read Runs. Keep policy-bearing auth tokens out of
+	// that field so a stale binary can never restore credentials unscoped.
+	PolicyRuns []PersistedRun `json:"policy_runs,omitempty"`
 }
 
 // RunPersister manages saving and loading the run registry to disk.
@@ -87,6 +96,10 @@ func (p *RunPersister) Save() error {
 	for _, rc := range entries {
 		rc.mu.RLock()
 		pr := PersistedRun{
+			PolicyStateKnown:  true,
+			PolicyYAML:        rc.PolicyYAML,
+			PolicyRuleSets:    rc.PolicyRuleSets,
+			PolicyRequired:    len(rc.KeepEngines) > 0 || len(rc.PolicyYAML) > 0 || len(rc.PolicyRuleSets) > 0,
 			AuthToken:         rc.AuthToken,
 			RunID:             rc.RunID,
 			ContainerID:       rc.ContainerID,
@@ -110,7 +123,14 @@ func (p *RunPersister) Save() error {
 		runs = append(runs, pr)
 	}
 
-	file := persistedFile{Version: 1, Runs: runs}
+	file := persistedFile{Version: 1}
+	for _, run := range runs {
+		if run.PolicyRequired {
+			file.PolicyRuns = append(file.PolicyRuns, run)
+		} else {
+			file.Runs = append(file.Runs, run)
+		}
+	}
 	data, err := json.MarshalIndent(file, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal persisted runs: %w", err)
@@ -195,7 +215,7 @@ func (p *RunPersister) Load() ([]PersistedRun, error) {
 	// Try versioned format first.
 	var file persistedFile
 	if err := json.Unmarshal(data, &file); err == nil && file.Version > 0 {
-		return file.Runs, nil
+		return append(file.Runs, file.PolicyRuns...), nil
 	}
 
 	// Fall back to legacy bare-array format.
@@ -235,114 +255,154 @@ func RestoreRunsWithSerial(ctx context.Context, registry *Registry, runs []Persi
 	}
 	restored := 0
 	for _, pr := range runs {
-		// Guard against a tampered persist file: the profile flows into the
-		// credential store path, so reject traversal before opening any store.
-		// Mirrors the boundary guard in handleRegisterRun — keep both.
-		if err := credential.ValidateProfile(pr.CredProfile); err != nil {
-			log.Warn("restore: invalid profile, skipping run",
-				"run_id", pr.RunID, "profile", pr.CredProfile, "error", err)
-			continue
+		if restoreRun(ctx, registry, pr, listen, key) {
+			restored++
 		}
-
-		rc := NewRunContext(pr.RunID)
-		rc.ContainerID = pr.ContainerID
-		rc.Grants = pr.Grants
-		rc.MCPServers = pr.MCPServers
-		rc.NetworkPolicy = pr.NetworkPolicy
-		rc.NetworkAllow = pr.NetworkAllow
-		rc.AWSConfig = pr.AWSConfig
-		rc.TransformerSpecs = pr.TransformerSpecs
-		rc.CopilotGitHubAuth = pr.CopilotGitHubAuth
-		rc.CredProfile = pr.CredProfile
-		rc.AllowedHostPorts = pr.AllowedHostPorts
-
-		// Open the store scoped to this run's profile — the daemon serves runs
-		// from many profiles, so a single default-profile store would re-resolve
-		// the wrong credentials (the same bug as token refresh).
-		store, err := credential.NewProfileStore(rc.CredProfile, key)
-		if err != nil {
-			log.Warn("restore: cannot open credential store, skipping run",
-				"run_id", pr.RunID, "error", err)
-			continue
-		}
-
-		// syncRefresh=false: these containers are already running, and
-		// StartTokenRefresh below performs an initial refresh of its own.
-		// A blocking exchange here is serialized across every restored run by
-		// codexRefreshMu, so one unreachable token endpoint would stall daemon
-		// startup by its full timeout for each run in turn.
-		if err := resolveCredentials(rc, pr.Grants, pr.MCPServers, store, false); err != nil {
-			log.Warn("restore: failed to resolve credentials, skipping run",
-				"run_id", pr.RunID, "error", err)
-			continue
-		}
-
-		// Re-open the run's serial listeners before the registry can observe
-		// it, on the same ports the container's MOAT_SERIAL_*_URL froze at
-		// create. A run with devices but no listener (no broker, or a port
-		// now occupied) is skipped: restoring it without working devices
-		// would look like dead hardware to the agent.
-		if len(pr.SerialDevices) > 0 {
-			if listen == nil {
-				log.Warn("restore: daemon has no serial broker, skipping run with devices",
-					"run_id", pr.RunID, "devices", len(pr.SerialDevices))
-				continue
-			}
-			if err := listen(rc, pr.SerialDevices, pr.SerialBindAddr, pr.SerialAddrs); err != nil {
-				log.Warn("restore: cannot re-open serial listeners, skipping run",
-					"run_id", pr.RunID, "error", err)
-				continue
-			}
-			rc.SerialDevices = pr.SerialDevices
-			rc.SerialBindAddr = pr.SerialBindAddr
-			rc.SerialAddrs = pr.SerialAddrs
-		}
-
-		// Create a per-run context and set cancel BEFORE registering so that
-		// a concurrent handleUnregisterRun sees a valid cancel function.
-		// Set up AWS credentials BEFORE RegisterWithToken so the RunContext is
-		// fully initialized before the proxy can observe it.
-		// This matches the ordering in handleRegisterRun.
-		runCtx, cancel := context.WithCancel(ctx)
-		rc.SetRefreshCancel(cancel)
-
-		// Start token refresh if grants are present.
-		if len(pr.Grants) > 0 {
-			StartTokenRefresh(runCtx, rc, pr.Grants)
-		}
-
-		// Set up AWS credential provider if configured.
-		if pr.AWSConfig != nil {
-			awsProvider, awsErr := awsprov.NewCredentialProvider(
-				runCtx,
-				awsprov.CredentialProviderConfig{
-					RoleARN:         pr.AWSConfig.RoleARN,
-					Region:          pr.AWSConfig.Region,
-					SessionDuration: pr.AWSConfig.SessionDuration,
-					ExternalID:      pr.AWSConfig.ExternalID,
-					Profile:         pr.AWSConfig.Profile,
-				},
-				"moat-"+pr.RunID,
-			)
-			if awsErr != nil {
-				log.Warn("restore: failed to create AWS credential provider",
-					"run_id", pr.RunID, "error", awsErr)
-			} else {
-				awsProvider.SetAuthToken(pr.AuthToken)
-				rc.SetAWSHandler(awsProvider.Handler())
-			}
-		}
-
-		registry.RegisterWithToken(rc, pr.AuthToken)
-
-		log.Info("restored run from disk",
-			"run_id", pr.RunID,
-			"container_id", pr.ContainerID,
-			"grants", len(pr.Grants),
-			"serial_devices", len(pr.SerialDevices))
-		restored++
 	}
 	return restored
+}
+
+// Scope deferred engine cleanup to one restore attempt, even if later runs block.
+func restoreRun(ctx context.Context, registry *Registry, pr PersistedRun, listen serialRestoreListener, key []byte) bool {
+	// Guard against a tampered persist file: the profile flows into the
+	// credential store path, so reject traversal before opening any store.
+	// Mirrors the boundary guard in handleRegisterRun — keep both.
+	if err := credential.ValidateProfile(pr.CredProfile); err != nil {
+		log.Warn("restore: invalid profile, skipping run",
+			"run_id", pr.RunID, "profile", pr.CredProfile, "error", err)
+		return false
+	}
+
+	legacyGitHub := false
+	for _, grant := range pr.Grants {
+		name, _, _ := strings.Cut(grant, ":")
+		if name == "github" || name == "copilot" {
+			legacyGitHub = true
+		}
+	}
+	if legacyGitHub && !pr.PolicyStateKnown && len(pr.PolicyYAML)+len(pr.PolicyRuleSets) == 0 {
+		log.Warn("restore: legacy GitHub run has no policy snapshot; recreate the run", "run_id", pr.RunID)
+		return false
+	}
+
+	if pr.PolicyRequired && len(pr.PolicyYAML)+len(pr.PolicyRuleSets) == 0 {
+		log.Warn("restore: required policy missing, skipping run", "run_id", pr.RunID)
+		return false
+	}
+	engines, policyErr := compilePolicies(pr.PolicyYAML, pr.PolicyRuleSets)
+	if policyErr != nil {
+		log.Warn("restore: invalid policy, skipping run", "run_id", pr.RunID, "error", policyErr)
+		return false
+	}
+	rc := NewRunContext(pr.RunID)
+	rc.PolicyYAML, rc.PolicyRuleSets, rc.KeepEngines = pr.PolicyYAML, pr.PolicyRuleSets, engines
+	// Close compiled engines on any failed restore. Registered runs own them.
+	policyOwned := false
+	defer func() {
+		if !policyOwned {
+			for _, eng := range engines {
+				eng.Close()
+			}
+		}
+	}()
+
+	rc.ContainerID = pr.ContainerID
+	rc.Grants = pr.Grants
+	rc.MCPServers = pr.MCPServers
+	rc.NetworkPolicy = pr.NetworkPolicy
+	rc.NetworkAllow = pr.NetworkAllow
+	rc.AWSConfig = pr.AWSConfig
+	rc.TransformerSpecs = pr.TransformerSpecs
+	rc.CopilotGitHubAuth = pr.CopilotGitHubAuth
+	rc.CredProfile = pr.CredProfile
+	rc.AllowedHostPorts = pr.AllowedHostPorts
+
+	// Open the store scoped to this run's profile — the daemon serves runs
+	// from many profiles, so a single default-profile store would re-resolve
+	// the wrong credentials (the same bug as token refresh).
+	store, err := credential.NewProfileStore(rc.CredProfile, key)
+	if err != nil {
+		log.Warn("restore: cannot open credential store, skipping run",
+			"run_id", pr.RunID, "error", err)
+		return false
+	}
+
+	// syncRefresh=false: these containers are already running, and
+	// StartTokenRefresh below performs an initial refresh of its own.
+	// A blocking exchange here is serialized across every restored run by
+	// codexRefreshMu, so one unreachable token endpoint would stall daemon
+	// startup by its full timeout for each run in turn.
+	if err := resolveCredentials(rc, pr.Grants, pr.MCPServers, store, false); err != nil {
+		log.Warn("restore: failed to resolve credentials, skipping run",
+			"run_id", pr.RunID, "error", err)
+		return false
+	}
+
+	// Re-open the run's serial listeners before the registry can observe
+	// it, on the same ports the container's MOAT_SERIAL_*_URL froze at
+	// create. A run with devices but no listener (no broker, or a port
+	// now occupied) is skipped: restoring it without working devices
+	// would look like dead hardware to the agent.
+	if len(pr.SerialDevices) > 0 {
+		if listen == nil {
+			log.Warn("restore: daemon has no serial broker, skipping run with devices",
+				"run_id", pr.RunID, "devices", len(pr.SerialDevices))
+			return false
+		}
+		if err := listen(rc, pr.SerialDevices, pr.SerialBindAddr, pr.SerialAddrs); err != nil {
+			log.Warn("restore: cannot re-open serial listeners, skipping run",
+				"run_id", pr.RunID, "error", err)
+			return false
+		}
+		rc.SerialDevices = pr.SerialDevices
+		rc.SerialBindAddr = pr.SerialBindAddr
+		rc.SerialAddrs = pr.SerialAddrs
+	}
+
+	// Create a per-run context and set cancel BEFORE registering so that
+	// a concurrent handleUnregisterRun sees a valid cancel function.
+	// Set up AWS credentials BEFORE RegisterWithToken so the RunContext is
+	// fully initialized before the proxy can observe it.
+	// This matches the ordering in handleRegisterRun.
+	runCtx, cancel := context.WithCancel(ctx)
+	rc.SetRefreshCancel(cancel)
+
+	// Start token refresh if grants are present.
+	if len(pr.Grants) > 0 {
+		StartTokenRefresh(runCtx, rc, pr.Grants)
+	}
+
+	// Set up AWS credential provider if configured.
+	if pr.AWSConfig != nil {
+		awsProvider, awsErr := awsprov.NewCredentialProvider(
+			runCtx,
+			awsprov.CredentialProviderConfig{
+				RoleARN:         pr.AWSConfig.RoleARN,
+				Region:          pr.AWSConfig.Region,
+				SessionDuration: pr.AWSConfig.SessionDuration,
+				ExternalID:      pr.AWSConfig.ExternalID,
+				Profile:         pr.AWSConfig.Profile,
+			},
+			"moat-"+pr.RunID,
+		)
+		if awsErr != nil {
+			log.Warn("restore: failed to create AWS credential provider",
+				"run_id", pr.RunID, "error", awsErr)
+		} else {
+			awsProvider.SetAuthToken(pr.AuthToken)
+			rc.SetAWSHandler(awsProvider.Handler())
+		}
+	}
+
+	registry.RegisterWithToken(rc, pr.AuthToken)
+	policyOwned = true
+
+	log.Info("restored run from disk",
+		"run_id", pr.RunID,
+		"container_id", pr.ContainerID,
+		"grants", len(pr.Grants),
+		"serial_devices", len(pr.SerialDevices))
+	return true
 }
 
 // resolveCredentials re-resolves credentials from the store for all grants.
