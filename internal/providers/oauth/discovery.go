@@ -133,8 +133,8 @@ func discoverAuthServerMetadata(ctx context.Context, authServerURL string) (*Aut
 	if issuer.Host == "" || issuer.User != nil || issuer.RawQuery != "" || issuer.ForceQuery || issuer.Fragment != "" {
 		return nil, fmt.Errorf("authorization server URL must have a host and no userinfo, query, or fragment")
 	}
-	// Public MCP discovery enforces HTTPS before this helper. Keep HTTP
-	// available only for loopback fixtures, never for remote issuer discovery.
+	// DiscoverFromMCPServer requires HTTPS before calling this helper.
+	// HTTP loopback support is only reachable from tests using this helper directly.
 	loopback := strings.EqualFold(issuer.Hostname(), "localhost")
 	if ip := net.ParseIP(issuer.Hostname()); ip != nil {
 		loopback = ip.IsLoopback()
@@ -179,10 +179,10 @@ func discoverAuthServerMetadata(ctx context.Context, authServerURL string) (*Aut
 // section 3.3) and checks the endpoints required for authorization-code grants.
 func validateAuthServerMetadata(asm *AuthServerMetadata, expectedIssuer string) error {
 	if asm.Issuer == "" {
-		return fmt.Errorf("auth server metadata missing issuer")
+		return fmt.Errorf("auth server metadata missing issuer: the authorization server must publish issuer %q to match authorization_servers in the MCP server protected resource metadata", expectedIssuer)
 	}
 	if asm.Issuer != expectedIssuer {
-		return fmt.Errorf("auth server metadata issuer %q does not match requested issuer %q", asm.Issuer, expectedIssuer)
+		return fmt.Errorf("auth server metadata issuer %q does not match requested issuer %q: the MCP server authorization_servers value and the authorization server metadata issuer must match exactly, including trailing slashes; ask the server operator to correct the metadata", asm.Issuer, expectedIssuer)
 	}
 	if asm.AuthorizationEndpoint == "" {
 		return fmt.Errorf("auth server metadata missing authorization_endpoint")

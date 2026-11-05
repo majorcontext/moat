@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -511,5 +512,48 @@ func TestAuthMetadataMismatchedIssuerFallsBack(t *testing.T) {
 	}
 	if metadata.Issuer != issuer || !reflect.DeepEqual(paths, []string{"/.well-known/oauth-authorization-server/tenant", "/.well-known/openid-configuration/tenant"}) {
 		t.Fatalf("incorrect fallback: metadata=%+v, paths=%v", metadata, paths)
+	}
+}
+
+func TestDiscoverFromMCPServerIssuerTrailingSlash(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		advertisedSuffix string
+		metadataSuffix   string
+		wantError        bool
+	}{
+		{"both slashless", "", "", false},
+		{"both trailing slash", "/", "/", false},
+		{"advertised trailing slash", "/", "", true},
+		{"metadata trailing slash", "", "/", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var base string
+			srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/.well-known/oauth-protected-resource/mcp" {
+					json.NewEncoder(w).Encode(ProtectedResourceMetadata{Resource: base + "/mcp", AuthorizationServers: []string{base + tc.advertisedSuffix}})
+					return
+				}
+				json.NewEncoder(w).Encode(AuthServerMetadata{Issuer: base + tc.metadataSuffix, AuthorizationEndpoint: "https://auth.example/authorize", TokenEndpoint: "https://auth.example/token"})
+			}))
+			defer srv.Close()
+			base = srv.URL
+			original := discoveryClient
+			discoveryClient = srv.Client()
+			t.Cleanup(func() { discoveryClient = original })
+			cfg, resource, err := DiscoverFromMCPServer(context.Background(), base+"/mcp")
+			if tc.wantError {
+				if err == nil || cfg != nil || resource != "" {
+					t.Fatalf("accepted mismatched metadata: config=%+v, resource=%q, error=%v", cfg, resource, err)
+				}
+				for _, detail := range []string{strconv.Quote(base + tc.advertisedSuffix), strconv.Quote(base + tc.metadataSuffix), "must match exactly, including trailing slashes", "server operator"} {
+					if !strings.Contains(err.Error(), detail) {
+						t.Errorf("error missing %q: %v", detail, err)
+					}
+				}
+			} else if err != nil || cfg == nil || resource != base+"/mcp" {
+				t.Fatalf("matching metadata rejected: config=%+v, resource=%q, error=%v", cfg, resource, err)
+			}
+		})
 	}
 }
