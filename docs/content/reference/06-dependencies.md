@@ -22,10 +22,10 @@ dependencies:
   - postgres@17
 ```
 
-The `--dep` CLI flag adds dependencies for a single run without modifying `moat.yaml`:
+Run Moat with the workspace containing that configuration:
 
 ```bash
-moat run --dep node@22 --dep git ./my-project
+moat run ./my-project
 ```
 
 See the [moat.yaml reference](./02-moat-yaml.md) for the complete `dependencies` field specification.

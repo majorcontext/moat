@@ -4,6 +4,12 @@ Moat runs AI coding agents in isolated containers with credential injection, net
 
 Moat is pre-1.0. The CLI interface and `moat.yaml` schema may change between minor versions. Breaking changes are listed under **Breaking** headings below.
 
+## Unreleased
+
+### Fixed
+
+- Fix `node@26` dependencies being rejected before image building — previously, the supported Node.js version list stopped at 24. Node.js 26 now works with the official Node image and the NodeSource installer used alongside other runtimes. ([#491](https://github.com/majorcontext/moat/pull/491))
+
 ## v0.9.1 — 2026-11-05
 
 Adds GitHub workspace access restrictions and the Supabase CLI grant, and fixes Datadog OAuth discovery, Vercel authentication, and interactive Codex joins. The proxy moves to gatekeeper v0.37; building from source now requires Go 1.27.3, and existing installations should run `moat proxy restart` after upgrading.
