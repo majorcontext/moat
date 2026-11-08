@@ -47,7 +47,7 @@ dependencies:
   - golangci-lint  # GitHub binary
 ```
 
-Run `moat deps list` for the full registry.
+Run `moat deps list` for the full registry and `moat deps info <name>` for current defaults and maintained release lines. Explicit patch pins within a maintained line pass through to the upstream image, repository, or installer.
 
 ### Dynamic
 
@@ -77,7 +77,7 @@ dependencies:
 
 Moat validates that the required runtime is present and returns an error if it is missing.
 
-`pip:` packages install into the container's system Python, not a virtual environment. When Python comes from Debian's `python3` package (which happens whenever Python is not the sole runtime, e.g. `python` alongside `node`), Moat removes the PEP 668 `EXTERNALLY-MANAGED` marker so `pip install` and `uv pip install --system` work — in `pip:` dependencies, in build hooks, and in the running container.
+`pip:` packages install into the requested Python interpreter, not a virtual environment. Mixed-runtime and custom-base builds install the requested Python through a temporary uv bootstrap; it does not substitute the distribution's system Python or replace an explicitly pinned `uv` dependency.
 
 ### Meta
 
@@ -147,14 +147,31 @@ env:
 
 ## Version resolution
 
-Partial versions resolve to the latest matching release within the specified major or minor line. Declare `node@26` to use Node.js 26; an unversioned `node` dependency continues to use the default major version, 22.
+Node.js, Python, and Go partial versions resolve to the latest matching release within the specified major or minor line. Other dependencies follow their upstream installer syntax; archive-based CLI installers generally require a full release version.
 
-| You write | Resolves to |
-|-----------|-------------|
-| `node@22` | `node@22.11.0` |
-| `go@1.22` | `go@1.22.12` |
-| `python@3.11` | `python@3.11.8` |
-| `node` | Default version for that runtime |
+```yaml
+dependencies:
+  - node@26            # Latest matching Node.js 26 release
+  - python@3.15.2      # Exact interpreter
+  - postgres@18.1      # Exact service image tag
+  - pnpm@10.21.0       # Exact package manager
+```
+
+Explicit package-manager pins take precedence over a project's `packageManager` field. Apt dependencies accept distribution revision syntax, for example `jq@1.6-2.1+deb12u1`. Explicit pins override unversioned bundle entries regardless of declaration order; conflicting explicit pins produce an error.
+
+### Upstream support policy
+
+Moat rejects known end-of-life release lines for Node.js, Python, Go, PostgreSQL, MySQL, and Redis. Support includes upstream security maintenance. For example, Node.js 20 reached EOL in April 2026; use a maintained line shown by `moat deps info node`.
+
+Patch versions within maintained lines do not need a catalog update. Unknown newer releases pass through to upstream version resolution, so a stale Moat binary does not block a new release. The upstream image or installer reports nonexistent versions. Projects without published support dates, including Ollama, do not receive an inferred EOL cutoff.
+
+A daily GitHub Actions workflow checks Node.js's official release schedule and index, lifecycle data from endoflife.date, and records projects without lifecycle policies. It opens or updates a reviewed PR with catalog changes. Defaults advance when their current line reaches EOL; unversioned dependencies in existing binaries also select a maintained successor from their embedded catalog. The successor is the oldest maintained newer line with at least 90 days of support left when available; Go uses the latest maintained toolchain. Other defaults stay pinned. Each Moat binary embeds the catalog and evaluates its EOL dates locally without a network lookup. Upgrade Moat to receive revised dates or new release-line metadata.
+
+Maintainers can refresh the catalog manually:
+
+```bash
+go run ./internal/deps/cmd/update-support
+```
 
 Version data is cached locally at `~/.moat/cache/versions.json` for 24 hours.
 
@@ -164,12 +181,12 @@ Moat selects the base image based on declared runtime dependencies.
 
 | Dependencies | Base image |
 |--------------|------------|
-| `node` only | `node:22-slim` |
-| `python` only | `python:3.11-slim` |
-| `go` only | `golang:1.22` |
+| `node@<version>` only | `node:<version>-slim` |
+| `python@<version>` only | `python:<version>-slim` |
+| `go@<version>` only | `golang:<version>` |
 | Mixed or none | `debian:bookworm-slim` |
 
-When multiple runtimes are declared (e.g., both `node` and `python`), Moat uses `debian:bookworm-slim` and installs each runtime as a separate layer.
+Mixed runtimes use `debian:bookworm-slim` and install the requested versions in separate layers. A `base_image` setting overrides the base image without changing requested runtime versions. Listing `python` without a version selects Moat's default interpreter, including on a custom image that already bundles another Python version; pin `python@<version>` to select that interpreter.
 
 ## Layer caching
 

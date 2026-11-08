@@ -4,6 +4,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/majorcontext/moat/internal/deps"
 )
 
 func TestGenerateSchemaReference(t *testing.T) {
@@ -183,11 +185,15 @@ func TestGenerateDepsReference(t *testing.T) {
 	}
 
 	// Verify version and default info for a known dep.
-	if !strings.Contains(ref, "(default: 22)") {
-		t.Error("expected node default version (22)")
+	spec, _ := deps.GetSpec("node")
+	if !strings.Contains(ref, "(default: "+spec.Default+")") {
+		t.Error("expected node default version from registry")
 	}
-	if !strings.Contains(ref, "[versions: 18, 20, 22, 24, 26]") {
-		t.Error("expected node version list")
+	if strings.Contains(ref, "[versions:") {
+		t.Error("reference must not advertise a static version allowlist")
+	}
+	if !strings.Contains(ref, "Patch pins are accepted within maintained release lines") {
+		t.Error("missing explicit version guidance")
 	}
 
 	// Verify the hooks section for system packages.

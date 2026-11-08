@@ -1,0 +1,70 @@
+name: Dependency support refresh
+
+on:
+  schedule:
+    - cron: "17 9 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dependency-support-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Refresh upstream support dates and defaults
+        run: go run ./internal/deps/cmd/update-support
+      - name: Check for changes
+        id: diff
+        run: |
+          if git diff --quiet -- internal/deps/registry.yaml internal/deps/support/catalog.json; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Validate refreshed catalog
+        if: steps.diff.outputs.changed == 'true'
+        run: go test -race ./internal/deps/support ./internal/deps/cmd/update-support
+      - name: Open or update support catalog PR
+        id: pr
+        uses: peter-evans/create-pull-request@v8.1.1
+        with:
+          branch: automation/dependency-support
+          delete-branch: true
+          add-paths: |
+            internal/deps/registry.yaml
+            internal/deps/support/catalog.json
+          commit-message: "chore(deps): refresh upstream support catalog"
+          title: "chore(deps): refresh upstream support catalog"
+          body: |
+            Refresh maintained release lines and upstream end-of-support dates.
+            Defaults advance only when their current release line is no longer supported.
+            Patch versions within maintained lines do not require catalog updates.
+
+            Sources: Node.js's release schedule/index, the endoflife.date lifecycle APIs,
+            with no inferred cutoff for projects without a declared EOL policy.
+            The updater and catalog tests ran before opening this PR. Full CI is
+            dispatched explicitly because GITHUB_TOKEN events do not reliably trigger PR workflows.
+      - name: Run full CI for the generated branch
+        if: steps.pr.outputs.pull-request-operation == 'created' || steps.pr.outputs.pull-request-operation == 'updated'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: gh workflow run ci.yml --ref automation/dependency-support

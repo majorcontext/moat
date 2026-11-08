@@ -148,7 +148,11 @@ func TestVersionValidation(t *testing.T) {
 		{"go@1.22", false, ""},
 		{"protoc@25.1", false, ""},
 		{"python@3.11", false, ""},
-		{"python@3_11", false, ""}, // underscore allowed
+		{"python@3_11", false, ""},
+		{"jq@1.6-2.1+deb12u1", false, ""},
+		{"git@1:2.47.0-1", false, ""},
+		{"npm:pkg@1.2.3+build.4", false, ""},
+		{"rust@--help", true, "must not start"},
 
 		// Invalid versions (shell injection attempts)
 		{"node@22; rm -rf /", true, "invalid character"},
@@ -256,45 +260,24 @@ func TestGoInstallRequiresGoRuntime(t *testing.T) {
 	}
 }
 
-func TestVersionConstraintValidation(t *testing.T) {
-	// Node versions are restricted to the supported major releases in the registry.
-	tests := []struct {
-		deps    []string
-		wantErr bool
-		errMsg  string
-	}{
-		// Valid versions
-		{[]string{"node@22"}, false, ""},
-		{[]string{"node@18"}, false, ""},
-		{[]string{"node@22"}, false, ""},
-		{[]string{"node@24"}, false, ""},
-		{[]string{"node@26"}, false, ""},
-		{[]string{"node"}, false, ""}, // No version = use default
-
-		// Invalid version for node (not in allowed list)
-		{[]string{"node@16"}, true, "invalid version"},
-		{[]string{"node@21"}, true, "invalid version"},
-		{[]string{"node@25"}, true, "invalid version"},
-		{[]string{"node@28"}, true, "invalid version"},
-	}
-
-	for _, tt := range tests {
-		t.Run(strings.Join(tt.deps, ","), func(t *testing.T) {
-			deps, parseErr := ParseAll(tt.deps)
-			if parseErr != nil {
-				t.Fatalf("ParseAll error: %v", parseErr)
-			}
-			err := Validate(deps)
-			if tt.wantErr {
-				if err == nil {
-					t.Errorf("Validate(%v) should error", tt.deps)
-				} else if tt.errMsg != "" && !strings.Contains(err.Error(), tt.errMsg) {
-					t.Errorf("error %q should contain %q", err.Error(), tt.errMsg)
-				}
-				return
-			}
+func TestExplicitDependencyVersionsAreNotAllowlisted(t *testing.T) {
+	for _, input := range []string{
+		"node@999", "node@999.1.2",
+		"python@999.1", "go@999.1.2",
+		"postgres@999", "postgres@999.1", "mysql@999", "redis@999.1",
+		"ollama@0.40.15", "ollama@99.1.2", "rust@1.99.1", "terraform@99.1.2",
+		"bun@99.1.2", "uv@99.1.2", "jq@99.1.2",
+	} {
+		t.Run(input, func(t *testing.T) {
+			parsed, err := ParseAll([]string{input, "python"})
 			if err != nil {
-				t.Errorf("Validate(%v) error: %v", tt.deps, err)
+				t.Fatal(err)
+			}
+			if err := Validate(parsed); err != nil {
+				t.Fatalf("explicit version rejected: %v", err)
+			}
+			if parsed[0].Version != strings.SplitN(input, "@", 2)[1] {
+				t.Fatalf("version changed: %+v", parsed[0])
 			}
 		})
 	}

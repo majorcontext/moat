@@ -49,8 +49,9 @@ type DepSpec struct {
 	Description string      `yaml:"description,omitempty"`
 	Type        InstallType `yaml:"type"`
 	Default     string      `yaml:"default,omitempty"`
-	Versions    []string    `yaml:"versions,omitempty"`
-	Requires    []string    `yaml:"requires,omitempty"`
+	// Versions is refreshed from the upstream support catalog, not an exact-patch allowlist.
+	Versions []string `yaml:"versions,omitempty"`
+	Requires []string `yaml:"requires,omitempty"`
 
 	// For github-binary type
 	Repo  string `yaml:"repo,omitempty"`

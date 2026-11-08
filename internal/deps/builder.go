@@ -19,7 +19,8 @@ import (
 //	2: home made writable for arbitrary runtime UIDs (Linux bind mode), and
 //	   ~/.codex pre-created so the sessions bind mount does not create it as root.
 //	3: only directory permissions are relaxed; preserve private file modes.
-const dockerfileLayoutVersion = 3
+//	4: explicit package pins are honored and Python fallbacks install the requested version.
+const dockerfileLayoutVersion = 4
 
 // ImageTag generates a deterministic image tag for a set of dependencies.
 func ImageTag(deps []Dependency, opts *ImageSpec) string {
@@ -36,6 +37,11 @@ func ImageTag(deps []Dependency, opts *ImageSpec) string {
 			v = spec.Default
 		}
 		key := d.Name + "@" + v
+		// Floating and exact requests can resolve to the same patch but use
+		// different base-image tags. They must never share a cached image.
+		if d.OriginalVersion != "" && d.OriginalVersion != v {
+			key += ":requested:" + d.OriginalVersion
+		}
 		// Include DockerMode in hash to differentiate docker:host vs docker:dind
 		if d.DockerMode != "" {
 			key += ":" + string(d.DockerMode)

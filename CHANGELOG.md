@@ -6,12 +6,20 @@ Moat is pre-1.0. The CLI interface and `moat.yaml` schema may change between min
 
 ## v0.9.2 — 2026-11-07
 
-Allows Node.js 26 in container dependencies while keeping the default major at 22. Fixes Linux bind-mode init-file staging and restores E2E CI failure reporting.
+Accepts security-patch pins within maintained dependency lines and tracks upstream end-of-life dates with a daily catalog refresh. Fixes Linux bind-mode init-file staging and restores E2E CI failure reporting.
+
+### Added
+
+- Daily dependency support refresh opens a PR with upstream lifecycle dates and maintained release lines. Defaults advance only when their current line reaches EOL; the initial refresh advances Go from 1.25 to 1.27. ([#491](https://github.com/majorcontext/moat/pull/491))
+
+### Breaking
+
+- Known upstream end-of-life runtime and service lines are rejected, including Node.js 20 and older. Replace retired pins in `moat.yaml` with a maintained line from `moat deps info <name>`. Conflicting explicit pins now produce an error; keep one explicit version per dependency. ([#491](https://github.com/majorcontext/moat/pull/491))
 
 ### Fixed
 
-- Fix `node@26` dependencies being rejected before image building — previously, the supported Node.js version list stopped at 24. Node.js 26 now works with the official Node image and the NodeSource installer used alongside other runtimes. ([#491](https://github.com/majorcontext/moat/pull/491))
-
+- Fix explicit dependency versions being rejected before image building — previously, static lists blocked newer Node.js, Python, PostgreSQL, MySQL, Redis, and Ollama releases and patch pins. Patch pins within maintained lines and unknown newer releases now pass through to upstream resolution. Projects without an EOL policy do not receive an inferred age cutoff. ([#491](https://github.com/majorcontext/moat/pull/491))
+- Fix explicit versions being silently replaced by installer defaults — requested apt, npm, uv-tool, and custom CLI pins now reach their installers, exact Node pins use official archives, and mixed-runtime or custom-base Python builds preserve the requested interpreter. Existing image caches rebuild for these installation changes. ([#491](https://github.com/majorcontext/moat/pull/491))
 - Fix staging init files under an image-owned directory in Linux bind mode — previously, startup failed when the workspace UID tried to chmod a parent owned by moatuser. Foreign directory modes now stay unchanged while staged files remain private at 0600. ([#491](https://github.com/majorcontext/moat/pull/491))
 - Fix E2E CI reporting success after failed tests — previously, `wait … || true` discarded the test exit status; the workflow now preserves it. Entrypoint privilege-drop scenarios now exercise root startup in volume mode, bind-mode identity has a separate check, and the Pi session test supplies a writable Moat home on Linux. ([#491](https://github.com/majorcontext/moat/pull/491))
 - Fix a timing-sensitive audit collector test in CI — previously, it checked the entry count after a fixed 100 ms sleep; it now waits for asynchronous ingestion with a timeout. ([#490](https://github.com/majorcontext/moat/pull/490))

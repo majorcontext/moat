@@ -11,6 +11,7 @@ import (
 func GenerateDepsReference() string {
 	var b strings.Builder
 	b.WriteString("## Available Dependencies\n\n")
+	b.WriteString("Use `name@version` to request an upstream version. Patch pins are accepted within maintained release lines; known upstream EOL lines are rejected.\n\n")
 
 	for _, name := range deps.List() {
 		spec, ok := deps.GetSpec(name)
@@ -18,14 +19,15 @@ func GenerateDepsReference() string {
 			continue
 		}
 
-		// Format: - `name` (default: X) [versions: A, B, C] — Description
+		// Format: - `name` (default: X) — Description
 		fmt.Fprintf(&b, "- `%s`", name)
 		if spec.Default != "" {
 			fmt.Fprintf(&b, " (default: %s)", spec.Default)
 		}
 		if len(spec.Versions) > 0 {
-			fmt.Fprintf(&b, " [versions: %s]", strings.Join(spec.Versions, ", "))
+			fmt.Fprintf(&b, " [%s: %s]", strings.ToLower(deps.VersionListLabel(name)), strings.Join(spec.Versions, ", "))
 		}
+
 		if spec.Description != "" {
 			fmt.Fprintf(&b, " — %s", spec.Description)
 		}

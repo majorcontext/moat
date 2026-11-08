@@ -383,3 +383,19 @@ func TestGenerateServiceEnvOllama(t *testing.T) {
 	_, hasDB := env["MOAT_OLLAMA_DB"]
 	assert.False(t, hasDB)
 }
+
+func TestServiceExplicitVersionsArePreserved(t *testing.T) {
+	for _, input := range []string{"postgres@999.1", "mysql@999.2", "redis@999.3", "ollama@0.40.15", "ministack@1.4"} {
+		t.Run(input, func(t *testing.T) {
+			parsed, err := deps.ParseAll([]string{input})
+			require.NoError(t, err)
+			require.NoError(t, deps.Validate(parsed))
+			cfg, err := buildServiceConfig(parsed[0], "version-pin-test", nil)
+			require.NoError(t, err)
+			assert.Equal(t, parsed[0].Version, cfg.Version)
+			spec, ok := deps.GetSpec(parsed[0].Name)
+			require.True(t, ok)
+			assert.Equal(t, spec.Service.Image, cfg.Image)
+		})
+	}
+}

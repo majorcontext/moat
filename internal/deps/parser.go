@@ -254,9 +254,12 @@ func validateVersion(version string) error {
 	if version == "" {
 		return nil
 	}
+	if strings.HasPrefix(version, "-") {
+		return fmt.Errorf("invalid version %q: must not start with an option prefix", version)
+	}
 	for _, r := range version {
-		if !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '.' && r != '-' && r != '_' {
-			return fmt.Errorf("invalid character %q in version %q: only letters, digits, dots, hyphens, and underscores are allowed", r, version)
+		if !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '.' && r != '-' && r != '_' && r != '+' && r != ':' {
+			return fmt.Errorf("invalid character %q in version %q: only letters, digits, dots, hyphens, underscores, plus signs, and colons are allowed", r, version)
 		}
 	}
 	return nil
@@ -267,7 +270,22 @@ func validateVersion(version string) error {
 // Dynamic dependencies (npm:, pip:, etc.) are handled directly.
 func ParseAll(specs []string) ([]Dependency, error) {
 	deps := make([]Dependency, 0, len(specs))
-	seen := make(map[string]bool) // Track seen deps to avoid duplicates
+	seen := make(map[string]int)
+	add := func(key string, dep Dependency) error {
+		if index, exists := seen[key]; exists {
+			// An explicit pin overrides bundle/default entries in either order.
+			if dep.Version != "" {
+				if previous := deps[index].Version; previous != "" && previous != dep.Version {
+					return fmt.Errorf("conflicting versions for %s: %q and %q; specify one explicit version", dep.Name, previous, dep.Version)
+				}
+				deps[index] = dep
+			}
+			return nil
+		}
+		seen[key] = len(deps)
+		deps = append(deps, dep)
+		return nil
+	}
 
 	for _, s := range specs {
 		dep, err := Parse(s)
@@ -278,9 +296,8 @@ func ParseAll(specs []string) ([]Dependency, error) {
 		// Dynamic dependencies don't need registry lookup
 		if dep.IsDynamic() {
 			key := dep.Type.String() + ":" + dep.Package
-			if !seen[key] {
-				seen[key] = true
-				deps = append(deps, dep)
+			if err := add(key, dep); err != nil {
+				return nil, err
 			}
 			continue
 		}
@@ -297,23 +314,22 @@ func ParseAll(specs []string) ([]Dependency, error) {
 				return nil, fmt.Errorf("meta dependency %q does not support version specifications", dep.Name)
 			}
 			for _, reqName := range spec.Requires {
-				if seen[reqName] {
-					continue
+				if err := add(reqName, Dependency{Name: reqName}); err != nil {
+					return nil, err
 				}
-				seen[reqName] = true
-				deps = append(deps, Dependency{Name: reqName})
 			}
 		} else {
-			if !seen[dep.Name] {
-				seen[dep.Name] = true
-				deps = append(deps, dep)
+			if err := add(dep.Name, dep); err != nil {
+				return nil, err
 			}
 		}
 	}
 	return deps, nil
 }
 
-// Validate checks that all dependency requirements are satisfied and versions are valid.
+// Validate checks dependency names and requirements. Explicit versions are
+// checked for shell-safe syntax during parsing and resolved by upstream sources;
+// support policy rejects upstream EOL lines without blocking patch pins or newer upstream releases.
 func Validate(deps []Dependency) error {
 	// Build set of dependency names (including dynamic deps' implicit requirements)
 	depSet := make(map[string]bool)
@@ -335,7 +351,7 @@ func Validate(deps []Dependency) error {
 		}
 
 		// Registry-based dependency
-		spec, ok := registry[d.Name]
+		spec, ok := GetSpec(d.Name)
 		if !ok {
 			return fmt.Errorf("unknown dependency %q%s", d.Name, suggestDep(d.Name))
 		}
@@ -357,19 +373,9 @@ func Validate(deps []Dependency) error {
 				d.Name, d.Name)
 		}
 
-		// Validate version against allowed versions if specified
-		if d.Version != "" && len(spec.Versions) > 0 {
-			found := false
-			for _, allowed := range spec.Versions {
-				if d.Version == allowed {
-					found = true
-					break
-				}
-			}
-			if !found {
-				return fmt.Errorf("invalid version %q for %s\n\n  Available versions: %s\n  Or omit the version to use the default (%s)",
-					d.Version, d.Name, strings.Join(spec.Versions, ", "), spec.Default)
-			}
+		version := depVersion(d, spec)
+		if err := validateSupport(d.Name, version); err != nil {
+			return err
 		}
 
 		for _, req := range spec.Requires {
@@ -380,6 +386,13 @@ func Validate(deps []Dependency) error {
 		}
 	}
 	return nil
+}
+
+func depVersion(dep Dependency, spec DepSpec) string {
+	if dep.Version != "" {
+		return dep.Version
+	}
+	return spec.Default
 }
 
 // suggestDep returns a suggestion message if a similar dependency exists.

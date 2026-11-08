@@ -6,18 +6,19 @@ node:
   description: Node.js runtime
   type: runtime
   default: "22"
-  versions: ["18", "20", "22", "24", "26"]
+  versions: ["22","24","26"]
 
 go:
   description: Go programming language
   type: runtime
-  default: "1.25"
+  default: "1.27"
+  versions: ["1.26","1.27"]
 
 python:
   description: Python programming language
   type: runtime
   default: "3.11"
-  versions: ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
+  versions: ["3.11","3.12","3.13","3.14","3.15"]
 
 rust:
   description: Rust programming language
@@ -317,10 +318,7 @@ gopls:
   description: Go language server (LSP + MCP support)
   type: go-install
   go-package: golang.org/x/tools/gopls
-  # Pinned: gopls newest (v0.22.0+) requires a Go toolchain newer than the
-  # go dependency installs, and images build with GOTOOLCHAIN=local, so
-  # `@latest` fails the image build. Bump deliberately alongside the go pin;
-  # override per project with `gopls@<version>` in dependencies.
+  # Reproducible default; explicit gopls@<version> overrides remain available.
   default: "v0.21.0"
   requires: [go]
 
@@ -328,10 +326,7 @@ govulncheck:
   description: Go vulnerability scanner
   type: go-install
   go-package: golang.org/x/vuln/cmd/govulncheck
-  # Pinned: golang.org/x/vuln v1.8.0 requires Go >= 1.26.0, which the image Go
-  # (GOTOOLCHAIN=local) cannot satisfy, so `@latest` fails the image build.
-  # Bump deliberately alongside the go pin; override per project with
-  # `govulncheck@<version>` in dependencies.
+  # Reproducible default; explicit govulncheck@<version> overrides remain available.
   default: "v1.7.0"
   requires: [go]
 
@@ -576,7 +571,7 @@ postgres:
   description: PostgreSQL database
   type: service
   default: "17"
-  versions: ["15", "16", "17"]
+  versions: ["14","15","16","17","18"]
   service:
     image: "postgres"
     ports:
@@ -594,7 +589,7 @@ mysql:
   description: MySQL database
   type: service
   default: "8"
-  versions: ["8", "9"]
+  versions: ["8.4","9.7","26.10"]
   service:
     image: "mysql"
     ports:
@@ -614,7 +609,7 @@ redis:
   description: Redis key-value store
   type: service
   default: "7"
-  versions: ["6", "7"]
+  versions: ["6.2","7.2","7.4","8.0","8.2","8.4","8.6","8.8","8.10"]
   service:
     image: "redis"
     ports:
@@ -649,7 +644,6 @@ ollama:
   description: Ollama local model server
   type: service
   default: "0.18.1"
-  versions: ["0.16.3", "0.17.7", "0.18.0", "0.18.1"]
   service:
     image: "ollama/ollama"
     ports:

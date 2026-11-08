@@ -159,7 +159,7 @@ func TestValidationAllDependencyTypes(t *testing.T) {
 		},
 		{
 			name:    "multiple dependency types",
-			deps:    []string{"node@22", "typescript", "psql", "go@1.21"},
+			deps:    []string{"node@22", "typescript", "psql", "go"},
 			wantErr: false,
 		},
 		{

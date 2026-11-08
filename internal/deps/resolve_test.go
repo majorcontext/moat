@@ -11,7 +11,9 @@ import (
 func TestResolveVersions(t *testing.T) {
 	// Pre-seed cache so tests don't hit the network
 	cache := versions.NewCache(24*time.Hour, "")
-	cache.Set("go@1.25", "1.25.8")
+	goSpec, _ := GetSpec("go")
+	resolvedDefault := goSpec.Default + ".123"
+	cache.Set("go@"+goSpec.Default, resolvedDefault)
 	cache.Set("node@22", "22.14.0")
 	SetVersionCache(cache)
 
@@ -52,11 +54,11 @@ func TestResolveVersions(t *testing.T) {
 				// the registry default and resolve it to a full patch version.
 				// This prevents tarball URLs like "go1.25.linux-amd64.tar.gz"
 				// (which don't exist) when Go is installed via curl.
-				if deps[0].Version != "1.25.8" {
-					t.Errorf("go version should be resolved to 1.25.8, got %q", deps[0].Version)
+				if deps[0].Version != resolvedDefault {
+					t.Errorf("go version should resolve to %q, got %q", resolvedDefault, deps[0].Version)
 				}
-				if deps[0].OriginalVersion != "1.25" {
-					t.Errorf("go OriginalVersion should be 1.25, got %q", deps[0].OriginalVersion)
+				if deps[0].OriginalVersion != goSpec.Default {
+					t.Errorf("go OriginalVersion should be %q, got %q", goSpec.Default, deps[0].OriginalVersion)
 				}
 			},
 		},
@@ -195,12 +197,13 @@ func TestResolveVersionsDefaultPopulatedOnError(t *testing.T) {
 
 	// Even though resolution failed, Version should be populated with the
 	// registry default rather than remaining empty.
-	if result[0].Version != "1.25" {
-		t.Errorf("go version should be registry default %q on resolution failure, got %q", "1.25", result[0].Version)
+	goSpec, _ := GetSpec("go")
+	if result[0].Version != goSpec.Default {
+		t.Errorf("go version should be registry default %q on resolution failure, got %q", goSpec.Default, result[0].Version)
 	}
 	// OriginalVersion should also be set so selectBaseImage can use it
 	// for Docker Hub floating tags.
-	if result[0].OriginalVersion != "1.25" {
-		t.Errorf("go OriginalVersion should be registry default %q on resolution failure, got %q", "1.25", result[0].OriginalVersion)
+	if result[0].OriginalVersion != goSpec.Default {
+		t.Errorf("go OriginalVersion should be registry default %q on resolution failure, got %q", goSpec.Default, result[0].OriginalVersion)
 	}
 }
