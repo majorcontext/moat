@@ -4,11 +4,15 @@ Moat runs AI coding agents in isolated containers with credential injection, net
 
 Moat is pre-1.0. The CLI interface and `moat.yaml` schema may change between minor versions. Breaking changes are listed under **Breaking** headings below.
 
-## Unreleased
+## v0.9.2 — 2026-11-07
+
+Allows Node.js 26 in container dependencies, using either the official Node image or the NodeSource installer alongside other runtimes. The default Node.js major remains 22.
 
 ### Fixed
 
 - Fix `node@26` dependencies being rejected before image building — previously, the supported Node.js version list stopped at 24. Node.js 26 now works with the official Node image and the NodeSource installer used alongside other runtimes. ([#491](https://github.com/majorcontext/moat/pull/491))
+
+- Fix a timing-sensitive audit collector test in CI — previously, it checked the entry count after a fixed 100 ms sleep; it now waits for asynchronous ingestion with a timeout. ([#490](https://github.com/majorcontext/moat/pull/490))
 
 ## v0.9.1 — 2026-11-05
 

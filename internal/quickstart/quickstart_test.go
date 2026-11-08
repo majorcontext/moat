@@ -186,7 +186,7 @@ func TestGenerateDepsReference(t *testing.T) {
 	if !strings.Contains(ref, "(default: 22)") {
 		t.Error("expected node default version (22)")
 	}
-	if !strings.Contains(ref, "[versions: 18, 20, 22, 24]") {
+	if !strings.Contains(ref, "[versions: 18, 20, 22, 24, 26]") {
 		t.Error("expected node version list")
 	}
 
