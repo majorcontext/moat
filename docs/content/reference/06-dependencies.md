@@ -147,7 +147,7 @@ env:
 
 ## Version resolution
 
-Partial versions resolve to the latest matching release within the specified major or minor line.
+Partial versions resolve to the latest matching release within the specified major or minor line. Declare `node@26` to use Node.js 26; an unversioned `node` dependency continues to use the default major version, 22.
 
 | You write | Resolves to |
 |-----------|-------------|

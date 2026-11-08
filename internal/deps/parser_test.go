@@ -257,7 +257,7 @@ func TestGoInstallRequiresGoRuntime(t *testing.T) {
 }
 
 func TestVersionConstraintValidation(t *testing.T) {
-	// Node has versions ["18", "20", "22", "24"] in registry
+	// Node versions are restricted to the supported major releases in the registry.
 	tests := []struct {
 		deps    []string
 		wantErr bool
@@ -268,11 +268,14 @@ func TestVersionConstraintValidation(t *testing.T) {
 		{[]string{"node@18"}, false, ""},
 		{[]string{"node@22"}, false, ""},
 		{[]string{"node@24"}, false, ""},
+		{[]string{"node@26"}, false, ""},
 		{[]string{"node"}, false, ""}, // No version = use default
 
 		// Invalid version for node (not in allowed list)
 		{[]string{"node@16"}, true, "invalid version"},
 		{[]string{"node@21"}, true, "invalid version"},
+		{[]string{"node@25"}, true, "invalid version"},
+		{[]string{"node@28"}, true, "invalid version"},
 	}
 
 	for _, tt := range tests {

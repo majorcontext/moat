@@ -12,6 +12,7 @@ func TestGetRuntimeCommands(t *testing.T) {
 		contains []string
 	}{
 		{"node", "22", []string{"nodesource", "setup_22.x", "nodejs"}},
+		{"node", "26", []string{"nodesource", "setup_26.x", "nodejs"}},
 		{"node", "20.11.0", []string{"nodesource", "setup_20.x", "nodejs"}}, // Full version should use major only
 		{"go", "1.22", []string{"go.dev/dl", "go1.22", "tar"}},
 		{"python", "3.10", []string{"python3", "pip", "venv"}},
