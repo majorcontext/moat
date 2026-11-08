@@ -350,16 +350,10 @@ func TestGenerateInstallScript_Python(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Should install Python from Ubuntu's default packages
-	if !strings.Contains(script, "python3") {
-		t.Error("script should install python3")
-	}
-	if !strings.Contains(script, "python3-pip") {
-		t.Error("script should install python3-pip")
-	}
-	// Should set up update-alternatives for PATH
-	if !strings.Contains(script, "update-alternatives") {
-		t.Error("script should set up Python alternatives for PATH")
+	for _, want := range []string{"uv python install --default --force 3.10", "UV_PYTHON_INSTALL_DIR=/opt/moat-python", "pip install --python /usr/local/bin/python pip"} {
+		if !strings.Contains(script, want) {
+			t.Errorf("versioned Python install missing %q", want)
+		}
 	}
 }
 

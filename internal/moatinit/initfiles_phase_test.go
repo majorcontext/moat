@@ -2,8 +2,10 @@ package moatinit
 
 import (
 	"encoding/base64"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 )
 
@@ -141,5 +143,72 @@ func TestInitFilesPhaseWidensPreexistingParent(t *testing.T) {
 	}
 	if got := statMode(t, ts, "/priv"); got != 0o755 {
 		t.Errorf("pre-existing parent mode = %o, want 755", got)
+	}
+}
+
+// Reject attempts to chmod a foreign parent, just as a non-root Linux UID does.
+type foreignInitParentSys struct {
+	*testSys
+	parent string
+}
+
+func (s *foreignInitParentSys) Chmod(path string, mode fs.FileMode) error {
+	if path == s.parent {
+		return syscall.EPERM
+	}
+	return s.testSys.Chmod(path, mode)
+}
+
+func TestInitFilesPreservesForeignParent(t *testing.T) {
+	ts := newTestSys(t, os.Getuid()+1, true)
+	parent := "/home/moatuser"
+	if err := ts.MkdirAll(parent, 0o777); err != nil {
+		t.Fatal(err)
+	}
+	if err := ts.Chmod(parent, 0o777); err != nil {
+		t.Fatal(err)
+	}
+	ctx, _ := newTestContext(ts, Config{InitFiles: parent + "/.initrc\t" + b64("secret"), Home: parent})
+	ctx.Sys = &foreignInitParentSys{testSys: ts, parent: parent}
+	if err := initFilesPhase(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := fileContent(t, ts, parent+"/.initrc"); got != "secret" {
+		t.Fatalf("content = %q", got)
+	}
+	if got := statMode(t, ts, parent); got != 0o777 {
+		t.Errorf("foreign parent mode = %o, want 777", got)
+	}
+	if got := statMode(t, ts, parent+"/.initrc"); got != 0o600 {
+		t.Errorf("secret mode = %o, want 600", got)
+	}
+}
+
+func TestInitFilesChmodsOwnedParent(t *testing.T) {
+	ts := newTestSys(t, os.Getuid(), true)
+	if err := ts.MkdirAll("/owned", 0o700); err != nil {
+		t.Fatal(err)
+	}
+	ctx, _ := newTestContext(ts, Config{InitFiles: "/owned/file\t" + b64("secret"), Home: "/owned"})
+	if err := initFilesPhase(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := statMode(t, ts, "/owned"); got != 0o755 {
+		t.Errorf("owned parent mode = %o, want 755", got)
+	}
+}
+
+func TestInitFilesFailsOnOwnedParentModeError(t *testing.T) {
+	ts := newTestSys(t, os.Getuid(), true)
+	if err := ts.MkdirAll("/owned", 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ctx, _ := newTestContext(ts, Config{InitFiles: "/owned/file\t" + b64("secret"), Home: "/owned"})
+	ctx.Sys = &foreignInitParentSys{testSys: ts, parent: "/owned"}
+	if err := initFilesPhase(ctx); err == nil {
+		t.Fatal("accepted chmod failure for owned parent")
+	}
+	if exists(ts, "/owned/file") {
+		t.Error("wrote secret after parent chmod failed")
 	}
 }

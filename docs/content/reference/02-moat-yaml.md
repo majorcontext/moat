@@ -306,15 +306,15 @@ When `git` is listed as a dependency, the host's git identity (`user.name` and `
 
 | Dependency | Base image |
 |------------|------------|
-| `node@18` | `node:18-slim` |
 | `node@22` | `node:22-slim` |
-| `node@22` | `node:22-slim` |
-| `python@3.10` | `python:3.10-slim` |
+| `node@24` | `node:24-slim` |
+| `node@26` | `node:26-slim` |
 | `python@3.11` | `python:3.11-slim` |
-| `python@3.12` | `python:3.12-slim` |
-| `go@1.21` | `golang:1.21` |
-| `go@1.22` | `golang:1.22` |
+| `python@3.15` | `python:3.15-slim` |
+| `go@1.27` | `golang:1.27` |
 | (none) | `debian:bookworm-slim` |
+
+Known upstream end-of-life lines are rejected. See the [dependency support policy](./06-dependencies.md#upstream-support-policy) and `moat deps info <name>` for maintained lines.
 
 #### Service dependencies
 

@@ -5,6 +5,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 # Cancel in-progress runs on new pushes to same PR/branch
 concurrency:
@@ -92,7 +93,7 @@ jobs:
 
   e2e:
     name: E2E Tests
-    if: github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'push'
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -121,8 +122,8 @@ jobs:
         run: |
           docker pull debian:bookworm-slim
           docker pull python:3.11-slim
-          docker pull node:20-slim
-          docker pull golang:1.22
+          docker pull node:22-slim
+          docker pull golang:1.27
           docker pull ubuntu:22.04
 
       - name: Pre-build moat binary and test binary
@@ -161,8 +162,8 @@ jobs:
             fi
             sleep 10
           done
-          wait $TEST_PID 2>/dev/null || true
-          EXIT_CODE=$?
+          EXIT_CODE=0
+          wait "$TEST_PID" 2>/dev/null || EXIT_CODE=$?
           echo "Test exited with code $EXIT_CODE"
           cat /tmp/e2e-output.log || echo "(no output file)"
           exit $EXIT_CODE

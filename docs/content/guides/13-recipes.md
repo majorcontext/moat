@@ -85,7 +85,7 @@ What this demonstrates:
 name: my-go-service
 
 dependencies:
-  - go@1.22
+  - go@1.27
   - golangci-lint
   - claude-code
   - git

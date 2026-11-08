@@ -31,6 +31,7 @@ func GenerateInstallScript(deps []Dependency) (string, error) {
 		githubBins    []Dependency
 		npmPkgs       []Dependency
 		goInstallPkgs []Dependency
+		uvToolPkgs    []Dependency
 		customDeps    []Dependency
 	)
 
@@ -38,7 +39,7 @@ func GenerateInstallScript(deps []Dependency) (string, error) {
 		spec, _ := GetSpec(dep.Name)
 		switch spec.Type {
 		case TypeApt:
-			aptPkgs = append(aptPkgs, spec.Package)
+			aptPkgs = append(aptPkgs, aptPackage(spec, dep.Version))
 		case TypeRuntime:
 			runtimes = append(runtimes, dep)
 		case TypeGithubBinary:
@@ -47,12 +48,14 @@ func GenerateInstallScript(deps []Dependency) (string, error) {
 			npmPkgs = append(npmPkgs, dep)
 		case TypeGoInstall:
 			goInstallPkgs = append(goInstallPkgs, dep)
+		case TypeUvTool:
+			uvToolPkgs = append(uvToolPkgs, dep)
 		case TypeCustom:
 			customDeps = append(customDeps, dep)
 		case TypeMeta:
 			// Meta dependencies are expanded during parsing/validation
 		default:
-			// Other types (uv-tool, docker, services, dynamic) are not
+			// Other types (docker, services, dynamic) are not
 			// installed via the shell-script path.
 		}
 	}
@@ -73,7 +76,7 @@ func GenerateInstallScript(deps []Dependency) (string, error) {
 		b.WriteString("# Apt packages\n")
 		b.WriteString("apt-get update && apt-get install -y")
 		for _, pkg := range aptPkgs {
-			b.WriteString(" \\\n    " + pkg)
+			b.WriteString(" \\\n    " + shellQuote(pkg))
 		}
 		b.WriteString("\n\n")
 	}
@@ -111,7 +114,14 @@ func GenerateInstallScript(deps []Dependency) (string, error) {
 			if pkg == "" {
 				pkg = dep.Name
 			}
-			pkgNames = append(pkgNames, pkg)
+			version := dep.Version
+			if version == "" {
+				version = spec.Default
+			}
+			if version != "" {
+				pkg += "@" + version
+			}
+			pkgNames = append(pkgNames, shellQuote(pkg))
 		}
 		b.WriteString("# npm packages\n")
 		b.WriteString("npm install -g " + strings.Join(pkgNames, " ") + "\n\n")
@@ -128,6 +138,12 @@ func GenerateInstallScript(deps []Dependency) (string, error) {
 			}
 			b.WriteString(getGoInstallCommands(spec, version).FormatForScript())
 		}
+		b.WriteString("\n")
+	}
+
+	for _, dep := range uvToolPkgs {
+		spec, _ := GetSpec(dep.Name)
+		b.WriteString(getUvToolCommands(dep.Name, dep.Version, spec).FormatForScript())
 		b.WriteString("\n")
 	}
 

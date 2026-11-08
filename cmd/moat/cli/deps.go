@@ -122,8 +122,9 @@ func runDepsInfo(cmd *cobra.Command, args []string) error {
 		fmt.Printf("Default:     %s\n", spec.Default)
 	}
 	if len(spec.Versions) > 0 {
-		fmt.Printf("Versions:    %s\n", strings.Join(spec.Versions, ", "))
+		fmt.Printf("%s: %s\n", deps.VersionListLabel(name), strings.Join(spec.Versions, ", "))
 	}
+
 	if len(spec.Requires) > 0 {
 		fmt.Printf("Requires:    %s\n", strings.Join(spec.Requires, ", "))
 	}

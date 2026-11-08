@@ -57,7 +57,10 @@ printf '%s\n' '{"type":"session","cwd":"/workspace"}' > "$file"
 `
 			r, err := mgr.Create(ctx, run.Options{
 				Name: "e2e-pi-sync-" + tc.name, Workspace: tc.workspace,
-				Config: &config.Config{Agent: "pi", Pi: config.PiConfig{SyncLogs: tc.sync}},
+				// A no-op hook supplies the normal Moat home/entrypoint without
+				// installing Pi. Bare ubuntu:22.04 has a root-only /root home,
+				// which a Linux bind-mode workspace UID cannot traverse.
+				Config: &config.Config{Agent: "pi", Pi: config.PiConfig{SyncLogs: tc.sync}, Hooks: config.HooksConfig{PreRun: "true"}},
 				Cmd:    []string{"sh", "-c", script},
 			})
 			if err != nil {

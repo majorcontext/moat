@@ -395,7 +395,7 @@ func TestNetworkRequestsAreCaptured(t *testing.T) {
 		}
 		defer mgr.Close()
 
-		workspace := createTestWorkspaceWithRuntime(t, "python", "3.10")
+		workspace := createTestWorkspaceWithRuntime(t, "python", "3.11")
 
 		// Use Python to make HTTPS request through the proxy.
 		//
@@ -407,7 +407,7 @@ func TestNetworkRequestsAreCaptured(t *testing.T) {
 			Grants:    []string{"github"},
 			Env:       []string{"PYTHONHTTPSVERIFY=0"},
 			Config: &config.Config{
-				Dependencies: []string{"python@3.10"},
+				Dependencies: []string{"python"},
 			},
 			Cmd: []string{
 				"python", "-c",
@@ -1456,13 +1456,13 @@ func TestDependencyGoRuntime(t *testing.T) {
 		}
 		defer mgr.Close()
 
-		workspace := createTestWorkspaceWithDeps(t, []string{"go@1.22"})
+		workspace := createTestWorkspaceWithDeps(t, []string{"go"})
 
 		r, err := mgr.Create(ctx, run.Options{
 			Name:      "e2e-dep-go",
 			Workspace: workspace,
 			Config: &config.Config{
-				Dependencies: []string{"go@1.22"},
+				Dependencies: []string{"go"},
 			},
 			Cmd: []string{"go", "version"},
 		})
@@ -1491,9 +1491,10 @@ func TestDependencyGoRuntime(t *testing.T) {
 			t.Fatalf("ReadLogs: %v", err)
 		}
 
+		goSpec, _ := deps.GetSpec("go")
 		found := false
 		for _, entry := range logs {
-			if strings.Contains(entry.Line, "go1.22") {
+			if strings.Contains(entry.Line, "go"+goSpec.Default) {
 				found = true
 				t.Logf("Go version: %s", entry.Line)
 				break
@@ -1501,7 +1502,7 @@ func TestDependencyGoRuntime(t *testing.T) {
 		}
 
 		if !found {
-			t.Errorf("Go 1.22 not found in output\nLogs:%s", formatLogEntries(logs))
+			t.Errorf("Go %s not found in output\nLogs:%s", goSpec.Default, formatLogEntries(logs))
 		}
 	})
 }

@@ -12,9 +12,10 @@ func TestGetRuntimeCommands(t *testing.T) {
 		contains []string
 	}{
 		{"node", "22", []string{"nodesource", "setup_22.x", "nodejs"}},
-		{"node", "20.11.0", []string{"nodesource", "setup_20.x", "nodejs"}}, // Full version should use major only
+		{"node", "26", []string{"nodesource", "setup_26.x", "nodejs"}},
+		{"node", "20.11.0", []string{"nodejs.org/dist/v20.11.0", "node-v20.11.0-linux-${ARCH}.tar.gz"}}, // Exact pins must be honored.
 		{"go", "1.22", []string{"go.dev/dl", "go1.22", "tar"}},
-		{"python", "3.10", []string{"python3", "pip", "venv"}},
+		{"python", "3.10", []string{"uv python install --default --force 3.10", "pip install --python /usr/local/bin/python pip"}},
 	}
 
 	for _, tt := range tests {

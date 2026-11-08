@@ -131,7 +131,7 @@ Configure git and install linting tools at build time. Build the project from th
 name: my-go-service
 
 dependencies:
-  - go@1.22
+  - go@1.27
   - golangci-lint
   - git
 

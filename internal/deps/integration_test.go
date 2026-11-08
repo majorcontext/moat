@@ -159,7 +159,7 @@ func TestValidationAllDependencyTypes(t *testing.T) {
 		},
 		{
 			name:    "multiple dependency types",
-			deps:    []string{"node@22", "typescript", "psql", "go@1.21"},
+			deps:    []string{"node@22", "typescript", "psql", "go"},
 			wantErr: false,
 		},
 		{
@@ -358,5 +358,46 @@ func TestDockerfileAndScriptConsistency(t *testing.T) {
 	}
 	if !strings.Contains(script, "typescript") {
 		t.Error("Script missing typescript")
+	}
+}
+
+func TestNodeDependencyPipeline(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		dependencies []string
+		base         string
+		major        string
+		installNode  bool
+	}{
+		{"single runtime", []string{"node@26"}, "node:26-slim", "26", false},
+		{"default unchanged", []string{"node"}, "node:22-slim", "22", false},
+		{"multiple runtimes", []string{"node@26", "python"}, "debian:bookworm-slim", "26", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dependencies, err := ParseAll(tc.dependencies)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := Validate(dependencies); err != nil {
+				t.Fatal(err)
+			}
+			result, err := GenerateDockerfile(dependencies, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.HasPrefix(result.Dockerfile, "FROM "+tc.base+"\n") {
+				t.Errorf("incorrect base image:\n%s", result.Dockerfile)
+			}
+			if got := strings.Contains(result.Dockerfile, "https://deb.nodesource.com/setup_"+tc.major+".x"); got != tc.installNode {
+				t.Errorf("NodeSource install present = %v, want %v", got, tc.installNode)
+			}
+			script, err := GenerateInstallScript(dependencies)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(script, "https://deb.nodesource.com/setup_"+tc.major+".x") || !strings.Contains(script, "apt-get install -y nodejs") {
+				t.Errorf("missing Node %s script install:\n%s", tc.major, script)
+			}
+		})
 	}
 }

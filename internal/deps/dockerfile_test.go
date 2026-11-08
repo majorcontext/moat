@@ -381,8 +381,8 @@ func TestGenerateDockerfileMultipleRuntimes(t *testing.T) {
 	if !strings.Contains(result.Dockerfile, "nodesource") {
 		t.Error("Dockerfile should install Node.js")
 	}
-	if !strings.Contains(result.Dockerfile, "python3") {
-		t.Error("Dockerfile should install Python")
+	if !strings.Contains(result.Dockerfile, "uv python install --default --force 3.10") {
+		t.Error("Dockerfile should install the requested Python version")
 	}
 }
 
@@ -498,7 +498,7 @@ func TestGenerateDockerfileDynamicPipWithNonPythonBase(t *testing.T) {
 		t.Fatalf("expected debian base for multi-runtime deps, got:\n%s", result.Dockerfile)
 	}
 	if !strings.Contains(result.Dockerfile, "EXTERNALLY-MANAGED") {
-		t.Error("Dockerfile should remove the PEP 668 marker when python is apt-installed")
+		t.Error("Dockerfile should remove the PEP 668 marker for the managed Python fallback")
 	}
 	if !strings.Contains(result.Dockerfile, "pip install numpy") {
 		t.Error("Dockerfile should install numpy")

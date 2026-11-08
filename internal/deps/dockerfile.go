@@ -139,7 +139,7 @@ func categorizeDeps(deps []Dependency) categorizedDeps {
 		spec, _ := GetSpec(dep.Name)
 		switch spec.Type {
 		case TypeApt:
-			c.aptPkgs = append(c.aptPkgs, spec.Package)
+			c.aptPkgs = append(c.aptPkgs, aptPackage(spec, dep.Version))
 		case TypeRuntime:
 			c.runtimes = append(c.runtimes, dep)
 		case TypeGithubBinary:
@@ -351,9 +351,9 @@ func writeAllAptPackages(b *strings.Builder, userPkgs []string, useBuildKit bool
 	for i, pkg := range allPkgs {
 		// Omit trailing backslash on last package when using BuildKit (no cleanup command follows).
 		if i < len(allPkgs)-1 || !useBuildKit {
-			b.WriteString("       " + pkg + " \\\n")
+			b.WriteString("       " + shellQuote(pkg) + " \\\n")
 		} else {
-			b.WriteString("       " + pkg + "\n\n")
+			b.WriteString("       " + shellQuote(pkg) + "\n\n")
 		}
 	}
 	if !useBuildKit {
@@ -515,11 +515,7 @@ func writeUvToolPackages(b *strings.Builder, deps []Dependency) {
 	b.WriteString("# uv tool packages\n")
 	for _, dep := range deps {
 		spec, _ := GetSpec(dep.Name)
-		pkg := spec.Package
-		if pkg == "" {
-			pkg = dep.Name
-		}
-		b.WriteString(fmt.Sprintf("RUN uv tool install %s\n", pkg))
+		b.WriteString(getUvToolCommands(dep.Name, dep.Version, spec).FormatForDockerfile())
 	}
 	b.WriteString("\n")
 }

@@ -37,10 +37,30 @@ type InstallCommands struct {
 	EnvVars  map[string]string // Environment variables to set
 }
 
+func aptPackage(spec DepSpec, version string) string {
+	if version == "" {
+		return spec.Package
+	}
+	return spec.Package + "=" + version
+}
+
 // getRuntimeCommands returns install commands for runtime dependencies.
 func getRuntimeCommands(name, version string) InstallCommands {
 	switch name {
 	case "node":
+		// Resolved and explicit patch pins use the official archive exactly.
+		// Partial versions retain the NodeSource fallback if host resolution failed.
+		if strings.Count(version, ".") >= 2 {
+			return InstallCommands{Commands: []string{
+				"apt-get update && apt-get install -y --no-install-recommends libatomic1 libstdc++6",
+				fmt.Sprintf(`ARCH=$(uname -m | sed 's/x86_64/x64/;s/aarch64/arm64/') && curl -fsSL "https://nodejs.org/dist/v%s/node-v%s-linux-${ARCH}.tar.gz" -o /tmp/moat-node.tar.gz`, version, version),
+				fmt.Sprintf("curl -fsSL https://nodejs.org/dist/v%s/SHASUMS256.txt -o /tmp/moat-node-shasums", version),
+				fmt.Sprintf(`NODE_ARCHIVE="node-v%s-linux-${ARCH}.tar.gz" && awk -v archive="$NODE_ARCHIVE" '$2 == archive {print $1 "  /tmp/moat-node.tar.gz"}' /tmp/moat-node-shasums > /tmp/moat-node.sha256`, version),
+				"sha256sum -c /tmp/moat-node.sha256",
+				"tar -xzf /tmp/moat-node.tar.gz -C /usr/local --strip-components=1",
+				"rm -f /tmp/moat-node.tar.gz /tmp/moat-node-shasums /tmp/moat-node.sha256",
+			}}
+		}
 		// NodeSource setup scripts use major versions only (e.g., setup_20.x, not setup_20.11.0.x)
 		majorVersion := version
 		if idx := strings.Index(version, "."); idx > 0 {
@@ -48,8 +68,10 @@ func getRuntimeCommands(name, version string) InstallCommands {
 		}
 		return InstallCommands{
 			Commands: []string{
-				fmt.Sprintf("curl -fsSL https://deb.nodesource.com/setup_%s.x | bash -", majorVersion),
-				"apt-get install -y nodejs",
+				fmt.Sprintf("curl -fsSL https://deb.nodesource.com/setup_%s.x -o /tmp/moat-nodesource-setup.sh", majorVersion),
+				"bash /tmp/moat-nodesource-setup.sh",
+				"rm -f /tmp/moat-nodesource-setup.sh",
+				"apt-get install -y nodejs=" + shellQuote(version+".*"),
 			},
 		}
 	case "go":
@@ -63,29 +85,25 @@ func getRuntimeCommands(name, version string) InstallCommands {
 			},
 		}
 	case "python":
-		// Python version handling strategy:
-		// - When a base image provides the runtime (python:X.Y-slim), this code is not used
-		// - When installing on Ubuntu, we use the system python3 (3.10 on Ubuntu 22.04)
-		//
-		// For specific Python versions, prefer using the official Docker base image
-		// by specifying python as a dependency in moat.yaml. The dockerfile generator
-		// will select python:X.Y-slim as the base image.
-		//
-		// This fallback installs Ubuntu's system Python for cases where Python is
-		// needed alongside other runtimes (e.g., node + python).
-		//
-		// Debian/Ubuntu mark their system Python as externally managed (PEP 668),
-		// which makes `pip install <pkg>` fail with "externally-managed-environment"
-		// — including for pip: dependencies and user pre_run hooks. The container is
-		// disposable and isolated, so system-wide installs are the expected workflow
-		// here; remove the marker. `rm -f` succeeds when the glob matches nothing
-		// (e.g. a base image that never had the marker).
+		// Custom base images and the legacy installer need a versioned Python,
+		// not the distro's fixed system Python. Bootstrap current uv privately;
+		// its evolving download catalog must not be frozen into a Moat release.
+		// An explicitly requested uv dependency is installed separately later.
 		return InstallCommands{
 			Commands: []string{
-				"apt-get update && apt-get install -y python3 python3-pip python3-venv",
-				"rm -f /usr/lib/python3*/EXTERNALLY-MANAGED /usr/local/lib/python3*/EXTERNALLY-MANAGED",
-				"update-alternatives --install /usr/bin/python python /usr/bin/python3 1",
+				`UV_RELEASE_URL=$(curl -fsSLI --retry 3 --connect-timeout 15 -o /dev/null -w '%{url_effective}' https://github.com/astral-sh/uv/releases/latest) && UV_BOOTSTRAP_VERSION=${UV_RELEASE_URL##*/}`,
+				`mkdir -p /tmp/moat-python-bootstrap && ARCH=$(uname -m) && curl -fsSL --retry 3 --connect-timeout 15 "https://github.com/astral-sh/uv/releases/download/${UV_BOOTSTRAP_VERSION}/uv-${ARCH}-unknown-linux-gnu.tar.gz" -o /tmp/moat-python-bootstrap/archive.tar.gz`,
+				`curl -fsSL --retry 3 --connect-timeout 15 "https://github.com/astral-sh/uv/releases/download/${UV_BOOTSTRAP_VERSION}/uv-${ARCH}-unknown-linux-gnu.tar.gz.sha256" -o /tmp/moat-python-bootstrap/archive.sha256`,
+				`awk '{print $1 "  /tmp/moat-python-bootstrap/archive.tar.gz"}' /tmp/moat-python-bootstrap/archive.sha256 > /tmp/moat-python-bootstrap/checksum`,
+				"sha256sum -c /tmp/moat-python-bootstrap/checksum",
+				"tar -xzf /tmp/moat-python-bootstrap/archive.tar.gz -C /tmp/moat-python-bootstrap --strip-components=1",
+				"UV_PYTHON_INSTALL_DIR=/opt/moat-python UV_PYTHON_BIN_DIR=/usr/local/bin /tmp/moat-python-bootstrap/uv python install --default --force " + shellQuote(version),
+				`/usr/local/bin/python -c 'import pathlib, sysconfig; pathlib.Path(sysconfig.get_path("stdlib"), "EXTERNALLY-MANAGED").unlink(missing_ok=True)'`,
+				"/tmp/moat-python-bootstrap/uv pip install --python /usr/local/bin/python pip",
+				`PYTHON_SCRIPTS=$(/usr/local/bin/python -c 'import sysconfig; print(sysconfig.get_path("scripts"))') && ln -sf "${PYTHON_SCRIPTS}/pip" /usr/local/bin/pip && ln -sf "${PYTHON_SCRIPTS}/pip3" /usr/local/bin/pip3`,
+				"rm -rf /tmp/moat-python-bootstrap",
 			},
+			EnvVars: map[string]string{"PATH": "/usr/local/bin:$PATH"},
 		}
 	default:
 		return InstallCommands{}
@@ -310,6 +328,16 @@ func buildArchDetectCommand(name string, amd64, arm64 archBinarySpec, atype arch
 	}
 }
 
+func goPackageVersion(version string) string {
+	if version == "" {
+		return "latest"
+	}
+	if version[0] >= '0' && version[0] <= '9' && (strings.Contains(version, ".") || strings.Trim(version, "0123456789") == "") {
+		return "v" + version
+	}
+	return version
+}
+
 // getGoInstallCommands returns install commands for go-install dependencies.
 // Uses GOBIN=/usr/local/bin to ensure binaries are in PATH.
 //
@@ -319,9 +347,7 @@ func buildArchDetectCommand(name string, amd64, arm64 archBinarySpec, atype arch
 // toolchain (GOTOOLCHAIN=local) fails the build, so the registry pins tools
 // whose `@latest` outruns the image Go.
 func getGoInstallCommands(spec DepSpec, version string) InstallCommands {
-	if version == "" {
-		version = "latest"
-	}
+	version = goPackageVersion(version)
 	return InstallCommands{
 		Commands: []string{
 			fmt.Sprintf("GOBIN=/usr/local/bin go install %s@%s", spec.GoPackage, version),
@@ -329,13 +355,67 @@ func getGoInstallCommands(spec DepSpec, version string) InstallCommands {
 	}
 }
 
+func getUvToolCommands(name, version string, spec DepSpec) InstallCommands {
+	pkg := orDefault(spec.Package, name)
+	if version == "" {
+		version = spec.Default
+	}
+	if version != "" {
+		pkg += "==" + version
+	}
+	return InstallCommands{Commands: []string{"uv tool install " + shellQuote(pkg)}}
+}
+
+// getCorepackCommands keeps pinned manager artifacts root-owned. Launchers use
+// the prepared cache explicitly so runtime UIDs cannot drift to a newer default.
+func getCorepackCommands(name, version, fallback string) InstallCommands {
+	target := orDefault(version, fallback)
+	commands := []string{
+		"command -v corepack >/dev/null 2>&1 || npm install -g corepack",
+		"corepack enable " + name,
+	}
+	plain := strings.TrimPrefix(target, "v")
+	pinned := plain != "" && plain[0] >= '0' && plain[0] <= '9'
+	if !pinned {
+		commands = append(commands, "corepack prepare "+name+"@"+shellQuote(target)+" --activate")
+	} else {
+		commands = append(commands,
+			"COREPACK_HOME=/opt/moat-corepack corepack prepare "+name+"@"+shellQuote(target)+" --activate",
+			"chmod -R a+rX /opt/moat-corepack",
+		)
+		aliases := []string{name, "yarnpkg"}
+		if name == "pnpm" {
+			aliases[1] = "pnpx"
+		}
+		for _, alias := range aliases {
+			args := ""
+			if alias == "pnpx" {
+				args = " dlx"
+			}
+			lines := []string{"#!/bin/sh", "export COREPACK_HOME=/opt/moat-corepack", "exec corepack " + shellQuote(name+"@"+target) + args + ` "$@"`}
+			for i := range lines {
+				lines[i] = shellQuote(lines[i])
+			}
+			path := "/usr/local/bin/" + alias
+			commands = append(commands, "rm -f "+path,
+				"printf '%s\\n' "+strings.Join(lines, " ")+" > "+path,
+				"chmod 755 "+path)
+		}
+	}
+	return InstallCommands{Commands: commands, EnvVars: map[string]string{"COREPACK_ENABLE_DOWNLOAD_PROMPT": "0"}}
+}
+
 // getCustomCommands returns install commands for custom dependencies.
 func getCustomCommands(name, version string) InstallCommands {
 	switch name {
 	case "playwright":
+		pkg := "playwright"
+		if version != "" {
+			pkg += "@" + version
+		}
 		return InstallCommands{
 			Commands: []string{
-				"npm install -g playwright",
+				"npm install -g " + shellQuote(pkg),
 				"PLAYWRIGHT_BROWSERS_PATH=/ms-playwright npx playwright install --with-deps chromium chromium-headless-shell",
 				"chmod -R o+rX /ms-playwright",
 			},
@@ -344,20 +424,28 @@ func getCustomCommands(name, version string) InstallCommands {
 			},
 		}
 	case "aws":
+		suffix := ""
+		if version != "" && version != "2" && version != "latest" {
+			suffix = "-" + version
+		}
 		// Detect architecture at build time: x86_64 or aarch64
 		return InstallCommands{
 			Commands: []string{
-				`ARCH=$(uname -m) && curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-${ARCH}.zip" -o /tmp/awscliv2.zip`,
+				fmt.Sprintf(`ARCH=$(uname -m) && curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-${ARCH}%s.zip" -o /tmp/awscliv2.zip`, suffix),
 				"unzip -q /tmp/awscliv2.zip -d /tmp",
 				"/tmp/aws/install",
 				"rm -rf /tmp/aws*",
 			},
 		}
 	case "gcloud":
+		prefix := ""
+		if version != "" && version != "latest" {
+			prefix = version + "-"
+		}
 		// Detect architecture at build time: x86_64 or arm (gcloud uses "arm" not "aarch64")
 		return InstallCommands{
 			Commands: []string{
-				`ARCH=$(uname -m | sed 's/aarch64/arm/') && curl -fsSL "https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-linux-${ARCH}.tar.gz" | tar -xz -C /opt`,
+				fmt.Sprintf(`ARCH=$(uname -m | sed 's/aarch64/arm/') && curl -fsSL "https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-%slinux-${ARCH}.tar.gz" | tar -xz -C /opt`, prefix),
 				"/opt/google-cloud-sdk/install.sh --quiet --path-update=true",
 			},
 			EnvVars: map[string]string{
@@ -369,7 +457,7 @@ func getCustomCommands(name, version string) InstallCommands {
 		return InstallCommands{
 			Commands: []string{
 				"curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o /tmp/rustup-init",
-				"RUSTUP_HOME=/usr/local/rustup CARGO_HOME=/usr/local/cargo sh /tmp/rustup-init -y --default-toolchain stable",
+				"RUSTUP_HOME=/usr/local/rustup CARGO_HOME=/usr/local/cargo sh /tmp/rustup-init -y --default-toolchain " + shellQuote(orDefault(version, "stable")),
 				"chmod -R a+rX /usr/local/rustup /usr/local/cargo",
 				"rm /tmp/rustup-init",
 			},
@@ -436,10 +524,14 @@ func getCustomCommands(name, version string) InstallCommands {
 			},
 		}
 	case "kubectl":
+		target := "$(curl -fsSL https://dl.k8s.io/release/stable.txt)"
+		if version != "" && version != "latest" {
+			target = "v" + strings.TrimPrefix(version, "v")
+		}
 		// Install kubectl - detects architecture
 		return InstallCommands{
 			Commands: []string{
-				`ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/') && curl -fsSL "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/${ARCH}/kubectl" -o /usr/local/bin/kubectl`,
+				fmt.Sprintf(`ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/') && curl -fsSL "https://dl.k8s.io/release/%s/bin/linux/${ARCH}/kubectl" -o /usr/local/bin/kubectl`, target),
 				"chmod +x /usr/local/bin/kubectl",
 			},
 		}
@@ -476,29 +568,9 @@ func getCustomCommands(name, version string) InstallCommands {
 			},
 		}
 	case "yarn":
-		// Enable yarn via Corepack (Node.js 16.10+)
-		// Don't use npm install -g yarn - it conflicts with Corepack
-		return InstallCommands{
-			Commands: []string{
-				"corepack enable",
-				"corepack prepare yarn@stable --activate",
-			},
-			EnvVars: map[string]string{
-				"COREPACK_ENABLE_DOWNLOAD_PROMPT": "0",
-			},
-		}
+		return getCorepackCommands("yarn", version, "stable")
 	case "pnpm":
-		// Enable pnpm via Corepack (Node.js 16.10+)
-		// Don't use npm install -g pnpm - it conflicts with Corepack
-		return InstallCommands{
-			Commands: []string{
-				"corepack enable",
-				"corepack prepare pnpm@latest --activate",
-			},
-			EnvVars: map[string]string{
-				"COREPACK_ENABLE_DOWNLOAD_PROMPT": "0",
-			},
-		}
+		return getCorepackCommands("pnpm", version, "latest")
 	default:
 		return InstallCommands{}
 	}
@@ -549,21 +621,9 @@ func getDynamicPackageCommands(dep Dependency) InstallCommands {
 			},
 		}
 	case TypeDynamicGo:
-		pkg := dep.Package
-		version := "latest"
-		if dep.Version != "" {
-			// Don't prefix "latest" with "v" - it's a special Go module specifier
-			if dep.Version == "latest" {
-				version = "latest"
-			} else {
-				version = "v" + dep.Version
-			}
-		}
-		return InstallCommands{
-			Commands: []string{
-				fmt.Sprintf("GOBIN=/usr/local/bin go install %s@%s", shellQuote(pkg), shellQuote(version)),
-			},
-		}
+		return InstallCommands{Commands: []string{
+			fmt.Sprintf("GOBIN=/usr/local/bin go install %s@%s", shellQuote(dep.Package), shellQuote(goPackageVersion(dep.Version))),
+		}}
 	default:
 		return InstallCommands{}
 	}
