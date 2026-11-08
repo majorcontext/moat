@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"path/filepath"
 	"strings"
+	"syscall"
 )
 
 // initFileRecord is one MOAT_INIT_FILES record: an absolute path and its
@@ -101,11 +102,24 @@ func initFilesPhase(ctx *Context) error {
 		if err := sys.MkdirAll(dir, 0o755); err != nil {
 			return fatalPhaseError(ctx, "creating "+dir, err)
 		}
-		// chmod 755 applies to the immediate parent only, including a
-		// pre-existing one at a stricter mode (INIT-05, Appendix B P2 —
-		// documented parity, not an accident).
-		if err := sys.Chmod(dir, 0o755); err != nil {
-			return fatalPhaseError(ctx, "setting mode on "+dir, err)
+		// Apply 0755 to parents we own (or as root). In Linux bind mode,
+		// the workspace UID can write into the image's shared home but
+		// cannot chmod directories owned by moatuser. Preserve those
+		// existing directory modes; secret files below are still 0600.
+		chmodParent := true
+		if sys.Geteuid() != 0 {
+			info, err := sys.Stat(dir)
+			if err != nil {
+				return fatalPhaseError(ctx, "checking owner of "+dir, err)
+			}
+			if st, ok := info.Sys().(*syscall.Stat_t); ok && int(st.Uid) != sys.Geteuid() {
+				chmodParent = false
+			}
+		}
+		if chmodParent {
+			if err := sys.Chmod(dir, 0o755); err != nil {
+				return fatalPhaseError(ctx, "setting mode on "+dir, err)
+			}
 		}
 		if err := sys.WriteFile(rec.path, data, 0o600); err != nil {
 			return fatalPhaseError(ctx, "writing "+rec.path, err)

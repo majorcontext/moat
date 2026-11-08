@@ -6,12 +6,14 @@ Moat is pre-1.0. The CLI interface and `moat.yaml` schema may change between min
 
 ## v0.9.2 — 2026-11-07
 
-Allows Node.js 26 in container dependencies, using either the official Node image or the NodeSource installer alongside other runtimes. The default Node.js major remains 22.
+Allows Node.js 26 in container dependencies while keeping the default major at 22. Fixes Linux bind-mode init-file staging and restores E2E CI failure reporting.
 
 ### Fixed
 
 - Fix `node@26` dependencies being rejected before image building — previously, the supported Node.js version list stopped at 24. Node.js 26 now works with the official Node image and the NodeSource installer used alongside other runtimes. ([#491](https://github.com/majorcontext/moat/pull/491))
 
+- Fix staging init files under an image-owned directory in Linux bind mode — previously, startup failed when the workspace UID tried to chmod a parent owned by moatuser. Foreign directory modes now stay unchanged while staged files remain private at 0600. ([#491](https://github.com/majorcontext/moat/pull/491))
+- Fix E2E CI reporting success after failed tests — previously, `wait … || true` discarded the test exit status; the workflow now preserves it. Entrypoint privilege-drop scenarios now exercise root startup in volume mode, bind-mode identity has a separate check, and the Pi session test supplies a writable Moat home on Linux. ([#491](https://github.com/majorcontext/moat/pull/491))
 - Fix a timing-sensitive audit collector test in CI — previously, it checked the entry count after a fixed 100 ms sleep; it now waits for asynchronous ingestion with a timeout. ([#490](https://github.com/majorcontext/moat/pull/490))
 
 ## v0.9.1 — 2026-11-05

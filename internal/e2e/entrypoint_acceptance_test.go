@@ -6,7 +6,12 @@ package e2e
 import (
 	"context"
 	"encoding/base64"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -88,6 +93,13 @@ func runEntrypoint(t *testing.T, name string, opts run.Options) (manifest, allLo
 	}
 	defer mgr.Close()
 
+	// These scenarios assert the root entrypoint's privilege drop to UID 5000.
+	// Linux bind mode intentionally uses the host workspace owner's UID instead;
+	// exercise that separate contract explicitly in the bind identity test.
+	// Apple containers use their normal root startup in bind mode.
+	if opts.WorkspaceMode == "" && mgr.RuntimeType() == "docker" {
+		opts.WorkspaceMode = config.WorkspaceModeVolume
+	}
 	opts.Name = name
 	r, err := mgr.Create(ctx, opts)
 	if err != nil {
@@ -192,10 +204,88 @@ func TestEntrypointBaseline(t *testing.T) {
 	})
 }
 
+// TestEntrypointBindWorkspaceIdentity checks the separate bind-mode contract:
+// Linux hosts run as the workspace owner; non-Linux hosts use moatuser.
+func TestEntrypointBindWorkspaceIdentity(t *testing.T) {
+	requireDocker(t)
+	t.Setenv("MOAT_RUNTIME", "docker")
+	workspace := createTestWorkspace(t)
+	m, logs, err := runEntrypoint(t, "acc-bind-identity", run.Options{
+		Workspace: workspace, WorkspaceMode: config.WorkspaceModeBind,
+		Cmd: dumperCmd, Config: &config.Config{Hooks: config.HooksConfig{PreRun: "true"}},
+	})
+	if err != nil || m == "" {
+		t.Fatalf("bind run: %v; logs:\n%s", err, logs)
+	}
+	wantUID, wantGID := expectedBindIdentity(t, workspace)
+	if id := section(m, "identity"); !manifestHas(id, "uid="+strconv.Itoa(wantUID)) {
+		t.Errorf("bind identity = %v, want UID %d", id, wantUID)
+	}
+	if id := section(m, "identity"); !manifestHas(id, "gid="+strconv.Itoa(wantGID)) {
+		t.Errorf("bind identity = %v, want GID %d", id, wantGID)
+	}
+	if leak := section(m, "init-files-leak"); !manifestHas(leak, "clean") {
+		t.Errorf("MOAT_INIT_FILES leaked into bind command: %v", leak)
+	}
+}
+
+func expectedBindIdentity(t *testing.T, workspace string) (int, int) {
+	t.Helper()
+	if runtime.GOOS != "linux" {
+		return 5000, 5000
+	}
+	info, err := os.Stat(workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		t.Fatal("workspace ownership unavailable")
+	}
+	if st.Uid == 0 || st.Uid == 5000 {
+		return 5000, 5000
+	}
+	return int(st.Uid), int(st.Gid)
+}
+
+// Preserve non-root Linux bind coverage as well as the root-volume scenarios.
+func TestEntrypointBindFeatures(t *testing.T) {
+	requireDocker(t)
+	t.Setenv("MOAT_RUNTIME", "docker")
+	workspace := createTestWorkspace(t)
+	content := base64.StdEncoding.EncodeToString([]byte("bind-secret"))
+	m, logs, err := runEntrypoint(t, "acc-bind-features", run.Options{
+		Workspace: workspace, WorkspaceMode: config.WorkspaceModeBind, Clipboard: true,
+		Env:    []string{"MOAT_INIT_FILES=/home/moatuser/.bind-initrc\t" + content},
+		Config: &config.Config{Hooks: config.HooksConfig{PreRun: "touch /workspace/.bind-marker"}},
+		Cmd:    []string{"sh", "-c", "test \"$(cat /home/moatuser/.bind-initrc)\" = bind-secret && " + stateDumperScript},
+	})
+	if err != nil || m == "" {
+		t.Fatalf("bind feature run: %v; logs:\n%s", err, logs)
+	}
+	wantUID, _ := expectedBindIdentity(t, workspace)
+	if id := section(m, "identity"); !manifestHas(id, "uid="+strconv.Itoa(wantUID)) {
+		t.Errorf("bind identity = %v, want UID %d", id, wantUID)
+	}
+	if !hasFileMode(section(m, "home"), ".bind-initrc", "-rw-------") {
+		t.Errorf("bind init file mode incorrect:\n%s", m)
+	}
+	if info, err := os.Stat(filepath.Join(workspace, ".bind-marker")); err != nil || !info.Mode().IsRegular() {
+		t.Errorf("bind pre_run marker missing from host workspace: %v", err)
+	}
+	if !manifestHas(section(m, "children"), "Xvfb running") {
+		t.Errorf("bind clipboard child missing:\n%s", m)
+	}
+	if !manifestHas(section(m, "init-files-leak"), "clean") {
+		t.Error("MOAT_INIT_FILES leaked into bind command")
+	}
+}
+
 // TestEntrypointFeatureScenarios exercises the feature phases on Docker and
 // asserts each phase's observable result.
 func TestEntrypointFeatureScenarios(t *testing.T) {
 	requireDocker(t)
+	t.Setenv("MOAT_RUNTIME", "docker")
 
 	t.Run("pre-run-hook", func(t *testing.T) {
 		m, logs, _ := runEntrypoint(t, "acc-prerun", run.Options{
@@ -296,6 +386,7 @@ func TestEntrypointFeatureScenarios(t *testing.T) {
 // the user command does not run.
 func TestEntrypointPreRunFailure(t *testing.T) {
 	requireDocker(t)
+	t.Setenv("MOAT_RUNTIME", "docker")
 	_, logs, waitErr := runEntrypoint(t, "acc-prerun-fail", run.Options{
 		Workspace: createTestWorkspace(t),
 		Cmd:       []string{"sh", "-c", "echo SHOULD-NOT-RUN"},

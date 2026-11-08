@@ -161,8 +161,8 @@ jobs:
             fi
             sleep 10
           done
-          wait $TEST_PID 2>/dev/null || true
-          EXIT_CODE=$?
+          EXIT_CODE=0
+          wait "$TEST_PID" 2>/dev/null || EXIT_CODE=$?
           echo "Test exited with code $EXIT_CODE"
           cat /tmp/e2e-output.log || echo "(no output file)"
           exit $EXIT_CODE
