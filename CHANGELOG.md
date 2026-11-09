@@ -4,6 +4,14 @@ Moat runs AI coding agents in isolated containers with credential injection, net
 
 Moat is pre-1.0. The CLI interface and `moat.yaml` schema may change between minor versions. Breaking changes are listed under **Breaking** headings below.
 
+## Unreleased
+
+Adds commands to inspect credential profiles and clear or remove their local data.
+
+### Added
+
+- **Profile management commands** — `moat profile list` shows configured and implicit profiles, active selection, inheritance, and errors per profile. `moat profile show [name]` shows lookup order and environment variable names without exposing values. `reset <name>` clears local grants, SSH mappings, and exclusions while preserving settings; `remove <name>` also deletes settings and refuses profiles with dependent children. Inspection supports JSON; reset and removal support confirmation, `--force`, and validated `--dry-run`, and coordinate with credential refreshes. ([#492](https://github.com/majorcontext/moat/pull/492))
+
 ## v0.9.2 — 2026-11-07
 
 Accepts security-patch pins within maintained dependency lines and tracks upstream end-of-life dates with a daily catalog refresh. Fixes Linux bind-mode init-file staging and restores E2E CI failure reporting.

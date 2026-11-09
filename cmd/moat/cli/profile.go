@@ -23,20 +23,20 @@ func newProfileCommand() *cobra.Command {
 			if err := config.CreateProfile(args[0], config.ProfileConfig{Inherit: parent, InheritDefault: inheritDefault}); err != nil {
 				return err
 			}
-			cmd.Printf("Created profile %s", args[0])
+			fmt.Fprintf(cmd.OutOrStdout(), "Created profile %s", args[0])
 			if inheritDefault {
-				cmd.Print(" (inherits default store)")
+				fmt.Fprint(cmd.OutOrStdout(), " (inherits default store)")
 			} else if parent != "" {
-				cmd.Printf(" (inherits %s)", parent)
+				fmt.Fprintf(cmd.OutOrStdout(), " (inherits %s)", parent)
 			}
-			cmd.Println()
+			fmt.Fprintln(cmd.OutOrStdout())
 			return nil
 		},
 	}
 	create.Flags().StringVar(&parent, "inherit", "", "inherit grants and environment variables from a named profile")
 	create.Flags().BoolVar(&inheritDefault, "inherit-default", false, "inherit grants from the default credential store")
 	create.MarkFlagsMutuallyExclusive("inherit", "inherit-default")
-	cmd.AddCommand(create)
+	cmd.AddCommand(create, newProfileListCommand(), newProfileShowCommand(), newProfileClearCommand("remove"), newProfileClearCommand("reset"))
 	return cmd
 }
 

@@ -122,6 +122,18 @@ func (s *FileStore) lock(ctx context.Context, provider Provider) (func(), error)
 	// Refresh token exchanges normally time out after 30 seconds.
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
+	// A stable sibling lock coordinates profile reset/removal with writes and
+	// refreshes. Acquire it before opening the provider lock, whose directory
+	// can be moved by profile lifecycle operations.
+	storeLock := flock.New(s.dir+".profile-lock", flock.SetPermissions(0o600))
+	storeLocked, err := storeLock.TryRLockContext(ctx, 25*time.Millisecond)
+	if err != nil || !storeLocked {
+		_ = storeLock.Close()
+		if err == nil {
+			err = fmt.Errorf("store lock unavailable")
+		}
+		return nil, fmt.Errorf("locking credential profile: %w", err)
+	}
 	// Keep the lock file permanently: unlinking it could let another process
 	// lock a different inode while existing waiters still use the original.
 	// The stable lock inode is separate from the atomically replaced secret.
@@ -129,6 +141,7 @@ func (s *FileStore) lock(ctx context.Context, provider Provider) (func(), error)
 	locked, err := lock.TryLockContext(ctx, 25*time.Millisecond)
 	if err != nil || !locked {
 		_ = lock.Close()
+		_ = storeLock.Close()
 		if errors.Is(err, context.DeadlineExceeded) {
 			return nil, fmt.Errorf("waiting for credential %s: %w; another moat process holds the lock, retry when it finishes", provider, err)
 		}
@@ -137,7 +150,10 @@ func (s *FileStore) lock(ctx context.Context, provider Provider) (func(), error)
 		}
 		return nil, fmt.Errorf("locking credential %s: %w", provider, err)
 	}
-	return func() { _ = lock.Close() }, nil
+	return func() {
+		_ = lock.Close()
+		_ = storeLock.Close()
+	}, nil
 }
 
 type lockedRefreshStore struct {

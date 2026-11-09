@@ -1,6 +1,7 @@
 package credential
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -105,6 +106,11 @@ func (s *FileStore) AddSSHMapping(mapping SSHMapping) error {
 	if err := validateProvider(key); err != nil {
 		return err
 	}
+	unlock, err := s.lock(context.Background(), Provider("ssh-mappings"))
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	mappings, err := s.localSSHMappings()
 	if err != nil {
 		return err
@@ -145,6 +151,11 @@ func (s *FileStore) RemoveSSHMapping(host string) error {
 	if err := validateProvider(key); err != nil {
 		return err
 	}
+	unlock, err := s.lock(context.Background(), Provider("ssh-mappings"))
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	mappings, err := s.localSSHMappings()
 	if err != nil {
 		return err
