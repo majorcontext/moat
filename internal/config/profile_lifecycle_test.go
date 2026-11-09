@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -127,31 +128,47 @@ func TestProfileClearDoesNotFollowSymlinksOrDeleteOnBadConfig(t *testing.T) {
 }
 
 func TestProfileClearRestoresStoreWhenConfigCannotBeSaved(t *testing.T) {
-	if os.Geteuid() == 0 {
-		t.Skip("requires unprivileged filesystem permissions")
-	}
-	home := t.TempDir()
-	t.Setenv("MOAT_HOME", home)
-	if err := CreateProfile("work", ProfileConfig{}); err != nil {
-		t.Fatal(err)
-	}
-	store := filepath.Join(home, "credentials", "profiles", "work")
-	if err := os.MkdirAll(store, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	path := filepath.Join(store, "github.enc")
-	if err := os.WriteFile(path, []byte("preserved"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chmod(home, 0o500); err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = os.Chmod(home, 0o700) }()
-	if err := ResetProfile("work"); err == nil {
-		t.Fatal("reset succeeded with unwritable config")
-	}
-	data, err := os.ReadFile(path)
-	if err != nil || string(data) != "preserved" {
-		t.Fatalf("rollback lost store: %q %v", data, err)
+	for name, operation := range map[string]func(string) error{"reset": ResetProfile, "remove": RemoveProfile} {
+		t.Run(name, func(t *testing.T) {
+			if os.Geteuid() == 0 {
+				t.Skip("requires unprivileged filesystem permissions")
+			}
+			home := t.TempDir()
+			t.Setenv("MOAT_HOME", home)
+			if err := CreateProfile("work", ProfileConfig{}); err != nil {
+				t.Fatal(err)
+			}
+			store := filepath.Join(home, "credentials", "profiles", "work")
+			if err := os.MkdirAll(store, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(store, "github.enc")
+			if err := os.WriteFile(path, []byte("preserved"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chmod(home, 0o500); err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = os.Chmod(home, 0o700) }()
+			clearErr := operation("work")
+			if !errors.Is(clearErr, os.ErrPermission) || !strings.Contains(clearErr.Error(), ".config-") {
+				t.Fatalf("expected config-write failure, got %v", clearErr)
+			}
+			data, err := os.ReadFile(path)
+			if err != nil || string(data) != "preserved" {
+				t.Fatalf("rollback lost store: %q %v", data, err)
+			}
+			cfg, err := LoadProfileConfig()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, exists := cfg.Profiles["work"]; !exists {
+				t.Fatal("rollback lost profile settings")
+			}
+			staged, err := filepath.Glob(filepath.Join(filepath.Dir(store), ".profile-clear-*"))
+			if err != nil || len(staged) != 0 {
+				t.Fatalf("left staging directories: %v %v", staged, err)
+			}
+		})
 	}
 }

@@ -287,6 +287,17 @@ func TestProfileClearWaitsForCredentialRefresh(t *testing.T) {
 				t.Fatalf("reset raced past refresh: %v", err)
 			case <-time.After(100 * time.Millisecond):
 			}
+			// A blocked clear must not stall unrelated global config changes.
+			created := make(chan error, 1)
+			go func() { created <- config.CreateProfile("unrelated", config.ProfileConfig{}) }()
+			select {
+			case err := <-created:
+				if err != nil {
+					t.Fatal(err)
+				}
+			case <-time.After(2 * time.Second):
+				t.Fatal("waiting for a refresh held the global config lock")
+			}
 			if err := locked.Save(Credential{Provider: ProviderGitHub, Token: "refreshed"}); err != nil {
 				t.Fatal(err)
 			}

@@ -169,7 +169,11 @@ func newProfileClearCommand(action string) *cobra.Command {
 				if action == "remove" {
 					consequence = "delete settings, local grants, SSH mappings and exclusions"
 				}
-				fmt.Fprintf(cmd.ErrOrStderr(), "%s profile %s: %s? [y/N] ", action, name, consequence)
+				active := ""
+				if name == credential.ActiveProfile {
+					active = " (active profile for this invocation)"
+				}
+				fmt.Fprintf(cmd.ErrOrStderr(), "%s profile %s%s: %s? [y/N] ", action, name, active, consequence)
 				answer, err := bufio.NewReader(cmd.InOrStdin()).ReadString('\n')
 				if err != nil && err != io.EOF {
 					return err

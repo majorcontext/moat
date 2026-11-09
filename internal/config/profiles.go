@@ -183,12 +183,42 @@ func clearProfile(name string, remove bool) error {
 	if err := ValidateProfileName(name); err != nil {
 		return err
 	}
+	if checkErr := CheckProfileClear(name, remove); checkErr != nil {
+		return checkErr
+	}
 	if err := os.MkdirAll(GlobalConfigDir(), 0o700); err != nil {
 		return err
 	}
+	// Wait for credential operations before taking the global config lock.
+	// Revalidate existence and dependents under config.lock below.
+	storeDir := filepath.Join(GlobalConfigDir(), "credentials", "profiles", name)
+	// This sibling lock survives directory removal and is shared by credential
+	// writes/refreshes. Holding it exclusively prevents stale lock inodes.
+	if mkdirErr := os.MkdirAll(filepath.Dir(storeDir), 0o700); mkdirErr != nil {
+		return mkdirErr
+	}
+	storeLock := flock.New(storeDir+".profile-lock", flock.SetPermissions(0o600))
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	locked, err := storeLock.TryLockContext(ctx, 25*time.Millisecond)
+	if err != nil || !locked {
+		_ = storeLock.Close()
+		if err == nil {
+			err = fmt.Errorf("store lock unavailable")
+		}
+		return fmt.Errorf("waiting for credential operations in profile %s: %w", name, err)
+	}
+	defer func() { _ = storeLock.Close() }()
 	lock := flock.New(filepath.Join(GlobalConfigDir(), "config.lock"), flock.SetPermissions(0o600))
-	if err := lock.Lock(); err != nil {
-		return fmt.Errorf("locking global config: %w", err)
+	// Lock order is store -> config. CreateProfile takes only config.lock
+	// and must not open credential stores while holding it.
+	configLocked, lockErr := lock.TryLockContext(ctx, 25*time.Millisecond)
+	if lockErr != nil || !configLocked {
+		_ = lock.Close()
+		if lockErr == nil {
+			lockErr = fmt.Errorf("config lock unavailable")
+		}
+		return fmt.Errorf("waiting for global profile configuration: %w", lockErr)
 	}
 	defer func() { _ = lock.Close() }()
 	data, err := os.ReadFile(filepath.Join(GlobalConfigDir(), "config.yaml"))
@@ -245,24 +275,6 @@ func clearProfile(name string, remove bool) error {
 	}
 	// Move the store aside before changing config. A failed config write can
 	// restore it; cleanup never traverses a replacement created concurrently.
-	storeDir := filepath.Join(GlobalConfigDir(), "credentials", "profiles", name)
-	// This sibling lock survives directory removal and is shared by credential
-	// writes/refreshes. Holding it exclusively prevents stale lock inodes.
-	if mkdirErr := os.MkdirAll(filepath.Dir(storeDir), 0o700); mkdirErr != nil {
-		return mkdirErr
-	}
-	storeLock := flock.New(storeDir+".profile-lock", flock.SetPermissions(0o600))
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-	defer cancel()
-	locked, err := storeLock.TryLockContext(ctx, 25*time.Millisecond)
-	if err != nil || !locked {
-		_ = storeLock.Close()
-		if err == nil {
-			err = fmt.Errorf("store lock unavailable")
-		}
-		return fmt.Errorf("waiting for credential operations in profile %s: %w", name, err)
-	}
-	defer func() { _ = storeLock.Close() }()
 	var staged string
 	if info, err := os.Lstat(storeDir); err == nil {
 		if !info.IsDir() {

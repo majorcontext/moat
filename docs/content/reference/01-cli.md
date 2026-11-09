@@ -1022,7 +1022,9 @@ moat profile remove work
 moat profile remove work --force
 ```
 
-Aliases: `profile rm`, `profile delete`. Remove and reset require an explicit name; `--profile` does not select the deletion target. Both prompt for confirmation unless `--force` is supplied and support `--dry-run`. A named profile called `default` can be removed; the unscoped store cannot be removed with these commands. They change local storage only, without revoking upstream tokens or changing existing runs.
+Aliases: `profile rm`, `profile delete`. Remove and reset require an explicit name; `--profile` does not select the deletion target. Both prompt for confirmation unless `--force` is supplied and support `--dry-run`. Closed or empty stdin cancels without `--force`; scripts should pass that flag explicitly to skip the prompt. The prompt identifies an active target profile. A named profile called `default` can be removed; the unscoped store cannot be removed with these commands. They change local storage only, without revoking upstream tokens or changing existing runs.
+
+Interrupted operations can leave private `.profile-clear-*` recovery directories under `~/.moat/credentials/profiles/` (or the corresponding `MOAT_HOME` location). These are omitted from profile listings. Inspect them before manual cleanup: a failed rollback may leave the only copy of the credentials there.
 
 ---
 
