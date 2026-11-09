@@ -979,6 +979,53 @@ moat revoke github --profile work
 
 ---
 
+## moat profile list
+
+List configured profiles and profiles created by granting credentials. Includes the unscoped store as `(default)` and marks the active profile for this invocation with `*`.
+
+```bash
+moat profile list
+moat profile list --json
+```
+
+The table shows `NAME`, `ACTIVE`, `INHERITS`, and `STATUS`. Broken inheritance is reported per row so other profiles remain visible. Listing does not unlock credentials or print environment values. A named profile called `default` is distinct from the unscoped `(default)` store.
+
+## moat profile show
+
+Inspect a profile's parent, full inheritance lookup order, and effective environment variable names. Values and credential secrets are omitted. Without a name, inspect the active profile selected by `--profile` or `MOAT_PROFILE`, or the unscoped store when neither is set.
+
+```bash
+moat profile show work
+moat profile show --profile work --json
+moat grant list --profile work  # Inspect effective grants and their sources
+```
+
+Aliases: `profile ls` for list and `profile inspect` for show.
+
+## moat profile reset
+
+Clear a named profile's local credentials, SSH mappings, and inheritance exclusions. Keep its environment and inheritance settings. Inherited grants remain available; clearing exclusions makes previously excluded parent grants available again.
+
+```bash
+moat profile reset work
+moat profile reset work --force  # Skip confirmation
+```
+
+Reset preserves profiles that have no explicit configuration entry, so they remain visible after their credentials are cleared.
+
+## moat profile remove
+
+Remove a named profile's settings and local credential store. Refuses to remove a profile that another profile inherits from; update or remove those children first.
+
+```bash
+moat profile remove work
+moat profile remove work --force
+```
+
+Aliases: `profile rm`, `profile delete`. Remove and reset require an explicit name; `--profile` does not select the deletion target. Both prompt for confirmation unless `--force` is supplied and support `--dry-run`. A named profile called `default` can be removed; the unscoped store cannot be removed with these commands. They change local storage only, without revoking upstream tokens or changing existing runs.
+
+---
+
 ## moat profile create
 
 Create a credential profile, optionally inheriting grants and environment variables from a parent.

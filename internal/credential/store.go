@@ -270,6 +270,12 @@ func ListProfiles() ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	return ListProfilesFromConfig(cfg)
+}
+
+// ListProfilesFromConfig includes disk-only profiles without revalidating inheritance.
+// Inspection can use this to display profiles whose inheritance needs repair.
+func ListProfilesFromConfig(cfg *config.GlobalConfig) ([]string, error) {
 	names := make(map[string]bool)
 	for name := range cfg.Profiles {
 		names[name] = true

@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/majorcontext/moat/internal/config"
 )
@@ -257,5 +258,88 @@ func TestSSHProfileInheritance(t *testing.T) {
 	add(child, "work.example", "custom")
 	if source, err := child.SSHSource("work.example"); err != nil || source != "child" {
 		t.Fatalf("source = %s, %v", source, err)
+	}
+}
+
+func TestProfileClearWaitsForCredentialRefresh(t *testing.T) {
+	for name, operation := range map[string]func(string) error{"reset": config.ResetProfile, "remove": config.RemoveProfile} {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv("MOAT_HOME", t.TempDir())
+			if err := config.CreateProfile("work", config.ProfileConfig{InheritDefault: true}); err != nil {
+				t.Fatal(err)
+			}
+			store, err := NewProfileStore("work", make([]byte, 32))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := store.Save(Credential{Provider: ProviderGitHub, Token: "before"}); err != nil {
+				t.Fatal(err)
+			}
+			locked, unlock, err := LockRefreshStore(context.Background(), store, ProviderGitHub)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer unlock()
+			finished := make(chan error, 1)
+			go func() { finished <- operation("work") }()
+			select {
+			case err := <-finished:
+				t.Fatalf("reset raced past refresh: %v", err)
+			case <-time.After(100 * time.Millisecond):
+			}
+			if err := locked.Save(Credential{Provider: ProviderGitHub, Token: "refreshed"}); err != nil {
+				t.Fatal(err)
+			}
+			unlock()
+			select {
+			case err := <-finished:
+				if err != nil {
+					t.Fatal(err)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("reset did not finish after refresh")
+			}
+			if err := store.Save(Credential{Provider: ProviderGitHub, Token: "stale"}); err == nil {
+				t.Fatal("stale writer recreated cleared credentials")
+			}
+			fresh, err := NewProfileStore("work", make([]byte, 32))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := fresh.Get(ProviderGitHub); !errors.Is(err, ErrNotFound) {
+				t.Fatalf("refresh survived reset: %v", err)
+			}
+			if err := fresh.Save(Credential{Provider: ProviderGitHub, Token: "new-grant"}); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestResetClearsOverridesAndExclusionsButKeepsInheritedGrants(t *testing.T) {
+	parent, _, child := inheritedStores(t)
+	for _, provider := range []Provider{ProviderGitHub, Provider("oauth:linear")} {
+		if err := parent.Save(Credential{Provider: provider, Token: "parent"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := child.Save(Credential{Provider: ProviderGitHub, Token: "local"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := child.Delete(Provider("oauth:linear")); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.ResetProfile(child.profile); err != nil {
+		t.Fatal(err)
+	}
+	fresh, err := NewProfileStore(child.profile, make([]byte, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, provider := range []Provider{ProviderGitHub, Provider("oauth:linear")} {
+		cred, err := fresh.Get(provider)
+		if err != nil || cred.Token != "parent" {
+			t.Fatalf("inherited %s not restored: %v, %v", provider, cred, err)
+		}
 	}
 }
