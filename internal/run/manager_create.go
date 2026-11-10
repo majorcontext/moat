@@ -874,10 +874,10 @@ func (m *Manager) Create(ctx context.Context, opts Options) (resRun *Run, retErr
 
 		// Build proxy environment using synthetic hostnames on all runtimes.
 		// Host-network mode is used on Docker Linux (without gVisor) when no ports
-		// need publishing. In that mode, the container shares the host loopback,
+		// need publishing and no strict firewall is installed. In that mode, the container shares the host loopback,
 		// so localhost must NOT be in NO_PROXY (otherwise it bypasses
 		// network.host enforcement).
-		isHostNet := m.useHostNetwork(len(ports) > 0)
+		isHostNet := m.useHostNetwork(len(ports) > 0, r.FirewallEnabled)
 		proxyEnv = buildProxyEnv(regResp.AuthToken, regResp.ProxyPort, isHostNet)
 
 		// Advertise each serial device as an rfc2217:// URL. Control lines have
@@ -1019,7 +1019,7 @@ region = %s
 
 	// Configure network mode and extra hosts based on runtime capabilities.
 	needsProxy := r.ProxyAuthToken != ""
-	networkMode, extraHosts := m.resolveNetworkConfig(len(ports) > 0, needsProxy, hostAddr)
+	networkMode, extraHosts := m.resolveNetworkConfig(len(ports) > 0, needsProxy, r.FirewallEnabled, hostAddr)
 
 	// Add the active credential profile's env vars. First of the three env
 	// layers, so moat.yaml and -e both override them: a profile carries the

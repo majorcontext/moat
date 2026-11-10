@@ -829,6 +829,19 @@ func (r *DockerRuntime) SetupFirewall(ctx context.Context, containerID string, p
 		}
 	}
 
+	// Refuse to firewall a container that shares the host network namespace:
+	// the rules below would be installed in the host's own OUTPUT chain and
+	// drop every outbound connection on the machine (#493). The run manager
+	// never selects host networking for a firewalled run; this guards against
+	// a regression turning into a machine-wide outage.
+	ctrInspect, err := r.cli.ContainerInspect(ctx, containerID)
+	if err != nil {
+		return fmt.Errorf("inspecting container for firewall setup: %w", err)
+	}
+	if ctrInspect.HostConfig != nil && ctrInspect.HostConfig.NetworkMode.IsHost() {
+		return fmt.Errorf("refusing to install firewall rules in container %s: it uses host networking, so the rules would apply to the host's firewall", containerID)
+	}
+
 	// iptables rules:
 	// 1. Allow loopback
 	// 2. Allow established connections (for responses)

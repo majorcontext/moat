@@ -96,7 +96,7 @@ The proxy binds to `0.0.0.0` (all interfaces) and requires per-run token authent
 
 Each run receives a cryptographically random 32-byte token in its proxy URL (`http://moat:<token>@moat-proxy:<port>`). The proxy validates the token and selects that run's credentials and network policy. Requests without a valid token are rejected.
 
-On Linux, gVisor uses bridge networking. Standard Docker uses host networking when proxy access is needed and no ports are published; services and BuildKit select dedicated bridge networks. See [Runtimes](./07-runtimes.md#sandbox-modes).
+On Linux, gVisor uses bridge networking. Standard Docker uses host networking when proxy access is needed, no ports are published, and `network.policy` is not `strict`; strict runs use bridge networking so their iptables rules apply only to the container. Services and BuildKit select dedicated bridge networks. See [Runtimes](./07-runtimes.md#sandbox-modes).
 
 ## Proxy lifecycle
 
