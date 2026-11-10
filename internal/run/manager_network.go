@@ -21,17 +21,17 @@ import (
 //  2. We're on macOS/Windows (host mode not supported)
 //  3. We're using the Apple container runtime
 //  4. We're using gVisor, whose default netstack needs a container network
-//  5. A strict-policy firewall will be installed (see useHostNetwork)
+//  5. A strict-policy firewall will be installed
 //
-// We only use host mode when we need proxy access AND don't have ports to
-// publish AND no firewall is installed, on Linux without gVisor. Services and
-// BuildKit may subsequently select a dedicated bridge network.
-func (m *Manager) resolveNetworkConfig(needsPorts, needsProxy, firewall bool, hostAddr string) (networkMode string, extraHosts []string) {
+// hostNet is the caller's useHostNetwork result, which encodes all of the
+// above; Create computes it once so the network mode and NO_PROXY agree.
+// Services and BuildKit may subsequently select a dedicated bridge network.
+func (m *Manager) resolveNetworkConfig(needsPorts, needsProxy, hostNet bool, hostAddr string) (networkMode string, extraHosts []string) {
 	if !needsProxy && !needsPorts {
 		return "", nil
 	}
 
-	if m.useHostNetwork(needsPorts, firewall) {
+	if hostNet {
 		// Standard Docker on Linux without ports shares the host network.
 		networkMode = "host"
 	} else {
@@ -68,8 +68,9 @@ func (m *Manager) resolveNetworkConfig(needsPorts, needsProxy, firewall bool, ho
 }
 
 // useHostNetwork reports whether the container shares the host network
-// namespace. resolveNetworkConfig (network mode) and Create (NO_PROXY) must
-// agree, so both call this.
+// namespace. Create calls it once and passes the result to both
+// resolveNetworkConfig (network mode) and buildProxyEnv (NO_PROXY), which
+// must agree.
 //
 // gVisor is excluded: under Docker's --network=host a stock runsc sandbox has
 // no network interfaces at all, so the container cannot reach the proxy.

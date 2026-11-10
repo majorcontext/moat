@@ -383,6 +383,11 @@ func (m *Manager) Create(ctx context.Context, opts Options) (resRun *Run, retErr
 	// Start proxy if we have grants (for credential injection) or strict network policy
 	needsProxyForGrants := len(opts.Grants) > 0
 	needsProxyForFirewall := opts.Config != nil && opts.Config.Network.Policy == "strict"
+	// hostNet is the single host-networking decision for this run: the
+	// network mode (resolveNetworkConfig) and NO_PROXY (buildProxyEnv) must
+	// agree, so both use this value. It derives from config rather than
+	// r.FirewallEnabled so it cannot be computed before that flag is set.
+	hostNet := m.useHostNetwork(len(ports) > 0, needsProxyForFirewall)
 	// Start proxy for any feature that the proxy is responsible for enforcing
 	// or relaying, even when there are no grants and the policy is permissive.
 	// Without this, setting `network.host`, `network.rules`, MCP servers,
@@ -877,8 +882,7 @@ func (m *Manager) Create(ctx context.Context, opts Options) (resRun *Run, retErr
 		// need publishing and no strict firewall is installed. In that mode, the container shares the host loopback,
 		// so localhost must NOT be in NO_PROXY (otherwise it bypasses
 		// network.host enforcement).
-		isHostNet := m.useHostNetwork(len(ports) > 0, r.FirewallEnabled)
-		proxyEnv = buildProxyEnv(regResp.AuthToken, regResp.ProxyPort, isHostNet)
+		proxyEnv = buildProxyEnv(regResp.AuthToken, regResp.ProxyPort, hostNet)
 
 		// Advertise each serial device as an rfc2217:// URL. Control lines have
 		// no pty representation, so the URL — not a device path — is what tools
@@ -1019,7 +1023,7 @@ region = %s
 
 	// Configure network mode and extra hosts based on runtime capabilities.
 	needsProxy := r.ProxyAuthToken != ""
-	networkMode, extraHosts := m.resolveNetworkConfig(len(ports) > 0, needsProxy, r.FirewallEnabled, hostAddr)
+	networkMode, extraHosts := m.resolveNetworkConfig(len(ports) > 0, needsProxy, hostNet, hostAddr)
 
 	// Add the active credential profile's env vars. First of the three env
 	// layers, so moat.yaml and -e both override them: a profile carries the
