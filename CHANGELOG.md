@@ -6,7 +6,9 @@ Moat is pre-1.0. The CLI interface and `moat.yaml` schema may change between min
 
 ## Unreleased
 
-Adds commands to inspect credential profiles and clear or remove their local data, and stops strict-policy runs on Docker on Linux from installing their egress firewall in the host's network namespace.
+## v0.9.3 — 2026-11-10
+
+Fixes a strict-policy bug on Docker on Linux that blocked all outbound traffic on the host, and adds commands to inspect, reset, and remove credential profiles. Strict runs on Linux now reach host services through `moat-host` instead of `localhost`.
 
 ### Added
 
