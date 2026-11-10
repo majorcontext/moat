@@ -386,8 +386,9 @@ func (m *Manager) Create(ctx context.Context, opts Options) (resRun *Run, retErr
 	// hostNet is the single host-networking decision for this run: the
 	// network mode (resolveNetworkConfig, below the SSH agent setup) and
 	// NO_PROXY (buildProxyEnv, in the proxy block) must agree, so both reuse
-	// this value rather than calling useHostNetwork again. It derives from config rather than
-	// r.FirewallEnabled so it cannot be computed before that flag is set.
+	// this value rather than calling useHostNetwork again. It derives from
+	// config rather than r.FirewallEnabled so it cannot be computed before
+	// that flag is set.
 	hostNet := m.useHostNetwork(len(ports) > 0, needsProxyForFirewall)
 	// Start proxy for any feature that the proxy is responsible for enforcing
 	// or relaying, even when there are no grants and the policy is permissive.
@@ -879,10 +880,10 @@ func (m *Manager) Create(ctx context.Context, opts Options) (resRun *Run, retErr
 		}
 
 		// Build proxy environment using synthetic hostnames on all runtimes.
-		// Host-network mode is used on Docker Linux (without gVisor) when no ports
-		// need publishing and no strict firewall is installed. In that mode, the container shares the host loopback,
-		// so localhost must NOT be in NO_PROXY (otherwise it bypasses
-		// network.host enforcement).
+		// Host-network mode is used on Docker Linux (without gVisor) when no
+		// ports need publishing and no strict firewall is installed. In that
+		// mode the container shares the host loopback, so localhost must NOT
+		// be in NO_PROXY (otherwise it bypasses network.host enforcement).
 		proxyEnv = buildProxyEnv(regResp.AuthToken, regResp.ProxyPort, hostNet)
 
 		// Advertise each serial device as an rfc2217:// URL. Control lines have
