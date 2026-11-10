@@ -10,6 +10,12 @@ import (
 	"github.com/majorcontext/moat/internal/container"
 )
 
+// netConfig resolves the network config the way Create does: one
+// useHostNetwork decision feeding resolveNetworkConfig.
+func netConfig(m *Manager, needsPorts, needsProxy, firewall bool) (string, []string) {
+	return m.resolveNetworkConfig(needsPorts, needsProxy, m.useHostNetwork(needsPorts, firewall), "127.0.0.1")
+}
+
 func mgrWithRuntime(rt container.Runtime) *Manager {
 	return &Manager{runtimePool: container.NewRuntimePoolWithDefault(rt)}
 }
@@ -22,7 +28,7 @@ func (noHostNetRuntime) SupportsHostNetwork() bool { return false }
 
 func TestResolveNetworkConfig_NoneNeeded(t *testing.T) {
 	m := &Manager{} // defaultRuntime is never reached on this path
-	mode, hosts := m.resolveNetworkConfig(false, false, "127.0.0.1")
+	mode, hosts := m.resolveNetworkConfig(false, false, false, "127.0.0.1")
 	if mode != "" || hosts != nil {
 		t.Fatalf("expected empty config, got mode=%q hosts=%v", mode, hosts)
 	}
@@ -32,7 +38,7 @@ func TestResolveNetworkConfig_HostMode(t *testing.T) {
 	// stubRuntime supports host network; with proxy needed and no ports, host
 	// mode lets the container reach 127.0.0.1.
 	m := mgrWithRuntime(&stubRuntime{})
-	mode, hosts := m.resolveNetworkConfig(false, true, "127.0.0.1")
+	mode, hosts := netConfig(m, false, true, false)
 	if mode != "host" {
 		t.Fatalf("expected host mode, got %q", mode)
 	}
@@ -47,7 +53,7 @@ func TestResolveNetworkConfig_HostMode(t *testing.T) {
 func TestResolveNetworkConfig_BridgeWithPortsAndProxy(t *testing.T) {
 	// Proxy and ports needed simultaneously: ports force bridge mode.
 	m := mgrWithRuntime(&stubRuntime{})
-	mode, _ := m.resolveNetworkConfig(true, true, "127.0.0.1")
+	mode, _ := netConfig(m, true, true, false)
 	if mode != "bridge" {
 		t.Fatalf("expected bridge mode for proxy+ports, got %q", mode)
 	}
@@ -56,7 +62,7 @@ func TestResolveNetworkConfig_BridgeWithPortsAndProxy(t *testing.T) {
 func TestResolveNetworkConfig_BridgeWithPorts(t *testing.T) {
 	// Published ports force bridge mode even when host network is supported.
 	m := mgrWithRuntime(&stubRuntime{})
-	mode, hosts := m.resolveNetworkConfig(true, false, "127.0.0.1")
+	mode, hosts := netConfig(m, true, false, false)
 	if mode != "bridge" {
 		t.Fatalf("expected bridge mode, got %q", mode)
 	}
@@ -69,7 +75,7 @@ func TestResolveNetworkConfig_BridgeWithPorts(t *testing.T) {
 func TestResolveNetworkConfig_BridgeWhenNoHostNetwork(t *testing.T) {
 	// A runtime without host-network support uses bridge mode even with no ports.
 	m := mgrWithRuntime(noHostNetRuntime{&stubRuntime{}})
-	mode, _ := m.resolveNetworkConfig(false, true, "127.0.0.1")
+	mode, _ := netConfig(m, false, true, false)
 	if mode != "bridge" {
 		t.Fatalf("expected bridge mode when host network unsupported, got %q", mode)
 	}
@@ -263,7 +269,7 @@ func TestResolveNetworkConfig_GVisorUsesBridge(t *testing.T) {
 	// A stock runsc sandbox has no interfaces under --network=host, so gVisor
 	// runs must use bridge mode even when host networking is otherwise chosen.
 	m := mgrWithRuntime(gvisorRuntime{stubRuntime: &stubRuntime{}, gvisor: true})
-	mode, hosts := m.resolveNetworkConfig(false, true, "127.0.0.1")
+	mode, hosts := netConfig(m, false, true, false)
 	if mode != "bridge" {
 		t.Fatalf("expected bridge mode under gVisor, got %q", mode)
 	}
@@ -280,7 +286,7 @@ func TestResolveNetworkConfig_NonGVisorKeepsHostMode(t *testing.T) {
 	// Companion: a runtime that implements UsesGVisor but reports false keeps
 	// host mode, so plain runc on Linux is unchanged.
 	m := mgrWithRuntime(gvisorRuntime{stubRuntime: &stubRuntime{}, gvisor: false})
-	mode, _ := m.resolveNetworkConfig(false, true, "127.0.0.1")
+	mode, _ := netConfig(m, false, true, false)
 	if mode != "host" {
 		t.Fatalf("expected host mode without gVisor, got %q", mode)
 	}
@@ -291,26 +297,54 @@ func TestUseHostNetwork(t *testing.T) {
 		name       string
 		rt         container.Runtime
 		needsPorts bool
+		firewall   bool
 		want       bool
 	}{
-		{"host-capable, no ports", &stubRuntime{}, false, true},
-		{"host-capable, ports", &stubRuntime{}, true, false},
-		{"no host network support", noHostNetRuntime{&stubRuntime{}}, false, false},
-		{"gVisor", gvisorRuntime{stubRuntime: &stubRuntime{}, gvisor: true}, false, false},
-		{"runc via UsesGVisor false", gvisorRuntime{stubRuntime: &stubRuntime{}, gvisor: false}, false, true},
+		{"host-capable, no ports", &stubRuntime{}, false, false, true},
+		{"host-capable, ports", &stubRuntime{}, true, false, false},
+		{"no host network support", noHostNetRuntime{&stubRuntime{}}, false, false, false},
+		{"gVisor", gvisorRuntime{stubRuntime: &stubRuntime{}, gvisor: true}, false, false, false},
+		{"runc via UsesGVisor false", gvisorRuntime{stubRuntime: &stubRuntime{}, gvisor: false}, false, false, true},
+		// A firewalled run must never share the host namespace: its iptables
+		// rules would land in the host's OUTPUT chain (#493).
+		{"host-capable, firewall", &stubRuntime{}, false, true, false},
+		{"runc via UsesGVisor false, firewall", gvisorRuntime{stubRuntime: &stubRuntime{}, gvisor: false}, false, true, false},
+		{"host-capable, ports and firewall", &stubRuntime{}, true, true, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m := mgrWithRuntime(tt.rt)
-			if got := m.useHostNetwork(tt.needsPorts); got != tt.want {
-				t.Errorf("useHostNetwork(%v) = %v, want %v", tt.needsPorts, got, tt.want)
+			if got := m.useHostNetwork(tt.needsPorts, tt.firewall); got != tt.want {
+				t.Errorf("useHostNetwork(%v, %v) = %v, want %v", tt.needsPorts, tt.firewall, got, tt.want)
 			}
 			// Network mode and the NO_PROXY decision both derive from
 			// useHostNetwork; check the mode agrees.
-			mode, _ := m.resolveNetworkConfig(tt.needsPorts, true, "127.0.0.1")
+			mode, _ := netConfig(m, tt.needsPorts, true, tt.firewall)
 			if (mode == "host") != tt.want {
 				t.Errorf("resolveNetworkConfig mode = %q, but useHostNetwork = %v", mode, tt.want)
 			}
 		})
+	}
+}
+
+func TestResolveNetworkConfig_FirewallUsesBridge(t *testing.T) {
+	// A strict-policy run on a host-capable runtime must get bridge mode with
+	// the synthetic hosts still mapped, so the container reaches the proxy
+	// from its own namespace and the firewall stays inside it (#493).
+	m := mgrWithRuntime(&stubRuntime{})
+	mode, hosts := netConfig(m, false, true, true)
+	if mode != "bridge" {
+		t.Fatalf("expected bridge mode for a firewalled run, got %q", mode)
+	}
+	wantSynth, _ := synthHostStrategy(container.RuntimeDocker, goruntime.GOOS, "127.0.0.1")
+	for _, h := range wantSynth {
+		if !slices.Contains(hosts, h) {
+			t.Fatalf("firewalled bridge extraHosts = %v, missing %q", hosts, h)
+		}
+	}
+
+	// Companion: the same runtime without a firewall keeps host mode.
+	if mode, _ := netConfig(m, false, true, false); mode != "host" {
+		t.Fatalf("expected host mode without a firewall, got %q", mode)
 	}
 }

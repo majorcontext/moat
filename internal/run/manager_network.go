@@ -21,16 +21,17 @@ import (
 //  2. We're on macOS/Windows (host mode not supported)
 //  3. We're using the Apple container runtime
 //  4. We're using gVisor, whose default netstack needs a container network
+//  5. A strict-policy firewall will be installed
 //
-// We only use host mode when we need proxy access AND don't have ports to
-// publish on Linux without gVisor. Services and BuildKit may subsequently
-// select a dedicated bridge network.
-func (m *Manager) resolveNetworkConfig(needsPorts, needsProxy bool, hostAddr string) (networkMode string, extraHosts []string) {
+// hostNet is the caller's useHostNetwork result, which encodes all of the
+// above; Create computes it once so the network mode and NO_PROXY agree.
+// Services and BuildKit may subsequently select a dedicated bridge network.
+func (m *Manager) resolveNetworkConfig(needsPorts, needsProxy, hostNet bool, hostAddr string) (networkMode string, extraHosts []string) {
 	if !needsProxy && !needsPorts {
 		return "", nil
 	}
 
-	if m.useHostNetwork(needsPorts) {
+	if hostNet {
 		// Standard Docker on Linux without ports shares the host network.
 		networkMode = "host"
 	} else {
@@ -67,16 +68,23 @@ func (m *Manager) resolveNetworkConfig(needsPorts, needsProxy bool, hostAddr str
 }
 
 // useHostNetwork reports whether the container shares the host network
-// namespace. resolveNetworkConfig (network mode) and Create (NO_PROXY) must
-// agree, so both call this.
+// namespace. Create calls it once and passes the result to both
+// resolveNetworkConfig (network mode) and buildProxyEnv (NO_PROXY), which
+// must agree.
 //
 // gVisor is excluded: under Docker's --network=host a stock runsc sandbox has
 // no network interfaces at all, so the container cannot reach the proxy.
 // Bridge mode keeps gVisor's own netstack and reaches the proxy through the
 // host-gateway mapping.
-func (m *Manager) useHostNetwork(needsPorts bool) bool {
+//
+// A firewalled (strict-policy) run is excluded too: SetupFirewall rewrites
+// the OUTPUT chain of the container's network namespace, and under host
+// networking that namespace is the host's, so the DROP rule would cut every
+// outbound connection on the machine — including the proxy daemon's own
+// upstream dials (#493).
+func (m *Manager) useHostNetwork(needsPorts, firewall bool) bool {
 	rt := m.defaultRuntime()
-	if needsPorts || !rt.SupportsHostNetwork() {
+	if needsPorts || firewall || !rt.SupportsHostNetwork() {
 		return false
 	}
 	if g, ok := rt.(interface{ UsesGVisor() bool }); ok && g.UsesGVisor() {

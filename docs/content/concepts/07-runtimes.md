@@ -42,7 +42,7 @@ Docker runtime supports two sandbox modes:
 
 On Linux, if gVisor is not installed, Moat returns an error with installation instructions. gVisor is available for Debian/Ubuntu via the official `gvisor.dev` package repository, and installation details are included in the error message itself.
 
-**Networking:** gVisor runs use bridge networking because a default `runsc` installation has no network interfaces under Docker host networking. Containers reach the proxy through the host gateway. Standard Docker on Linux uses host networking when proxy access is needed and no ports are published; published ports, services, and BuildKit use bridge networks.
+**Networking:** gVisor runs use bridge networking because a default `runsc` installation has no network interfaces under Docker host networking. Containers reach the proxy through the host gateway. Standard Docker on Linux uses host networking when proxy access is needed and no ports are published; published ports, `network.policy: strict`, services, and BuildKit use bridge networks. Strict runs need their own network namespace because the egress firewall rewrites the namespace's `OUTPUT` chain.
 
 ### Overriding sandbox mode
 

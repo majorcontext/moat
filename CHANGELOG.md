@@ -6,11 +6,19 @@ Moat is pre-1.0. The CLI interface and `moat.yaml` schema may change between min
 
 ## Unreleased
 
-Adds commands to inspect credential profiles and clear or remove their local data.
+Adds commands to inspect credential profiles and clear or remove their local data, and stops strict-policy runs on Docker on Linux from installing their egress firewall in the host's network namespace.
 
 ### Added
 
 - **Profile management commands** — `moat profile list` shows configured and implicit profiles, active selection, inheritance, and errors per profile. `moat profile show [name]` shows lookup order and environment variable names without exposing values. `reset <name>` clears local grants, SSH mappings, and exclusions while preserving settings; `remove <name>` also deletes settings and refuses profiles with dependent children. Inspection supports JSON; reset and removal support confirmation, `--force`, and validated `--dry-run`, and coordinate with credential refreshes. ([#492](https://github.com/majorcontext/moat/pull/492))
+
+### Changed
+
+- Strict-policy runs on Docker on Linux now get their own network namespace, so `localhost` and `127.0.0.1` inside the container refer to the container rather than the host. To reach a host service allowed by `network.host`, use `moat-host` (`$MOAT_HOST_GATEWAY`). ([#495](https://github.com/majorcontext/moat/pull/495))
+
+### Security
+
+- Fix strict-policy firewall rules landing on the host — previously, `network.policy: strict` runs on Docker on Linux without gVisor (for example `--no-sandbox` on WSL2) shared the host network namespace, so the container's `NET_ADMIN` iptables setup flushed the host's `OUTPUT` chain and appended a `DROP` rule, cutting every new outbound connection on the machine, including the proxy daemon's upstream requests. Strict runs no longer use host networking, and firewall setup refuses host-network containers. If you ran a strict run this way, reboot (the rules do not persist) or reload your firewall (`sudo ufw reload`, `sudo firewall-cmd --reload`) to restore the host's own `OUTPUT` rules, which the flush removed. To check for leftovers, run `sudo iptables -S OUTPUT` and `sudo ip6tables -S OUTPUT`, plus `iptables-legacy`/`ip6tables-legacy` if installed. ([#495](https://github.com/majorcontext/moat/pull/495))
 
 ## v0.9.2 — 2026-11-07
 
