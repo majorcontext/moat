@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -840,16 +841,17 @@ func TestSetupFirewallRejectsOutOfRangePorts(t *testing.T) {
 // fakeDockerAPI serves ContainerInspect with the given network mode and
 // records whether any exec was created, which is how SetupFirewall installs
 // its iptables rules.
-func fakeDockerAPI(t *testing.T, networkMode string) (*DockerRuntime, *bool) {
+func fakeDockerAPI(t *testing.T, networkMode string) (*DockerRuntime, *atomic.Bool) {
 	t.Helper()
-	execCreated := false
+	// Written on the server goroutine, read on the test goroutine.
+	execCreated := &atomic.Bool{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		switch {
 		case strings.HasSuffix(req.URL.Path, "/containers/c/json"):
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"Id":"c","HostConfig":{"NetworkMode":"` + networkMode + `"}}`))
 		case strings.HasSuffix(req.URL.Path, "/containers/c/exec"):
-			execCreated = true
+			execCreated.Store(true)
 			http.Error(w, `{"message":"exec not supported by fake"}`, http.StatusInternalServerError)
 		default:
 			http.NotFound(w, req)
@@ -861,7 +863,7 @@ func fakeDockerAPI(t *testing.T, networkMode string) (*DockerRuntime, *bool) {
 		t.Fatalf("creating docker client: %v", err)
 	}
 	t.Cleanup(func() { _ = cli.Close() })
-	return &DockerRuntime{cli: cli}, &execCreated
+	return &DockerRuntime{cli: cli}, execCreated
 }
 
 func TestSetupFirewallRefusesHostNetwork(t *testing.T) {
@@ -876,7 +878,7 @@ func TestSetupFirewallRefusesHostNetwork(t *testing.T) {
 	if !strings.Contains(err.Error(), "host networking") {
 		t.Fatalf("SetupFirewall failed for the wrong reason: %v", err)
 	}
-	if *execCreated {
+	if execCreated.Load() {
 		t.Fatal("SetupFirewall created an exec on a host-network container")
 	}
 
@@ -887,7 +889,7 @@ func TestSetupFirewallRefusesHostNetwork(t *testing.T) {
 	if err == nil || strings.Contains(err.Error(), "host networking") {
 		t.Fatalf("SetupFirewall on a bridge container = %v, want the fake's exec error", err)
 	}
-	if !*execCreated {
+	if !execCreated.Load() {
 		t.Fatal("SetupFirewall did not reach the iptables exec on a bridge container")
 	}
 }

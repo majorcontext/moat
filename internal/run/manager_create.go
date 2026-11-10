@@ -384,8 +384,9 @@ func (m *Manager) Create(ctx context.Context, opts Options) (resRun *Run, retErr
 	needsProxyForGrants := len(opts.Grants) > 0
 	needsProxyForFirewall := opts.Config != nil && opts.Config.Network.Policy == "strict"
 	// hostNet is the single host-networking decision for this run: the
-	// network mode (resolveNetworkConfig) and NO_PROXY (buildProxyEnv) must
-	// agree, so both use this value. It derives from config rather than
+	// network mode (resolveNetworkConfig, below the SSH agent setup) and
+	// NO_PROXY (buildProxyEnv, in the proxy block) must agree, so both reuse
+	// this value rather than calling useHostNetwork again. It derives from config rather than
 	// r.FirewallEnabled so it cannot be computed before that flag is set.
 	hostNet := m.useHostNetwork(len(ports) > 0, needsProxyForFirewall)
 	// Start proxy for any feature that the proxy is responsible for enforcing
