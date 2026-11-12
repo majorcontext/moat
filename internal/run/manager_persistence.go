@@ -52,7 +52,7 @@ func (m *Manager) loadPersistedRuns(ctx context.Context) error {
 
 		// Runs already in a terminal state don't need a live container check.
 		// Pass stateConfirmed=true because the owning process authoritatively
-		// wrote this terminal state — it's safe to clean up stale routes.
+		// wrote this terminal state — Wait can return without a live check.
 		if meta.State == string(StateStopped) || meta.State == string(StateFailed) {
 			m.registerPersistedRun(State(meta.State), true, false, meta, store, runID, nil)
 			continue
@@ -197,6 +197,7 @@ func (m *Manager) registerPersistedRun(runState State, stateConfirmed bool, skip
 		Image:             meta.Image,
 		Runtime:           meta.Runtime,
 		Ports:             meta.Ports,
+		HostPorts:         meta.HostPorts,
 		State:             runState,
 		ContainerID:       meta.ContainerID,
 		Store:             store,
@@ -217,37 +218,13 @@ func (m *Manager) registerPersistedRun(runState State, stateConfirmed bool, skip
 		WorkspaceVolume:   meta.WorkspaceVolume,
 	}
 
-	// If container is confirmed stopped by a live check or by authoritative
-	// persisted state, close exitCh so Wait() calls don't hang, and clean
-	// up stale routes so the name can be reused without "moat clean".
-	//
-	// Only perform route/daemon cleanup when stateConfirmed is true:
-	// either a successful container state check confirmed the container is
-	// gone, or the owning process wrote the terminal state to disk.
-	//
-	// When stateConfirmed is false (container check failed, context canceled,
-	// or unknown container state), routes are intentionally preserved even if
-	// the container is likely stopped. This avoids corrupting routes for runs
-	// that are actually still alive but temporarily unreachable. The tradeoff
-	// is that routes may become stale in error cases, requiring "moat clean"
-	// to reclaim names. This is preferable to the previous behavior where a
-	// single failed check permanently destroyed routes for live runs.
+	// Terminal runs must unblock Wait, but loading history must not delete
+	// routes by name. A newer run can reuse the name (and even its host port).
+	// Active run cleanup removes its own registration; reconciliation and
+	// Create reclaim stale routes when needed.
 	if stateConfirmed && (runState == StateStopped || runState == StateFailed) {
 		close(r.exitCh)
-		if r.Name != "" {
-			if err := m.routes.Remove(r.Name); err != nil {
-				log.Debug("removing stale route", "name", r.Name, "error", err)
-			}
-			if m.daemonClient != nil {
-				if err := m.daemonClient.UnregisterRoutes(context.Background(), r.Name); err != nil {
-					log.Debug("failed to unregister routes via daemon", "error", err)
-				}
-			}
-		}
 	}
-	// Note: no else branch for unconfirmed terminal states. All paths that
-	// reach here with stateConfirmed=false have runState=running/created
-	// (persisted terminal runs are caught early with stateConfirmed=true).
 
 	// Never write state back to disk during reconciliation.
 	// The owning process is responsible for its run's on-disk state.

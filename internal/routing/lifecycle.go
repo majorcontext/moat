@@ -4,21 +4,26 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
+	"sync"
 	"syscall"
+	"time"
 
 	"github.com/majorcontext/gatekeeper/proxy"
 )
 
 // Lifecycle manages the shared reverse proxy lifecycle.
 type Lifecycle struct {
-	dir     string
-	port    int
-	server  *ProxyServer
-	routes  *RouteTable
-	isOwner bool      // true if this instance started the proxy
-	ca      *proxy.CA // CA for TLS (nil if TLS disabled)
+	mu        sync.Mutex
+	dir       string
+	port      int
+	server    *ProxyServer
+	routes    *RouteTable
+	startedAt time.Time // identifies this instance even within the same process
+	isOwner   bool      // true if this instance started the proxy
+	ca        *proxy.CA // CA for TLS (nil if TLS disabled)
 }
 
 // NewLifecycle creates a lifecycle manager for the proxy.
@@ -45,6 +50,8 @@ func NewLifecycle(dir string, desiredPort int) (*Lifecycle, error) {
 // Must be called before EnsureRunning().
 // Returns true if a new CA was created (caller should print trust instructions).
 func (lc *Lifecycle) EnableTLS() (newCA bool, err error) {
+	lc.mu.Lock()
+	defer lc.mu.Unlock()
 	caDir := filepath.Join(lc.dir, "ca")
 
 	// Check if CA already exists
@@ -63,24 +70,34 @@ func (lc *Lifecycle) EnableTLS() (newCA bool, err error) {
 
 // CA returns the CA used for TLS, or nil if TLS is not enabled.
 func (lc *Lifecycle) CA() *proxy.CA {
+	lc.mu.Lock()
+	defer lc.mu.Unlock()
 	return lc.ca
 }
 
 // EnsureRunning starts the proxy if not already running.
 func (lc *Lifecycle) EnsureRunning() error {
+	lc.mu.Lock()
+	defer lc.mu.Unlock()
+	unlock, err := lc.lockLifecycle()
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	// Check for existing proxy
 	lock, err := LoadProxyLock(lc.dir)
 	if err != nil {
 		return fmt.Errorf("loading proxy lock: %w", err)
 	}
 
-	if lock != nil && lock.IsAlive() {
+	// A live PID does not imply its listener is still serving.
+	if lock != nil && lock.IsAlive() && proxyListening(lock.Port) {
 		// Proxy already running - check for port mismatch only if specific port requested
 		if lc.port > 0 && lock.Port != lc.port {
 			return fmt.Errorf("proxy port mismatch: running on %d, requested %d. Either unset MOAT_PROXY_PORT, or stop all agents to restart the proxy", lock.Port, lc.port)
 		}
 		lc.port = lock.Port
-		lc.isOwner = false
+		lc.isOwner = lc.isOwner && lc.server != nil && lock.PID == os.Getpid() && lc.server.Port() == lock.Port && lc.startedAt.Equal(lock.StartedAt)
 		return nil
 	}
 
@@ -88,6 +105,15 @@ func (lc *Lifecycle) EnsureRunning() error {
 	if lock != nil {
 		_ = RemoveProxyLock(lc.dir)
 	}
+
+	// Release any failed owned listener before replacing the server.
+	if lc.server != nil && lc.isOwner {
+		stopCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+		_ = lc.server.Stop(stopCtx)
+		cancel()
+	}
+	lc.isOwner = false
+	lc.server = nil
 
 	// Start new proxy
 	lc.server = NewProxyServer(lc.routes)
@@ -113,22 +139,26 @@ func (lc *Lifecycle) EnsureRunning() error {
 	}
 
 	lc.port = lc.server.Port()
-	lc.isOwner = true
 
 	// Save lock file
+	lc.startedAt = time.Now()
 	if err := SaveProxyLock(lc.dir, ProxyLockInfo{
-		PID:  os.Getpid(),
-		Port: lc.port,
+		PID:       os.Getpid(),
+		Port:      lc.port,
+		StartedAt: lc.startedAt,
 	}); err != nil {
 		_ = lc.server.Stop(context.Background())
 		return fmt.Errorf("saving proxy lock: %w", err)
 	}
 
+	lc.isOwner = true
 	return nil
 }
 
 // Port returns the port the proxy is running on.
 func (lc *Lifecycle) Port() int {
+	lc.mu.Lock()
+	defer lc.mu.Unlock()
 	return lc.port
 }
 
@@ -137,6 +167,8 @@ func (lc *Lifecycle) Port() int {
 // Callers use this to run work that must happen exactly once per proxy
 // lifetime, such as reconciling the route table against running containers.
 func (lc *Lifecycle) IsOwner() bool {
+	lc.mu.Lock()
+	defer lc.mu.Unlock()
 	return lc.isOwner
 }
 
@@ -147,6 +179,13 @@ func (lc *Lifecycle) Routes() *RouteTable {
 
 // Stop stops the proxy if this instance owns it.
 func (lc *Lifecycle) Stop(ctx context.Context) error {
+	lc.mu.Lock()
+	defer lc.mu.Unlock()
+	unlock, err := lc.lockLifecycle()
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	if !lc.isOwner || lc.server == nil {
 		return nil
 	}
@@ -155,10 +194,46 @@ func (lc *Lifecycle) Stop(ctx context.Context) error {
 		return err
 	}
 
-	return RemoveProxyLock(lc.dir)
+	lc.isOwner = false
+	lc.server = nil
+	// Another process may have recovered the listener while we were stopping.
+	lock, err := LoadProxyLock(lc.dir)
+	if err != nil {
+		return err
+	}
+	if lock != nil && lock.PID == os.Getpid() && lock.Port == lc.port && lc.startedAt.Equal(lock.StartedAt) {
+		return RemoveProxyLock(lc.dir)
+	}
+	return nil
 }
 
 // ShouldStop returns true if there are no more registered agents.
 func (lc *Lifecycle) ShouldStop() bool {
 	return len(lc.routes.Agents()) == 0
+}
+
+// proxyListening is deliberately bounded; recovery must not stall run monitors.
+func proxyListening(port int) bool {
+	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 250*time.Millisecond)
+	if err != nil {
+		return false
+	}
+	_ = conn.Close()
+	return true
+}
+
+// lockLifecycle serializes listener/lock-file transitions across managers and
+// processes. It must not use routes.lock: shutdown can wait for handlers that
+// themselves need the route table.
+func (lc *Lifecycle) lockLifecycle() (func(), error) {
+	f, err := os.OpenFile(filepath.Join(lc.dir, "lifecycle.lock"), os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	unlock, err := lockFile(f)
+	if err != nil {
+		_ = f.Close()
+		return nil, err
+	}
+	return func() { unlock(); _ = f.Close() }, nil
 }

@@ -7,6 +7,7 @@ package run
 import (
 	"context"
 	"fmt"
+	"maps"
 	"time"
 
 	"github.com/majorcontext/moat/internal/container"
@@ -20,8 +21,7 @@ import (
 const reconcileTimeout = 5 * time.Second
 
 // setupPortBindings retrieves the host-side port mappings for a container's
-// exposed ports and registers them as routes with both the local route table
-// and the proxy daemon. Port binding lookup is retried because the container
+// exposed ports and registers them in the shared route table. Port binding lookup is retried because the container
 // runtime may not have mappings ready immediately after start.
 func (m *Manager) setupPortBindings(ctx context.Context, r *Run) {
 	if len(r.Ports) == 0 {
@@ -43,19 +43,13 @@ func (m *Manager) setupPortBindings(ctx context.Context, r *Run) {
 	}
 
 	hostPorts, services := serviceEndpoints(r.Ports, bindings)
+	r.stateMu.Lock()
 	r.HostPorts = hostPorts
+	r.stateMu.Unlock()
+	_ = r.SaveMetadata()
 	if len(services) > 0 {
-		if err := m.routes.Add(r.Name, services); err != nil {
+		if err := m.routes.AddOwned(r.Name, r.ContainerID, services); err != nil {
 			ui.Warnf("Registering routes: %v", err)
-		}
-		// Snapshot daemonClient under lock to avoid racing with Create()
-		m.mu.RLock()
-		dc := m.daemonClient
-		m.mu.RUnlock()
-		if dc != nil {
-			if err := dc.RegisterRoutes(ctx, r.Name, services); err != nil {
-				log.Debug("failed to register routes via daemon", "error", err)
-			}
 		}
 	}
 }
@@ -81,13 +75,10 @@ func serviceEndpoints(ports map[string]int, bindings map[int]int) (map[string]in
 // reconcileRoutes rebuilds the shared route table from the containers that are
 // actually running, then drops entries nothing is serving.
 //
-// Route registration is otherwise one-shot at container start, so a run whose
-// entry is lost — by an older moat version's delete-on-empty, a hand-edited
-// file, or a crash mid-write — stays invisible to the discovery index and
-// `moat open` for the life of its container (issue #451). Taking ownership of
-// the routing proxy is the natural repair point: the proxy was not running, so
-// there is no in-flight traffic to disturb, and the table's contents are about
-// to become load-bearing again.
+// This startup sweep also repairs runs without an active CLI health monitor
+// (including older clients). Their entries may have been lost by an older
+// version's delete-on-empty, a hand-edited file, or a crash mid-write (issue
+// #451). Active runs additionally repair their own routes in recoverRunRoutes.
 //
 // Both halves are best-effort. A run whose runtime is unavailable (a run
 // created under a different container runtime) or whose port bindings cannot
@@ -142,7 +133,7 @@ func (m *Manager) reconcileRoutes(ctx context.Context) {
 		// Written straight to the shared route table rather than via the daemon:
 		// the daemon's RouteTable is backed by the same routes.json in
 		// ~/.moat/proxy, so a daemon round-trip would write the identical entry.
-		if err := m.routes.Add(meta.Name, services); err != nil {
+		if err := m.routes.AddOwned(meta.Name, meta.ContainerID, services); err != nil {
 			log.Debug("reconcile routes: registering route failed", "agent", meta.Name, "error", err)
 			continue
 		}
@@ -187,4 +178,67 @@ func portExposingRuns() []storage.Metadata {
 		out = append(out, meta)
 	}
 	return out
+}
+
+// recoverRunRoutes repairs endpoint registrations independently of the egress
+// daemon. It is called by the periodic health monitor, never prunes other runs,
+// and only publishes bindings positively confirmed by the run's own runtime.
+func (m *Manager) recoverRunRoutes(ctx context.Context, r *Run) {
+	if len(r.Ports) == 0 || r.Name == "" || r.ContainerID == "" ||
+		r.GetState() != StateRunning || ctx.Err() != nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, reconcileTimeout)
+	defer cancel()
+	rt, err := m.runtimeForRun(r)
+	if err != nil {
+		return
+	}
+	state, err := rt.ContainerState(ctx, r.ContainerID)
+	if err != nil || state != "running" {
+		return
+	}
+	bindings, err := rt.GetPortBindings(ctx, r.ContainerID)
+	if err != nil || ctx.Err() != nil {
+		return
+	}
+	hostPorts, services := serviceEndpoints(r.Ports, bindings)
+	// Partial bindings may be a transient runtime response. Preserve existing
+	// routes until all declared services can be recovered together.
+	if len(services) != len(r.Ports) {
+		return
+	}
+	if m.proxyLifecycle != nil {
+		// Inherited runs may be monitored by a manager that never called Create.
+		if m.proxyLifecycle.CA() == nil {
+			if _, err := m.proxyLifecycle.EnableTLS(); err != nil {
+				log.Debug("recover routes: enabling TLS failed", "run", r.ID, "error", err)
+				return
+			}
+		}
+		if err := m.proxyLifecycle.EnsureRunning(); err != nil {
+			log.Debug("recover routes: starting proxy failed", "run", r.ID, "error", err)
+			return
+		}
+	}
+	// Serialize publication with terminal-state transitions so cleanup always
+	// follows the last registration, rather than racing it back into existence.
+	r.stateMu.Lock()
+	if r.State != StateRunning || ctx.Err() != nil {
+		r.stateMu.Unlock()
+		return
+	}
+	if err := m.routes.AddOwned(r.Name, r.ContainerID, services); err != nil {
+		r.stateMu.Unlock()
+		log.Debug("recover routes: registration failed", "run", r.ID, "error", err)
+		return
+	}
+	changed := !maps.Equal(r.HostPorts, hostPorts)
+	if changed {
+		r.HostPorts = hostPorts
+	}
+	r.stateMu.Unlock()
+	if changed {
+		_ = r.SaveMetadata()
+	}
 }

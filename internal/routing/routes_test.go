@@ -57,6 +57,153 @@ func TestSaveIsAtomic(t *testing.T) {
 	}
 }
 
+func TestOwnedRoutesProtectReplacementWithIdenticalPorts(t *testing.T) {
+	dir := t.TempDir()
+	old, err := NewRouteTable(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err := NewRouteTable(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	endpoints := map[string]string{"web": "127.0.0.1:50001"}
+	if err := old.AddOwned("project", "old", endpoints); err != nil {
+		t.Fatal(err)
+	}
+	if err := current.AddOwned("project", "new", endpoints); err == nil {
+		t.Fatal("replaced an existing owner")
+	}
+	// Route loss leaves a stale sidecar, which must not prevent recovery.
+	if err := os.Remove(filepath.Join(dir, "routes.json")); err != nil {
+		t.Fatal(err)
+	}
+	if err := current.AddOwned("project", "new", endpoints); err != nil {
+		t.Fatal(err)
+	}
+	if err := old.RemoveOwned("project", "old", endpoints); err != nil {
+		t.Fatal(err)
+	}
+	if !current.AgentExists("project") {
+		t.Fatal("old cleanup removed reused ports")
+	}
+	if err := current.RemoveOwned("project", "new", map[string]string{"web": "127.0.0.1:50002"}); err != nil {
+		t.Fatal(err)
+	}
+	if !current.AgentExists("project") {
+		t.Fatal("cleanup ignored endpoint mismatch")
+	}
+	if err := current.RemoveOwned("project", "new", endpoints); err != nil {
+		t.Fatal(err)
+	}
+	if old.AgentExists("project") {
+		t.Fatal("matching owner was not removed")
+	}
+}
+
+func TestOwnedRoutesLegacyAddClearsOwnership(t *testing.T) {
+	rt, err := NewRouteTable(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	endpoints := map[string]string{"web": "127.0.0.1:50001"}
+	if err := rt.AddOwned("project", "old", endpoints); err != nil {
+		t.Fatal(err)
+	}
+	if err := rt.Add("project", endpoints); err != nil {
+		t.Fatal(err)
+	}
+	if err := rt.RemoveOwned("project", "old", endpoints); err != nil {
+		t.Fatal(err)
+	}
+	if !rt.AgentExists("project") {
+		t.Fatal("cleanup removed legacy registration")
+	}
+	// An existing legacy registration can be adopted by a verified container.
+	if err := rt.AddOwned("project", "new", endpoints); err != nil {
+		t.Fatal(err)
+	}
+	if err := rt.RemoveOwned("project", "new", endpoints); err != nil {
+		t.Fatal(err)
+	}
+	if rt.AgentExists("project") {
+		t.Fatal("adopted registration was not removed")
+	}
+}
+
+func TestOwnedRoutesPublishOwnerBeforeRoute(t *testing.T) {
+	dir := t.TempDir()
+	rt, err := NewRouteTable(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	endpoints := map[string]string{"web": "127.0.0.1:50001"}
+	if err := rt.AddOwned("project", "old", endpoints); err != nil {
+		t.Fatal(err)
+	}
+	// Force only the route rename to fail, after ownership publication.
+	if err := os.Remove(filepath.Join(dir, "routes.json")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(dir, "routes.json"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	// reload normally rejects a directory; exercise the shared save primitive
+	// under the lock to model a failure after AddOwned's initial reload.
+	err = rt.withFileLock(func() error {
+		owners := map[string]routeOwner{"project": {ContainerID: "new", Endpoints: endpoints}}
+		if err := rt.saveJSON("route-owners.json", owners); err != nil {
+			return err
+		}
+		return rt.save()
+	})
+	if err == nil {
+		t.Fatal("expected failed route write")
+	}
+	if err := os.Remove(filepath.Join(dir, "routes.json")); err != nil {
+		t.Fatal(err)
+	}
+	// Restore the old identical route, as if the failed write left it intact.
+	if err := rt.save(); err != nil {
+		t.Fatal(err)
+	}
+	if err := rt.RemoveOwned("project", "old", endpoints); err != nil {
+		t.Fatal(err)
+	}
+	if !rt.AgentExists("project") {
+		t.Fatal("old cleanup removed registration after failed publication")
+	}
+}
+
+func TestOwnedRoutesRemoveAndPruneClearOwners(t *testing.T) {
+	for _, prune := range []bool{false, true} {
+		t.Run(fmt.Sprint(prune), func(t *testing.T) {
+			rt, err := NewRouteTable(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := rt.AddOwned("project", "old", map[string]string{"web": deadAddr(t)}); err != nil {
+				t.Fatal(err)
+			}
+			if prune {
+				rt.PruneUnreachable(nil)
+			} else if err := rt.Remove("project"); err != nil {
+				t.Fatal(err)
+			}
+			owners, err := rt.loadOwners()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, ok := owners["project"]; ok {
+				t.Fatal("owner survived removal")
+			}
+			if rt.AgentExists("project") {
+				t.Fatal("route survived removal")
+			}
+		})
+	}
+}
+
 func TestRouteTable(t *testing.T) {
 	dir := t.TempDir()
 	rt, err := NewRouteTable(dir)

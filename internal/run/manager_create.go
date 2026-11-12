@@ -89,7 +89,13 @@ func (m *Manager) Create(ctx context.Context, opts Options) (resRun *Run, retErr
 			agentName = agentName + "-" + generateID()[4:8]
 		}
 	} else {
-		// Check for collision with explicit name
+		// Live names remain reserved even when their route registration is lost.
+		for _, existing := range m.List() {
+			state := existing.GetState()
+			if existing.Name == agentName && state != StateStopped && state != StateFailed {
+				return nil, fmt.Errorf("agent %q is already running. Use --name to specify a different name, or stop the existing agent first", agentName)
+			}
+		}
 		if m.routes.AgentExists(agentName) {
 			// The route may be stale (leftover from a crashed process).
 			// Probe the registered endpoints — if none are reachable, clean up.

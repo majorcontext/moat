@@ -66,7 +66,7 @@ func (m *Manager) Start(ctx context.Context, runID string) error {
 	}()
 
 	// Start proxy health monitor to re-register the run if the daemon restarts.
-	if r.ProxyRegReq != nil {
+	if r.ProxyRegReq != nil || len(r.Ports) > 0 {
 		m.monitorWg.Add(1)
 		go func() {
 			defer m.monitorWg.Done()
@@ -186,7 +186,7 @@ func (m *Manager) StartAttached(ctx context.Context, runID string, stdin io.Read
 
 	// Start proxy health monitor for the duration of the attached session.
 	var proxyHealthCancel context.CancelFunc
-	if r.ProxyRegReq != nil {
+	if r.ProxyRegReq != nil || len(r.Ports) > 0 {
 		var proxyCtx context.Context
 		proxyCtx, proxyHealthCancel = context.WithCancel(context.Background())
 		m.monitorWg.Add(1)

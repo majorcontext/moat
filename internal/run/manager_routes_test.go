@@ -38,6 +38,7 @@ func (p *portStubRuntime) GetPortBindings(_ context.Context, id string) (map[int
 func reconcileFixture(t *testing.T, rt container.Runtime, runs ...storage.Metadata) (*Manager, *routing.RouteTable) {
 	t.Helper()
 	t.Setenv("MOAT_HOME", t.TempDir())
+	t.Setenv("MOAT_KEYRING_BACKEND", "file")
 
 	baseDir := storage.DefaultBaseDir()
 	for i, meta := range runs {
@@ -263,5 +264,152 @@ func TestReconcileRoutesSkipsTerminalRuns(t *testing.T) {
 
 	if routes.AgentExists("finished") {
 		t.Error("an unreachable route for a terminal run should be pruned")
+	}
+}
+
+func TestRecoverRunRoutesRepairsLostRegistration(t *testing.T) {
+	rt := &portStubRuntime{
+		stubRuntime: &stubRuntime{states: map[string]string{"c1": "running"}},
+		bindings:    map[string]map[int]int{"c1": {4321: 53624}},
+	}
+	m, routes := reconcileFixture(t, rt)
+	r := &Run{Name: "recover", ContainerID: "c1", State: StateRunning, Ports: map[string]int{"www": 4321}}
+	lc, err := routing.NewLifecycle(t.TempDir(), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.proxyLifecycle = lc
+	defer lc.Stop(context.Background())
+	for i := 0; i < 2; i++ {
+		m.recoverRunRoutes(context.Background(), r)
+		if addr, ok := routes.Lookup(r.Name, "www"); !ok || addr != "127.0.0.1:53624" {
+			t.Fatalf("registration not recovered: %q %v", addr, ok)
+		}
+		if r.HostPorts["www"] != 53624 {
+			t.Fatal("cleanup bindings not refreshed")
+		}
+		if !lc.IsOwner() {
+			t.Fatal("proxy ownership lost")
+		}
+		if err := routes.Remove(r.Name); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestRecoverRunRoutesPreservesUncertainBindings(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		state    string
+		bindings map[int]int
+		bindErr  error
+	}{
+		{name: "unknown container"},
+		{name: "stopped container", state: "exited"},
+		{name: "binding error", state: "running", bindErr: fmt.Errorf("unavailable")},
+		{name: "partial bindings", state: "running", bindings: map[int]int{4321: 53624}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rt := &portStubRuntime{stubRuntime: &stubRuntime{states: map[string]string{"c1": tc.state}},
+				bindings: map[string]map[int]int{"c1": tc.bindings}, bindErr: tc.bindErr}
+			m, routes := reconcileFixture(t, rt)
+			r := &Run{Name: "recover", ContainerID: "c1", State: StateRunning,
+				Ports: map[string]int{"www": 4321, "api": 4322}}
+			if err := routes.Add(r.Name, map[string]string{"www": "127.0.0.1:1111"}); err != nil {
+				t.Fatal(err)
+			}
+			m.recoverRunRoutes(context.Background(), r)
+			if addr, ok := routes.Lookup(r.Name, "www"); !ok || addr != "127.0.0.1:1111" {
+				t.Fatalf("uncertain route changed: %q %v", addr, ok)
+			}
+		})
+	}
+}
+
+func TestRecoverRunRoutesSkipsTerminalOrCanceled(t *testing.T) {
+	rt := &portStubRuntime{stubRuntime: &stubRuntime{states: map[string]string{"c1": "running"}},
+		bindings: map[string]map[int]int{"c1": {4321: 53624}}}
+	m, routes := reconcileFixture(t, rt)
+	r := &Run{Name: "recover", ContainerID: "c1", State: StateStopped, Ports: map[string]int{"www": 4321}}
+	m.recoverRunRoutes(context.Background(), r)
+	if routes.AgentExists(r.Name) {
+		t.Fatal("resurrected stopped run")
+	}
+	r.SetState(StateRunning)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	m.recoverRunRoutes(ctx, r)
+	if routes.AgentExists(r.Name) {
+		t.Fatal("published after cancellation")
+	}
+}
+
+// stoppingPortRuntime models a stop arriving while port lookup is in flight.
+type stoppingPortRuntime struct {
+	*portStubRuntime
+	stop func()
+}
+
+func (p *stoppingPortRuntime) GetPortBindings(ctx context.Context, id string) (map[int]int, error) {
+	p.stop()
+	return p.portStubRuntime.GetPortBindings(ctx, id)
+}
+
+func TestRecoverRunRoutesDoesNotPublishAfterConcurrentStop(t *testing.T) {
+	r := &Run{Name: "recover", ContainerID: "c1", State: StateRunning, Ports: map[string]int{"www": 4321}}
+	rt := &stoppingPortRuntime{
+		portStubRuntime: &portStubRuntime{
+			stubRuntime: &stubRuntime{states: map[string]string{"c1": "running"}},
+			bindings:    map[string]map[int]int{"c1": {4321: 53624}},
+		},
+		stop: func() { r.SetState(StateStopped) },
+	}
+	m, routes := reconcileFixture(t, rt)
+	m.recoverRunRoutes(context.Background(), r)
+	if routes.AgentExists(r.Name) {
+		t.Fatal("published after concurrent stop")
+	}
+}
+
+func TestRecoverRunRoutesPersistsChangedBindings(t *testing.T) {
+	rt := &portStubRuntime{
+		stubRuntime: &stubRuntime{states: map[string]string{"c1": "running"}},
+		bindings:    map[string]map[int]int{"c1": {4321: 53624}},
+	}
+	m, _ := reconcileFixture(t, rt)
+	store, err := storage.NewRunStore(storage.DefaultBaseDir(), "run_000000000001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := &Run{Name: "recover", ContainerID: "c1", State: StateRunning, Ports: map[string]int{"www": 4321}, Store: store}
+	m.recoverRunRoutes(context.Background(), r)
+	meta, err := store.LoadMetadata()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.HostPorts["www"] != 53624 {
+		t.Fatal("recovered bindings were not persisted")
+	}
+}
+
+func TestRecoverRunRoutesCannotHijackOwnedName(t *testing.T) {
+	rt := &portStubRuntime{
+		stubRuntime: &stubRuntime{states: map[string]string{"old": "running"}},
+		bindings:    map[string]map[int]int{"old": {4321: 53624}},
+	}
+	m, routes := reconcileFixture(t, rt)
+	endpoints := map[string]string{"www": "127.0.0.1:53625"}
+	if err := routes.AddOwned("project", "replacement", endpoints); err != nil {
+		t.Fatal(err)
+	}
+	r := &Run{Name: "project", ContainerID: "old", State: StateRunning, Ports: map[string]int{"www": 4321}}
+	for i := 0; i < 2; i++ {
+		m.recoverRunRoutes(context.Background(), r)
+	}
+	if addr, ok := routes.Lookup("project", "www"); !ok || addr != endpoints["www"] {
+		t.Fatalf("hijacked route: %q, %v", addr, ok)
+	}
+	if len(r.HostPorts) != 0 {
+		t.Fatal("failed registration changed cleanup bindings")
 	}
 }

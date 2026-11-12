@@ -31,6 +31,7 @@ type Metadata struct {
 	JoinableAgents []string       `json:"joinable_agents"`
 	Image          string         `json:"image,omitempty"` // Container image used
 	Ports          map[string]int `json:"ports,omitempty"`
+	HostPorts      map[string]int `json:"host_ports,omitempty"`
 	ContainerID    string         `json:"container_id,omitempty"`
 	State          string         `json:"state,omitempty"`
 	Interactive    bool           `json:"interactive,omitempty"`
