@@ -250,7 +250,33 @@ codex:
 
 This is all-or-nothing. Codex partitions sessions by date rather than by workspace and cannot be told to write elsewhere, so sharing exposes your transcripts from **every** project to the container. Prefer the default unless you specifically need one combined history.
 
-The SQLite databases in `~/.codex` are never shared in either mode -- concurrent runs writing one shared SQLite file risks corrupting it. A consequence is that `codex resume` on the host may not list sessions created inside a container, since resume reads that index. The transcripts themselves are complete.
+The SQLite databases in `~/.codex` are never shared in either mode -- concurrent runs writing one shared SQLite file risks corrupting it. Codex can discover saved rollouts and rebuild its private index. Host-side resume uses the host working directory, while container transcripts record `/workspace`; those paths differ, so host-side selection may require an explicit session ID.
+
+## Continue a conversation
+
+```bash
+moat codex --continue
+moat codex -c -- "Review the changes we made"
+moat codex -c -p "Add tests for the previous change"
+```
+
+Moat uses `codex resume --last` interactively and `codex exec resume --last`
+with `-p`. Codex selects a saved conversation for the container's current
+working directory using its native session-selection rules. Moat does not
+pass `--all`. This creates a new Moat run using the saved conversation; it
+does not reconnect to the previous container.
+
+Continuation requires workspace-isolated sessions. Moat rejects `--continue`
+when `codex.shared_sessions: true`: every container records `/workspace` as its
+working directory, so Codex could select another project's conversation from
+the shared history. Set `codex.shared_sessions: false` and first save a
+conversation in that workspace's isolated session directory before continuing.
+Existing shared conversations are not migrated automatically.
+
+Continuation enables the transcript mount even without an auto-detected grant.
+An explicit `codex.sync_logs: false` is rejected; enable it before continuing.
+The earlier run must also have persisted its transcripts. A session-directory
+creation failure now stops the run rather than silently losing persistence.
 
 ## MCP servers
 

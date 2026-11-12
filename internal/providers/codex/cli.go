@@ -1,6 +1,8 @@
 package codex
 
 import (
+	"fmt"
+
 	"github.com/spf13/cobra"
 
 	"github.com/majorcontext/moat/internal/cli"
@@ -15,6 +17,7 @@ var (
 	codexNoYolo       bool
 	codexFullAuto     bool
 	codexWtFlag       string
+	codexContinue     bool
 )
 
 // NetworkHosts returns the list of hosts that Codex needs network access to.
@@ -92,6 +95,7 @@ Use 'moat list' to see running and recent runs.`,
 	cli.AddExecFlags(codexCmd, &codexFlags)
 
 	// Add Codex-specific flags
+	codexCmd.Flags().BoolVarP(&codexContinue, "continue", "c", false, "continue the most recent conversation for this workspace")
 	codexCmd.Flags().StringVarP(&codexPromptFlag, "prompt", "p", "", "run with prompt (non-interactive mode)")
 	codexCmd.Flags().StringSliceVar(&codexAllowedHosts, "allow-host", nil, "additional hosts to allow network access to")
 	codexCmd.Flags().BoolVar(&codexNoYolo, "noyolo", false, "keep Codex's own approval prompts and sandbox enabled (require manual approval for each action)")
@@ -132,20 +136,16 @@ func runCodex(cmd *cobra.Command, args []string) error {
 		// launching Codex in the container gets the same behavior, including a
 		// custom `command:` in moat.yaml. CLI flags would also have to differ
 		// between `codex` and `codex exec`, which accept different flags.
+		Preflight: validateCodexContinuation,
 		BuildCommand: func(promptFlag, initialPrompt string) ([]string, error) {
-			if promptFlag != "" {
-				// Non-interactive: use `codex exec` with the prompt.
-				return []string{"codex", "exec", promptFlag}, nil
-			}
-			// Interactive: run `codex` for the TUI
-			containerCmd := []string{"codex"}
-			if initialPrompt != "" {
-				containerCmd = append(containerCmd, initialPrompt)
-			}
-			return containerCmd, nil
+			return buildCodexCommand(promptFlag, initialPrompt, codexContinue), nil
 		},
 		ConfigureAgent: func(cfg *config.Config) {
 			cfg.Codex.RequireApproval = codexNoYolo
+			if codexContinue {
+				enabled := true
+				cfg.Codex.SyncLogs = &enabled
+			}
 		},
 	})
 }
@@ -171,4 +171,35 @@ func GetCredentialName() string {
 		}
 	}
 	return ""
+}
+
+// Continuation needs the same transcript mount as the preceding run. Never
+// silently override an explicit persistence opt-out.
+func validateCodexContinuation(cfg *config.Config) error {
+	if !codexContinue || cfg == nil {
+		return nil
+	}
+	if cfg.Codex.SharedSessions {
+		return fmt.Errorf("--continue cannot be used with codex.shared_sessions: true: all containers use /workspace, so Codex could resume another project's conversation; use workspace-isolated sessions (codex.shared_sessions: false) and first save a conversation there")
+	}
+	if cfg.Codex.SyncLogs != nil && !*cfg.Codex.SyncLogs {
+		return fmt.Errorf("--continue requires codex.sync_logs: true; remove or enable codex.sync_logs in moat.yaml")
+	}
+	return nil
+}
+
+func buildCodexCommand(promptFlag, initialPrompt string, continuation bool) []string {
+	args := []string{"codex"}
+	prompt := initialPrompt
+	if promptFlag != "" {
+		args = append(args, "exec")
+		prompt = promptFlag
+	}
+	if continuation {
+		args = append(args, "resume", "--last")
+	}
+	if prompt != "" {
+		args = append(args, prompt)
+	}
+	return args
 }

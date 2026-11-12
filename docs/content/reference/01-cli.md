@@ -363,6 +363,7 @@ In addition to the command-specific flags below, `moat codex` accepts all [commo
 
 | Flag | Description |
 |------|-------------|
+| `-c`, `--continue` | Continue the most recent saved conversation for this workspace. Requires session persistence; see the agent guide. |
 | `-p`, `--prompt TEXT` | Run non-interactive with prompt |
 | `--noyolo` | Keep Codex's own approval prompts and sandbox enabled. By default moat turns both off (`approval_policy = "never"`, `sandbox_mode = "danger-full-access"` in the generated `~/.codex/config.toml`), because the container is already the isolation boundary and Codex's sandbox blocks the network the moat proxy provides. Same meaning as `--noyolo` on `moat claude`. |
 | `--full-auto` | Deprecated, hidden. `--full-auto=false` is treated as `--noyolo`; `--full-auto=true` is a no-op. The Codex CLI removed this flag from its interactive mode and deprecated it on `codex exec`. |
@@ -477,10 +478,11 @@ Pi has no credential of its own — it runs against your `anthropic`, `openai`, 
 
 | Flag | Description |
 |------|-------------|
+| `-c`, `--continue` | Continue the most recent saved conversation for this workspace. Requires session persistence; see the agent guide. |
 | `-p`, `--prompt TEXT` | Run non-interactive with prompt |
 | `--provider NAME` | Model backend: `anthropic`, `openai`, or `lunaroute`. Overrides `pi.provider`; required when more than one of those grants is configured. |
 | `--model PATTERN` | Model pattern to use (overrides `pi.model`). When unset, Moat selects the first available model for the chosen backend, ordered by model ID. |
-| `--sync-logs` | Persist Pi session transcripts in `~/.moat/pi/sessions/<workspace-slug>/`. Off by default; overrides `pi.sync_logs`. Use `--sync-logs=false` to disable. |
+| `--sync-logs` | Persist Pi session transcripts in `~/.moat/pi/sessions/<workspace-slug>/`. Off by default; enabled by `--continue` unless explicitly disabled. Overrides `pi.sync_logs`. Use `--sync-logs=false` to disable. |
 
 ### Examples
 

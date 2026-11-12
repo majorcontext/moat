@@ -1585,18 +1585,13 @@ region = %s
 		// SQLite file risks corrupting it. Rollout filenames carry a timestamp
 		// and UUID, so concurrent runs cannot collide on a file.
 		if !isPiRun && opts.Config != nil && opts.Config.ShouldSyncCodexLogs() {
-			hostCodexSessions := codexSessionsHostDir(hostHome, opts.Workspace, opts.Config.Codex.SharedSessions)
-			if hostCodexSessions == "" {
-				log.Warn("skipping Codex session sync mount: empty workspace path")
-			} else if err := os.MkdirAll(hostCodexSessions, 0o755); err != nil {
-				ui.Warnf("Failed to create Codex sessions directory: %v", err)
-			} else {
-				mounts = append(mounts, container.MountConfig{
-					Source:   hostCodexSessions,
-					Target:   filepath.Join(containerHome, ".codex", "sessions"),
-					ReadOnly: false,
-				})
+			mount, err := codexSessionMount(hostHome, opts.Workspace, containerHome, opts.Config.Codex.SharedSessions)
+			if err != nil {
+				cleanupDaemonRun()
+				cleanupSSH(sshServer)
+				return nil, err
 			}
+			mounts = append(mounts, mount)
 		}
 	}
 
