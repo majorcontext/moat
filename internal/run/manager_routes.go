@@ -21,8 +21,13 @@ import (
 const reconcileTimeout = 5 * time.Second
 
 // setupPortBindings retrieves the host-side port mappings for a container's
-// exposed ports and registers them in the shared route table. Port binding lookup is retried because the container
-// runtime may not have mappings ready immediately after start.
+// exposed ports and registers them in the shared route table. Port binding
+// lookup is retried because the runtime may not have mappings ready immediately
+// after start.
+//
+// The daemon API and routing proxy open the same routes.json. RouteTable reads
+// reload it from disk, including in pre-ownership versions, so no daemon API
+// notification is needed. A legacy RegisterRoutes call would discard ownership.
 func (m *Manager) setupPortBindings(ctx context.Context, r *Run) {
 	if len(r.Ports) == 0 {
 		return
