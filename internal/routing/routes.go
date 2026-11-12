@@ -3,6 +3,7 @@ package routing
 
 import (
 	"encoding/json"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -66,6 +67,9 @@ func (rt *RouteTable) Add(agent string, endpoints map[string]string) error {
 		if err := rt.reload(); err != nil { // pick up routes written by other processes
 			return err
 		}
+		if err := rt.clearOwners([]string{agent}); err != nil {
+			return err
+		}
 		rt.routes[agent] = endpoints
 		return rt.save()
 	})
@@ -85,9 +89,129 @@ func (rt *RouteTable) Remove(agent string) error {
 		if err := rt.reload(); err != nil { // pick up routes written by other processes
 			return err
 		}
+		if err := rt.clearOwners([]string{agent}); err != nil {
+			return err
+		}
 		delete(rt.routes, agent)
 		return rt.save()
 	})
+}
+
+// routeOwner is stored separately so older readers can still consume routes.json.
+type routeOwner struct {
+	ContainerID string            `json:"containerID"`
+	Endpoints   map[string]string `json:"endpoints"`
+}
+
+// AddOwned registers a container's endpoints without replacing another owner's
+// existing route. A missing route permits replacing an orphaned sidecar entry.
+func (rt *RouteTable) AddOwned(agent, containerID string, endpoints map[string]string) error {
+	if containerID == "" {
+		return fmt.Errorf("route owner container ID is empty")
+	}
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	return rt.withFileLock(func() error {
+		if err := rt.reload(); err != nil {
+			return err
+		}
+		owners, err := rt.loadOwners()
+		if err != nil {
+			return err
+		}
+		if current, exists := rt.routes[agent]; exists {
+			owner := owners[agent]
+			if owner.ContainerID != "" && owner.ContainerID != containerID {
+				return fmt.Errorf("routes for %q are owned by another container", agent)
+			}
+			// Legacy registrations have no ownership proof. Adopt only an
+			// exact endpoint match; a different binding may serve another run.
+			if owner.ContainerID == "" && !sameEndpoints(current, endpoints) {
+				return fmt.Errorf("routes for %q have different unowned endpoints", agent)
+			}
+			// Health checks normally find an unchanged registration. Avoid
+			// replacing either file unless the persisted registration needs repair.
+			if owner.ContainerID == containerID && sameEndpoints(owner.Endpoints, endpoints) && sameEndpoints(current, endpoints) {
+				return nil
+			}
+		}
+		owners[agent] = routeOwner{ContainerID: containerID, Endpoints: endpoints}
+		// Publish ownership first. If the route write fails, old cleanup cannot
+		// delete a new registration whose ports happen to have been reused.
+		if err := rt.saveJSON("route-owners.json", owners); err != nil {
+			return err
+		}
+		rt.routes[agent] = endpoints
+		return rt.save()
+	})
+}
+
+// RemoveOwned only removes the caller's exact registration. Missing ownership
+// (including legacy Add registrations) is deliberately insufficient authority.
+// Such routes remain until Create or reconciliation can reclaim them safely.
+func (rt *RouteTable) RemoveOwned(agent, containerID string, endpoints map[string]string) error {
+	if containerID == "" || len(endpoints) == 0 {
+		return nil
+	}
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	return rt.withFileLock(func() error {
+		if err := rt.reload(); err != nil {
+			return err
+		}
+		owners, err := rt.loadOwners()
+		if err != nil {
+			return err
+		}
+		owner := owners[agent]
+		if owner.ContainerID != containerID || !sameEndpoints(owner.Endpoints, endpoints) || !sameEndpoints(rt.routes[agent], endpoints) {
+			return nil
+		}
+		delete(owners, agent)
+		if err := rt.saveJSON("route-owners.json", owners); err != nil {
+			return err
+		}
+		delete(rt.routes, agent)
+		return rt.save()
+	})
+}
+
+// Ownership reads and writes are always made under routes.lock. Unlike the
+// derived route cache, malformed ownership must fail closed for mutations.
+func (rt *RouteTable) loadOwners() (map[string]routeOwner, error) {
+	owners := make(map[string]routeOwner)
+	data, err := os.ReadFile(filepath.Join(rt.dir, "route-owners.json"))
+	if os.IsNotExist(err) {
+		return owners, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(data, &owners); err != nil {
+		return nil, err
+	}
+	if owners == nil {
+		owners = make(map[string]routeOwner)
+	}
+	return owners, nil
+}
+
+func (rt *RouteTable) clearOwners(agents []string) error {
+	owners, err := rt.loadOwners()
+	if err != nil {
+		return err
+	}
+	changed := false
+	for _, agent := range agents {
+		if _, ok := owners[agent]; ok {
+			delete(owners, agent)
+			changed = true
+		}
+	}
+	if !changed {
+		return nil
+	}
+	return rt.saveJSON("route-owners.json", owners)
 }
 
 // withFileLock runs fn while holding an exclusive advisory lock on
@@ -265,6 +389,9 @@ func (rt *RouteTable) removeUnchanged(probed map[string]map[string]string) []str
 		if len(removed) == 0 {
 			return nil
 		}
+		if err := rt.clearOwners(removed); err != nil {
+			return err
+		}
 		return rt.save()
 	})
 	if err != nil {
@@ -356,7 +483,11 @@ func (rt *RouteTable) Agents() []string {
 }
 
 func (rt *RouteTable) save() error {
-	data, err := json.MarshalIndent(rt.routes, "", "  ")
+	return rt.saveJSON("routes.json", rt.routes)
+}
+
+func (rt *RouteTable) saveJSON(filename string, value any) error {
+	data, err := json.MarshalIndent(value, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -365,7 +496,7 @@ func (rt *RouteTable) save() error {
 	// take the file lock — the rename is what makes a concurrent read see either
 	// the old file or the new one, never a partial write. The temp name is
 	// unique per writer so a save racing a reader's directory scan can't collide.
-	path := filepath.Join(rt.dir, "routes.json")
+	path := filepath.Join(rt.dir, filename)
 	tmp, err := os.CreateTemp(rt.dir, "routes-*.json.tmp")
 	if err != nil {
 		return err

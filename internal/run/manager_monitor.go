@@ -78,9 +78,9 @@ func (m *Manager) monitorContainerExit(ctx context.Context, r *Run) {
 	m.cleanupResources(cleanupCtx, r)
 }
 
-// monitorProxyHealth periodically checks the proxy daemon's health and
-// re-registers the run if the daemon restarted. This prevents containers from
-// getting HTTP 407 errors when the daemon's in-memory registry is lost.
+// monitorProxyHealth repairs endpoint routing and checks the credential proxy
+// daemon. Re-registering after a daemon restart prevents HTTP 407 errors when
+// its in-memory registry is lost.
 func (m *Manager) monitorProxyHealth(ctx context.Context, r *Run) {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
@@ -91,6 +91,10 @@ func (m *Manager) monitorProxyHealth(ctx context.Context, r *Run) {
 			return
 		case <-ticker.C:
 		}
+
+		// Endpoint routing has a separate listener and registration lifecycle
+		// from credential injection, and must recover even for grant-free runs.
+		m.recoverRunRoutes(ctx, r)
 
 		// Snapshot daemonClient under lock.
 		m.mu.RLock()

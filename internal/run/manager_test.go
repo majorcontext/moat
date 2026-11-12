@@ -824,7 +824,7 @@ func TestComputeBuildKitEnv(t *testing.T) {
 	}
 }
 
-// --- loadPersistedRuns stale route cleanup tests ---
+// --- loadPersistedRuns route preservation tests ---
 
 // stubRuntime is a minimal container.Runtime implementation for testing
 // loadPersistedRuns. Only ContainerState and WaitContainer are implemented;
@@ -921,10 +921,9 @@ func (s *stubRuntime) ExecInteractive(context.Context, string, []string, contain
 	panic("not implemented")
 }
 
-// TestLoadPersistedRunsCleansStaleRoutes verifies that loadPersistedRuns removes
-// routes for containers that are no longer running. This prevents the bug where
-// a stale routes.json entry blocks reuse of a run name after the container has stopped.
-func TestLoadPersistedRunsCleansStaleRoutes(t *testing.T) {
+// A stopped container does not own every subsequent route with its name.
+// Loading history must preserve registrations, even before the service listens.
+func TestLoadPersistedRunsPreservesRoutesForReusedNames(t *testing.T) {
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
 	t.Setenv("MOAT_HOME", "")
@@ -948,7 +947,7 @@ func TestLoadPersistedRunsCleansStaleRoutes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Pre-populate routes.json with a stale route for this agent
+	// A newer run has registered an endpoint under the same name.
 	routeDir := filepath.Join(tmpHome, ".moat", "routes")
 	routes, err := routing.NewRouteTable(routeDir)
 	if err != nil {
@@ -978,9 +977,9 @@ func TestLoadPersistedRunsCleansStaleRoutes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// The stale route should have been cleaned up
-	if routes.AgentExists("my-agent") {
-		t.Error("stale route for stopped container should have been removed by loadPersistedRuns")
+	// Loading the older, exited container must not delete the new route.
+	if !routes.AgentExists("my-agent") {
+		t.Error("loading a stopped run removed a newer run's route")
 	}
 
 	// The run should still be loaded (just with stopped state)
@@ -1214,12 +1213,12 @@ func TestLoadPersistedRunsSkipsCrossRuntimeCheck(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Simulate a run created with Apple containers
+	// Use an unavailable runtime so this unit test never starts a real runtime.
 	err = store.SaveMetadata(storage.Metadata{
 		Name:        "apple-agent",
 		ContainerID: "run_applerun1234",
 		State:       "running",
-		Runtime:     "apple",
+		Runtime:     "unavailable-test-runtime",
 		Workspace:   "/tmp/workspace",
 		CreatedAt:   time.Now().Add(-1 * time.Hour),
 		StartedAt:   time.Now().Add(-1 * time.Hour),
@@ -1241,7 +1240,7 @@ func TestLoadPersistedRunsSkipsCrossRuntimeCheck(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Docker runtime — should NOT query this Apple container.
+	// Fake Docker runtime — must not query the other runtime's container.
 	// done is closed immediately so any accidentally-spawned monitor
 	// goroutine would return from WaitContainer and corrupt state.
 	done := make(chan struct{})
@@ -1267,8 +1266,8 @@ func TestLoadPersistedRunsSkipsCrossRuntimeCheck(t *testing.T) {
 	if r.GetState() != StateRunning {
 		t.Errorf("cross-runtime run should preserve persisted state %q, got %q", StateRunning, r.GetState())
 	}
-	if r.Runtime != "apple" {
-		t.Errorf("expected runtime %q, got %q", "apple", r.Runtime)
+	if r.Runtime != "unavailable-test-runtime" {
+		t.Errorf("expected runtime %q, got %q", "unavailable-test-runtime", r.Runtime)
 	}
 
 	// Give any accidentally-spawned monitor goroutine time to corrupt state.
@@ -1289,11 +1288,8 @@ func TestLoadPersistedRunsSkipsCrossRuntimeCheck(t *testing.T) {
 	}
 }
 
-// TestLoadPersistedRunsCleansRoutesForPersistedTerminalState verifies that
-// runs persisted in a terminal state (stopped/failed) have their stale routes
-// cleaned up. The owning process authoritatively wrote the terminal state,
-// so route cleanup is safe.
-func TestLoadPersistedRunsCleansRoutesForPersistedTerminalState(t *testing.T) {
+// Persisted terminal state says nothing about who currently owns the name.
+func TestLoadPersistedRunsPreservesRoutesForPersistedTerminalState(t *testing.T) {
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
 	t.Setenv("MOAT_HOME", "")
@@ -1341,9 +1337,9 @@ func TestLoadPersistedRunsCleansRoutesForPersistedTerminalState(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Stale route should be cleaned for a persisted terminal state
-	if routes.AgentExists("done-agent") {
-		t.Error("stale route for persisted stopped run should have been removed by loadPersistedRuns")
+	// History loading leaves the route intact; Create can reclaim stale names.
+	if !routes.AgentExists("done-agent") {
+		t.Error("loading persisted terminal state removed a newer run's route")
 	}
 
 	// Run should be loaded with stopped state

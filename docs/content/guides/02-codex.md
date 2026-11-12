@@ -274,6 +274,11 @@ the shared history. Set `codex.shared_sessions: false` and first save a
 conversation in that workspace's isolated session directory before continuing.
 Existing shared conversations are not migrated automatically.
 
+Continuation relies on Codex's native session discovery reading rollout files
+from the mounted `~/.codex/sessions` directory and rebuilding its private
+session index. Moat persists the rollout files; each new container creates its
+own SQLite index.
+
 Continuation enables the transcript mount even without an auto-detected grant.
 An explicit `codex.sync_logs: false` is rejected; enable it before continuing.
 The earlier run must also have persisted its transcripts. A session-directory

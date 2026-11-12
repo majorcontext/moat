@@ -231,11 +231,18 @@ func (ps *ProxyServer) Stop(ctx context.Context) error {
 		return nil
 	}
 
-	// For non-TLS mode, use graceful shutdown
+	var shutdownErr error
 	if ps.server != nil {
-		return ps.server.Shutdown(ctx)
+		shutdownErr = ps.server.Shutdown(ctx)
 	}
 
-	// For TLS mode, close the listener (muxListener handles per-connection servers)
-	return ps.listener.Close()
+	// Start launches Serve asynchronously. Shutdown can return before Serve
+	// registers the listener, so explicitly close our listener before returning.
+	// If Serve was already running, Shutdown has drained its active requests
+	// and closed the listener; normalize that expected second close.
+	closeErr := ps.listener.Close()
+	if errors.Is(closeErr, net.ErrClosed) {
+		closeErr = nil
+	}
+	return errors.Join(shutdownErr, closeErr)
 }

@@ -43,6 +43,8 @@ var ErrRunNotFound = daemon.ErrRunNotFound
 
 // Run represents an agent execution environment.
 type Run struct {
+	// inherited is immutable after construction and identifies runs loaded from disk.
+	inherited bool
 	ID        string
 	Name      string // Human-friendly name (e.g., "myapp" or "fluffy-chicken")
 	Workspace string
@@ -57,7 +59,7 @@ type Run struct {
 	Runtime           string            // Container runtime type ("docker" or "apple")
 	ProviderMeta      map[string]string // Provider-specific metadata (e.g., claude_session_id)
 	Ports             map[string]int    // endpoint name -> container port
-	HostPorts         map[string]int    // endpoint name -> host port (after binding)
+	HostPorts         map[string]int    // endpoint name -> host port (guarded by stateMu)
 	State             State
 	ContainerID       string
 	SSHAgentServer    *sshagent.Server  // SSH agent proxy for SSH key access
@@ -215,6 +217,7 @@ func (r *Run) SaveMetadata() error {
 	stoppedAt := r.StoppedAt
 	errMsg := r.Error
 	providerMeta := maps.Clone(r.ProviderMeta)
+	hostPorts := maps.Clone(r.HostPorts)
 	r.stateMu.Unlock()
 
 	return r.Store.SaveMetadata(storage.Metadata{
@@ -225,6 +228,7 @@ func (r *Run) SaveMetadata() error {
 		JoinableAgents:      r.JoinableAgents,
 		Image:               r.Image,
 		Ports:               r.Ports,
+		HostPorts:           hostPorts,
 		ContainerID:         r.ContainerID,
 		State:               string(state),
 		Interactive:         r.Interactive,

@@ -273,6 +273,17 @@ $ sudo security add-trusted-cert -d -r trustRoot \
 
 ### "Connection refused" on hostname
 
+While the run's Moat process is active, it checks endpoint routing every 30 seconds.
+If the routing proxy's owning process exits or a route registration is lost,
+the run restores the proxy and its routes after confirming that its container is
+still running. The application inside the container must still be listening on
+the declared port; restarting a development server does not require restarting
+the Moat run.
+
+Routes created by older Moat versions have no ownership record. Cleanup preserves
+those entries to avoid deleting a newer run's route; name reuse and route
+reconciliation reclaim them once they are unreachable.
+
 1. Check the proxy is running:
    ```bash
    $ moat proxy status

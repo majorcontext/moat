@@ -5,12 +5,15 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/majorcontext/gatekeeper/proxy"
 )
@@ -740,5 +743,73 @@ func TestEnableTLSAfterStart(t *testing.T) {
 		t.Error("Expected error when calling EnableTLS after Start, got nil")
 	} else if err.Error() != "cannot enable TLS after Start()" {
 		t.Errorf("Expected 'cannot enable TLS after Start()' error, got: %v", err)
+	}
+}
+
+// A proxy that was already running must observe CLI writes to the shared file
+// without a daemon registration request or a new RouteTable instance.
+func TestReverseProxyReloadsOwnedRoutesFromAnotherTable(t *testing.T) {
+	dir := t.TempDir()
+	reader, err := NewRouteTable(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer, err := NewRouteTable(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxy := NewReverseProxy(reader)
+	check := func(wantStatus int, wantRegistered bool) {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Host = "project.localhost"
+		req.Header.Set("Accept", "application/json")
+		rec := httptest.NewRecorder()
+		proxy.ServeHTTP(rec, req)
+		if rec.Code != wantStatus {
+			t.Fatalf("status = %d, want %d: %s", rec.Code, wantStatus, rec.Body.String())
+		}
+		addr, registered := reader.Lookup("project", "web")
+		if registered != wantRegistered || (registered && addr != "127.0.0.1:50001") {
+			t.Fatalf("lookup = %q, %v; want registered %v", addr, registered, wantRegistered)
+		}
+	}
+	check(http.StatusNotFound, false)
+	// Multiple endpoints serve a discovery index without contacting a backend.
+	endpoints := map[string]string{"web": "127.0.0.1:50001", "api": "127.0.0.1:50002"}
+	if err := writer.AddOwned("project", "container", endpoints); err != nil {
+		t.Fatal(err)
+	}
+	check(http.StatusOK, true)
+	if err := writer.RemoveOwned("project", "container", endpoints); err != nil {
+		t.Fatal(err)
+	}
+	check(http.StatusNotFound, false)
+}
+
+// Start launches Serve asynchronously. Stop may run before Serve has registered
+// the listener with http.Server; Shutdown alone cannot close that listener.
+func TestProxyServerStopBeforeServe(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	server := &http.Server{ReadHeaderTimeout: time.Second}
+	ps := &ProxyServer{listener: listener, server: server}
+	if err := ps.Stop(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	conn, err := net.DialTimeout("tcp", listener.Addr().String(), time.Second)
+	if err == nil {
+		conn.Close()
+		t.Fatal("Stop returned before the unregistered listener was closed")
+	}
+	// The delayed Serve must also terminate cleanly once scheduled.
+	if err := server.Serve(listener); !errors.Is(err, http.ErrServerClosed) {
+		t.Fatalf("late Serve returned %v, want ErrServerClosed", err)
+	}
+	if err := ps.Stop(context.Background()); err != nil {
+		t.Fatalf("repeated Stop: %v", err)
 	}
 }

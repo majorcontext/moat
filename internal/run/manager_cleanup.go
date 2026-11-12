@@ -5,6 +5,7 @@ package run
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -229,15 +230,9 @@ func (m *Manager) cleanupResources(ctx context.Context, r *Run) {
 			}
 		}
 
-		// Unregister routes
-		if r.Name != "" {
-			_ = m.routes.Remove(r.Name)
-			if dc != nil {
-				if err := dc.UnregisterRoutes(ctx, r.Name); err != nil {
-					log.Debug("cleanup: failed to unregister routes", "error", err)
-				}
-			}
-		}
+		// The daemon reads the same route file. Do not follow this conditional
+		// removal with a name-only daemon delete: a new run may now own the name.
+		m.removeRunRoutes(r)
 
 		// Clean up provider resources
 		for providerName, cleanupPath := range r.ProviderCleanupPaths {
@@ -255,4 +250,19 @@ func (m *Manager) cleanupResources(ctx context.Context, r *Run) {
 			}
 		}
 	})
+}
+
+func (m *Manager) removeRunRoutes(r *Run) {
+	if r.Name == "" || m.routes == nil {
+		return
+	}
+	r.stateMu.Lock()
+	services := make(map[string]string, len(r.HostPorts))
+	for name, port := range r.HostPorts {
+		services[name] = fmt.Sprintf("127.0.0.1:%d", port)
+	}
+	r.stateMu.Unlock()
+	if err := m.routes.RemoveOwned(r.Name, r.ContainerID, services); err != nil {
+		log.Debug("cleanup: failed to unregister routes", "run", r.ID, "error", err)
+	}
 }

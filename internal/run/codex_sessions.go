@@ -23,7 +23,7 @@ func codexSessionMountForWorkspace(workspace, containerHome string, shared bool)
 func codexSessionMount(hostHome, workspace, containerHome string, shared bool) (container.MountConfig, error) {
 	hostDir := codexSessionsHostDir(hostHome, workspace, shared)
 	if hostDir == "" || !filepath.IsAbs(hostDir) || !filepath.IsAbs(containerHome) {
-		return container.MountConfig{}, fmt.Errorf("cannot persist Codex sessions: invalid paths: workspace=%q, hostDir=%q, containerHome=%q; the session directory and container home must be absolute", workspace, hostDir, containerHome)
+		return container.MountConfig{}, fmt.Errorf("cannot persist Codex sessions: invalid paths: workspace=%q, hostDir=%q, containerHome=%q; the session directory and container home must be absolute; check HOME, MOAT_HOME, and the workspace path", workspace, hostDir, containerHome)
 	}
 	if err := os.MkdirAll(hostDir, 0o755); err != nil {
 		return container.MountConfig{}, fmt.Errorf("creating Codex session directory %s: %w", hostDir, err)
