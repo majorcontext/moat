@@ -2,6 +2,7 @@ package run
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -88,5 +89,63 @@ func TestCreatePreservesLiveNameWithoutRoute(t *testing.T) {
 	m := &Manager{routes: routes, runs: map[string]*Run{"live": {Name: "project", State: StateRunning}}}
 	if _, err := m.Create(context.Background(), Options{Name: "project"}); err == nil || !strings.Contains(err.Error(), "already running") {
 		t.Fatalf("expected name collision, got %v", err)
+	}
+}
+
+func TestCreateReservesCreatedAndStartingNames(t *testing.T) {
+	for _, state := range []State{StateCreated, StateStarting} {
+		for _, inherited := range []bool{false, true} {
+			t.Run(string(state)+fmt.Sprint(inherited), func(t *testing.T) {
+				routes, err := routing.NewRouteTable(t.TempDir())
+				if err != nil {
+					t.Fatal(err)
+				}
+				// No runtime pool: these states must never query a runtime or reach Create.
+				m := &Manager{routes: routes, runs: map[string]*Run{"existing": {Name: "project", State: state, inherited: inherited}}}
+				if _, err := m.Create(context.Background(), Options{Name: "project"}); err == nil || !strings.Contains(err.Error(), "already running") {
+					t.Fatalf("expected name reservation, got %v", err)
+				}
+			})
+		}
+	}
+}
+
+func TestInheritedRunNameReservationChecksRuntime(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		containerState string
+		inherited      bool
+		reserved       bool
+	}{
+		{"local running", "exited", false, true},
+		{"inherited running", "running", true, true},
+		{"inherited exited", "exited", true, false},
+		{"inherited dead", "dead", true, false},
+		{"inherited stopped", "stopped", true, false},
+		{"inherited paused", "paused", true, true},
+		{"inherited unknown", "", true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rt := &stubRuntime{states: map[string]string{}}
+			if tc.containerState != "" {
+				rt.states["c1"] = tc.containerState
+			}
+			m := &Manager{runtimePool: container.NewRuntimePoolWithDefault(rt)}
+			r := &Run{ContainerID: "c1", State: StateRunning, inherited: tc.inherited}
+			if got := m.runReservesName(context.Background(), r); got != tc.reserved {
+				t.Fatalf("reserved = %v, want %v", got, tc.reserved)
+			}
+		})
+	}
+}
+
+func TestInheritedNameCheckPreservesCanceledReservation(t *testing.T) {
+	rt := &stubRuntime{states: map[string]string{"c1": "exited"}}
+	m := &Manager{runtimePool: container.NewRuntimePoolWithDefault(rt)}
+	r := &Run{ContainerID: "c1", State: StateRunning, inherited: true}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if !m.runReservesName(ctx, r) {
+		t.Fatal("canceled check released name")
 	}
 }

@@ -43,6 +43,8 @@ var ErrRunNotFound = daemon.ErrRunNotFound
 
 // Run represents an agent execution environment.
 type Run struct {
+	// inherited is immutable after construction and identifies runs loaded from disk.
+	inherited bool
 	ID        string
 	Name      string // Human-friendly name (e.g., "myapp" or "fluffy-chicken")
 	Workspace string

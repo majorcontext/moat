@@ -119,9 +119,15 @@ func (rt *RouteTable) AddOwned(agent, containerID string, endpoints map[string]s
 		if err != nil {
 			return err
 		}
-		if _, exists := rt.routes[agent]; exists {
-			if owner := owners[agent]; owner.ContainerID != "" && owner.ContainerID != containerID {
+		if current, exists := rt.routes[agent]; exists {
+			owner := owners[agent]
+			if owner.ContainerID != "" && owner.ContainerID != containerID {
 				return fmt.Errorf("routes for %q are owned by another container", agent)
+			}
+			// Health checks normally find an unchanged registration. Avoid
+			// replacing either file unless the persisted registration needs repair.
+			if owner.ContainerID == containerID && sameEndpoints(owner.Endpoints, endpoints) && sameEndpoints(current, endpoints) {
+				return nil
 			}
 		}
 		owners[agent] = routeOwner{ContainerID: containerID, Endpoints: endpoints}
@@ -137,6 +143,7 @@ func (rt *RouteTable) AddOwned(agent, containerID string, endpoints map[string]s
 
 // RemoveOwned only removes the caller's exact registration. Missing ownership
 // (including legacy Add registrations) is deliberately insufficient authority.
+// Such routes remain until Create or reconciliation can reclaim them safely.
 func (rt *RouteTable) RemoveOwned(agent, containerID string, endpoints map[string]string) error {
 	if containerID == "" || len(endpoints) == 0 {
 		return nil

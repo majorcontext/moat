@@ -145,7 +145,7 @@ func TestOwnedRoutesPublishOwnerBeforeRoute(t *testing.T) {
 	if err := os.Remove(filepath.Join(dir, "routes.json")); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Mkdir(filepath.Join(dir, "routes.json"), 0700); err != nil {
+	if err := os.Mkdir(filepath.Join(dir, "routes.json"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	// reload normally rejects a directory; exercise the shared save primitive
@@ -590,5 +590,55 @@ func TestPruneUnreachableSkipsReregisteredRoutes(t *testing.T) {
 	}
 	if !rt.AgentExists("restarted") {
 		t.Error("re-registered agent should survive")
+	}
+}
+
+func TestOwnedRoutesUnchangedRegistrationDoesNotRewrite(t *testing.T) {
+	dir := t.TempDir()
+	rt, err := NewRouteTable(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	endpoints := map[string]string{"web": "127.0.0.1:50001"}
+	if err := rt.AddOwned("project", "container", endpoints); err != nil {
+		t.Fatal(err)
+	}
+	before := make(map[string]os.FileInfo)
+	for _, filename := range []string{"routes.json", "route-owners.json"} {
+		info, err := os.Stat(filepath.Join(dir, filename))
+		if err != nil {
+			t.Fatal(err)
+		}
+		before[filename] = info
+	}
+	// A separate table must reload the persisted ownership, not depend on an
+	// in-memory optimization. Atomic replacement changes the file identity.
+	other, err := NewRouteTable(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 3; i++ {
+		if err := other.AddOwned("project", "container", endpoints); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for filename, info := range before {
+		after, err := os.Stat(filepath.Join(dir, filename))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !os.SameFile(info, after) || !info.ModTime().Equal(after.ModTime()) {
+			t.Fatalf("unchanged registration rewrote %s", filename)
+		}
+	}
+	// A matching sidecar alone must not suppress repair of a missing route.
+	if err := os.Remove(filepath.Join(dir, "routes.json")); err != nil {
+		t.Fatal(err)
+	}
+	if err := other.AddOwned("project", "container", endpoints); err != nil {
+		t.Fatal(err)
+	}
+	if !rt.AgentExists("project") {
+		t.Fatal("missing route was not restored")
 	}
 }

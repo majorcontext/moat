@@ -310,11 +310,16 @@ func TestRecoverRunRoutesPreservesUncertainBindings(t *testing.T) {
 		{name: "partial bindings", state: "running", bindings: map[int]int{4321: 53624}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			rt := &portStubRuntime{stubRuntime: &stubRuntime{states: map[string]string{"c1": tc.state}},
-				bindings: map[string]map[int]int{"c1": tc.bindings}, bindErr: tc.bindErr}
+			rt := &portStubRuntime{
+				stubRuntime: &stubRuntime{states: map[string]string{"c1": tc.state}},
+				bindings:    map[string]map[int]int{"c1": tc.bindings},
+				bindErr:     tc.bindErr,
+			}
 			m, routes := reconcileFixture(t, rt)
-			r := &Run{Name: "recover", ContainerID: "c1", State: StateRunning,
-				Ports: map[string]int{"www": 4321, "api": 4322}}
+			r := &Run{
+				Name: "recover", ContainerID: "c1", State: StateRunning,
+				Ports: map[string]int{"www": 4321, "api": 4322},
+			}
 			if err := routes.Add(r.Name, map[string]string{"www": "127.0.0.1:1111"}); err != nil {
 				t.Fatal(err)
 			}
@@ -327,8 +332,10 @@ func TestRecoverRunRoutesPreservesUncertainBindings(t *testing.T) {
 }
 
 func TestRecoverRunRoutesSkipsTerminalOrCanceled(t *testing.T) {
-	rt := &portStubRuntime{stubRuntime: &stubRuntime{states: map[string]string{"c1": "running"}},
-		bindings: map[string]map[int]int{"c1": {4321: 53624}}}
+	rt := &portStubRuntime{
+		stubRuntime: &stubRuntime{states: map[string]string{"c1": "running"}},
+		bindings:    map[string]map[int]int{"c1": {4321: 53624}},
+	}
 	m, routes := reconcileFixture(t, rt)
 	r := &Run{Name: "recover", ContainerID: "c1", State: StateStopped, Ports: map[string]int{"www": 4321}}
 	m.recoverRunRoutes(context.Background(), r)
@@ -411,5 +418,22 @@ func TestRecoverRunRoutesCannotHijackOwnedName(t *testing.T) {
 	}
 	if len(r.HostPorts) != 0 {
 		t.Fatal("failed registration changed cleanup bindings")
+	}
+}
+
+func TestRecoverRunRoutesWithoutLifecycle(t *testing.T) {
+	rt := &portStubRuntime{
+		stubRuntime: &stubRuntime{states: map[string]string{"c1": "running"}},
+		bindings:    map[string]map[int]int{"c1": {4321: 53624}},
+	}
+	m, routes := reconcileFixture(t, rt)
+	r := &Run{Name: "project", ContainerID: "c1", State: StateRunning, Ports: map[string]int{"web": 4321}}
+	m.recoverRunRoutes(context.Background(), r)
+	if addr, ok := routes.Lookup("project", "web"); !ok || addr != "127.0.0.1:53624" {
+		t.Fatalf("route was not restored: %q %v", addr, ok)
+	}
+	m.removeRunRoutes(r)
+	if routes.AgentExists("project") {
+		t.Fatal("recovered route did not record cleanup ownership")
 	}
 }

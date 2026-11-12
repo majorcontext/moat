@@ -280,6 +280,10 @@ still running. The application inside the container must still be listening on
 the declared port; restarting a development server does not require restarting
 the Moat run.
 
+Routes created by older Moat versions have no ownership record. Cleanup preserves
+those entries to avoid deleting a newer run's route; name reuse and route
+reconciliation reclaim them once they are unreachable.
+
 1. Check the proxy is running:
    ```bash
    $ moat proxy status

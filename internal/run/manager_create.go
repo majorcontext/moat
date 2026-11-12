@@ -91,10 +91,13 @@ func (m *Manager) Create(ctx context.Context, opts Options) (resRun *Run, retErr
 	} else {
 		// Live names remain reserved even when their route registration is lost.
 		for _, existing := range m.List() {
-			state := existing.GetState()
-			if existing.Name == agentName && state != StateStopped && state != StateFailed {
+			if existing.Name != agentName {
+				continue
+			}
+			if m.runReservesName(ctx, existing) {
 				return nil, fmt.Errorf("agent %q is already running. Use --name to specify a different name, or stop the existing agent first", agentName)
 			}
+			m.removeRunRoutes(existing)
 		}
 		if m.routes.AgentExists(agentName) {
 			// The route may be stale (leftover from a crashed process).
@@ -3297,4 +3300,35 @@ func proxyRequiredForConfig(cfg *config.Config) bool {
 		cfg.Network.KeepPolicy != nil ||
 		cfg.Claude.BaseURL != "" ||
 		(cfg.Claude.LLMGateway != nil && cfg.Claude.LLMGateway.Policy != nil)
+}
+
+// runReservesName treats local lifecycle state as authoritative. Inherited
+// running state is a startup snapshot: only a successful, bounded runtime check
+// reporting a terminal container can release it. Uncertainty reserves the name.
+func (m *Manager) runReservesName(ctx context.Context, r *Run) bool {
+	state := r.GetState()
+	if state == StateStopped || state == StateFailed {
+		return false
+	}
+	if state != StateRunning || !r.inherited || r.ContainerID == "" {
+		return true
+	}
+	checkCtx, cancel := context.WithTimeout(ctx, reconcileTimeout)
+	defer cancel()
+	rt, err := m.runtimeForRun(r)
+	if err != nil {
+		return true
+	}
+	containerState, err := rt.ContainerState(checkCtx, r.ContainerID)
+	if err != nil || checkCtx.Err() != nil {
+		return true
+	}
+	switch containerState {
+	case "exited", "dead", "stopped":
+		// A concurrent Start must retain its reservation.
+		state = r.GetState()
+		return state != StateRunning && state != StateStopped && state != StateFailed
+	default:
+		return true
+	}
 }

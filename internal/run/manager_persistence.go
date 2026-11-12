@@ -188,6 +188,7 @@ func (m *Manager) registerPersistedRun(runState State, stateConfirmed bool, skip
 	}
 
 	r := &Run{
+		inherited:         true,
 		ID:                runID,
 		Name:              meta.Name,
 		Workspace:         meta.Workspace,

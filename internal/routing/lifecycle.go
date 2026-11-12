@@ -190,7 +190,7 @@ func (lc *Lifecycle) Stop(ctx context.Context) error {
 		return nil
 	}
 
-	if err := lc.server.Stop(ctx); err != nil {
+	if err = lc.server.Stop(ctx); err != nil {
 		return err
 	}
 
