@@ -5,12 +5,15 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/majorcontext/gatekeeper/proxy"
 )
@@ -782,4 +785,31 @@ func TestReverseProxyReloadsOwnedRoutesFromAnotherTable(t *testing.T) {
 		t.Fatal(err)
 	}
 	check(http.StatusNotFound, false)
+}
+
+// Start launches Serve asynchronously. Stop may run before Serve has registered
+// the listener with http.Server; Shutdown alone cannot close that listener.
+func TestProxyServerStopBeforeServe(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	server := &http.Server{ReadHeaderTimeout: time.Second}
+	ps := &ProxyServer{listener: listener, server: server}
+	if err := ps.Stop(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	conn, err := net.DialTimeout("tcp", listener.Addr().String(), time.Second)
+	if err == nil {
+		conn.Close()
+		t.Fatal("Stop returned before the unregistered listener was closed")
+	}
+	// The delayed Serve must also terminate cleanly once scheduled.
+	if err := server.Serve(listener); !errors.Is(err, http.ErrServerClosed) {
+		t.Fatalf("late Serve returned %v, want ErrServerClosed", err)
+	}
+	if err := ps.Stop(context.Background()); err != nil {
+		t.Fatalf("repeated Stop: %v", err)
+	}
 }
