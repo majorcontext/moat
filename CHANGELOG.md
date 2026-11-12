@@ -6,6 +6,10 @@ Moat is pre-1.0. The CLI interface and `moat.yaml` schema may change between min
 
 ## Unreleased
 
+### Added
+
+- **Pi and Codex continuation** — `moat pi --continue` and `moat codex --continue` (`-c`) resume saved conversations, including non-interactive `-p` prompts. Pi requires a previous run with transcript persistence enabled; Codex continuation uses workspace-isolated histories and rejects shared sessions. ([#497](https://github.com/majorcontext/moat/pull/497))
+
 ## v0.9.3 — 2026-11-10
 
 Fixes a strict-policy bug on Docker on Linux that blocked all outbound traffic on the host, and adds commands to inspect, reset, and remove credential profiles. Strict runs on Linux now reach host services through `moat-host` instead of `localhost`.
