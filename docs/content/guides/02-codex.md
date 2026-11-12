@@ -263,7 +263,8 @@ moat codex -c -p "Add tests for the previous change"
 Moat uses `codex resume --last` interactively and `codex exec resume --last`
 with `-p`. Codex selects a saved conversation for the container's current
 working directory using its native session-selection rules. Moat does not
-pass `--all`. This creates a new Moat run using the saved conversation; it
+pass `--all`; the per-workspace transcript mount keeps selection isolated even
+though containers share the `/workspace` path. This creates a new Moat run using the saved conversation; it
 does not reconnect to the previous container.
 
 Continuation requires workspace-isolated sessions. Moat rejects `--continue`

@@ -13,7 +13,7 @@ import (
 func codexSessionMount(hostHome, workspace, containerHome string, shared bool) (container.MountConfig, error) {
 	hostDir := codexSessionsHostDir(hostHome, workspace, shared)
 	if hostDir == "" || !filepath.IsAbs(hostDir) || !filepath.IsAbs(containerHome) {
-		return container.MountConfig{}, fmt.Errorf("codex.sync_logs requires a workspace and absolute home directories")
+		return container.MountConfig{}, fmt.Errorf("cannot persist Codex sessions: check the workspace path and home directories; host HOME and the container home must be absolute")
 	}
 	if err := os.MkdirAll(hostDir, 0o755); err != nil {
 		return container.MountConfig{}, fmt.Errorf("creating Codex session directory %s: %w", hostDir, err)
