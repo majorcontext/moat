@@ -1571,28 +1571,28 @@ region = %s
 				})
 			}
 		}
+	}
 
-		// Mount a session directory so Codex transcripts written inside the
-		// container appear on the host. Enabled when codex.sync_logs is true,
-		// or by default when the openai grant is configured.
-		//
-		// The source is per-workspace (~/.moat/codex/sessions/<slug>) unless
-		// codex.shared_sessions opts into the host's own ~/.codex/sessions —
-		// see codexSessionsHostDir for why the default isolates.
-		//
-		// Only transcripts are shared, never the sibling SQLite databases
-		// (state_*.sqlite and friends) — concurrent runs writing one shared
-		// SQLite file risks corrupting it. Rollout filenames carry a timestamp
-		// and UUID, so concurrent runs cannot collide on a file.
-		if !isPiRun && opts.Config != nil && opts.Config.ShouldSyncCodexLogs() {
-			mount, err := codexSessionMount(hostHome, opts.Workspace, containerHome, opts.Config.Codex.SharedSessions)
-			if err != nil {
-				cleanupDaemonRun()
-				cleanupSSH(sshServer)
-				return nil, err
-			}
-			mounts = append(mounts, mount)
+	// Mount a session directory so Codex transcripts written inside the
+	// container appear on the host. Enabled when codex.sync_logs is true,
+	// or by default when the openai grant is configured.
+	//
+	// The source is per-workspace (~/.moat/codex/sessions/<slug>) unless
+	// codex.shared_sessions opts into the host's own ~/.codex/sessions —
+	// see codexSessionsHostDir for why the default isolates.
+	//
+	// Only transcripts are shared, never the sibling SQLite databases
+	// (state_*.sqlite and friends) — concurrent runs writing one shared
+	// SQLite file risks corrupting it. Rollout filenames carry a timestamp
+	// and UUID, so concurrent runs cannot collide on a file.
+	if !isPiRun && opts.Config != nil && opts.Config.ShouldSyncCodexLogs() {
+		mount, err := codexSessionMountForWorkspace(opts.Workspace, containerHome, opts.Config.Codex.SharedSessions)
+		if err != nil {
+			cleanupDaemonRun()
+			cleanupSSH(sshServer)
+			return nil, err
 		}
+		mounts = append(mounts, mount)
 	}
 
 	if opts.Config != nil && opts.Config.ShouldSyncPiLogs() {

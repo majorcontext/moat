@@ -1,8 +1,10 @@
 package run
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -42,8 +44,18 @@ func TestCodexSessionMountPersistence(t *testing.T) {
 func TestCodexSessionMountErrors(t *testing.T) {
 	t.Setenv("MOAT_HOME", t.TempDir())
 	for _, args := range [][3]string{{"/host", "", "/container"}, {"/host", "/workspace", ""}, {"/host", "/workspace", "relative"}} {
-		if _, err := codexSessionMount(args[0], args[1], args[2], false); err == nil {
+		_, err := codexSessionMount(args[0], args[1], args[2], false)
+		if err == nil {
 			t.Fatalf("accepted %q", args)
+		}
+		for _, detail := range []string{
+			fmt.Sprintf("workspace=%q", args[1]),
+			fmt.Sprintf("hostDir=%q", codexSessionsHostDir(args[0], args[1], false)),
+			fmt.Sprintf("containerHome=%q", args[2]),
+		} {
+			if !strings.Contains(err.Error(), detail) {
+				t.Errorf("error %q missing %s", err, detail)
+			}
 		}
 	}
 	file := filepath.Join(t.TempDir(), "file")
@@ -53,5 +65,19 @@ func TestCodexSessionMountErrors(t *testing.T) {
 	t.Setenv("MOAT_HOME", file)
 	if _, err := codexSessionMount("/host", "/workspace", "/container", false); err == nil {
 		t.Fatal("silently ignored persistence failure")
+	}
+}
+
+func TestCodexSessionMountRequiresHostHome(t *testing.T) {
+	t.Setenv("HOME", "")
+	t.Setenv("MOAT_HOME", t.TempDir())
+	for _, shared := range []bool{false, true} {
+		mount, err := codexSessionMountForWorkspace("/workspace", "/home/agent", shared)
+		if err == nil || !strings.Contains(err.Error(), "resolving host home directory") {
+			t.Fatalf("shared=%v: expected home lookup failure, got mount=%+v, err=%v", shared, mount, err)
+		}
+		if mount.Source != "" {
+			t.Fatalf("returned mount after home lookup failure: %+v", mount)
+		}
 	}
 }

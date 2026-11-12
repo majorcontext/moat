@@ -134,3 +134,30 @@ func TestCodexContinuationOverridesYAMLCommand(t *testing.T) {
 		}
 	}
 }
+
+func TestCodexContinuationRejectsDisabledPersistenceBeforeExecution(t *testing.T) {
+	t.Setenv("MOAT_HOME", t.TempDir())
+	t.Setenv("MOAT_KEYRING_BACKEND", "file")
+	originalExec, originalDryRun, originalContinue := cli.ExecuteRun, cli.DryRun, codexContinue
+	t.Cleanup(func() { cli.ExecuteRun, cli.DryRun, codexContinue = originalExec, originalDryRun, originalContinue })
+	cli.DryRun = false
+	called := false
+	cli.ExecuteRun = func(_ context.Context, _ cli.ExecOptions) (*cli.ExecResult, error) {
+		called = true
+		return &cli.ExecResult{}, nil
+	}
+	workspace := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workspace, "moat.yaml"), []byte("codex:\n  sync_logs: false\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	root := &cobra.Command{Use: "moat"}
+	(&Provider{}).RegisterCLI(root)
+	root.SetArgs([]string{"codex", workspace, "--continue"})
+	err := root.Execute()
+	if err == nil || !strings.Contains(err.Error(), "codex.sync_logs") {
+		t.Fatalf("expected disabled persistence error, got %v", err)
+	}
+	if called {
+		t.Fatal("executor called despite disabled persistence")
+	}
+}
