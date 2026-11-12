@@ -17,6 +17,7 @@ import (
 // Lifecycle manages the shared reverse proxy lifecycle.
 type Lifecycle struct {
 	mu        sync.Mutex
+	probe     func(int) error // nil uses the bounded TCP probe; tests inject uncertain results
 	dir       string
 	port      int
 	server    *ProxyServer
@@ -90,15 +91,29 @@ func (lc *Lifecycle) EnsureRunning() error {
 		return fmt.Errorf("loading proxy lock: %w", err)
 	}
 
-	// A live PID does not imply its listener is still serving.
-	if lock != nil && lock.IsAlive() && proxyListening(lock.Port) {
-		// Proxy already running - check for port mismatch only if specific port requested
-		if lc.port > 0 && lock.Port != lc.port {
-			return fmt.Errorf("proxy port mismatch: running on %d, requested %d. Either unset MOAT_PROXY_PORT, or stop all agents to restart the proxy", lock.Port, lc.port)
+	// A refused connection proves the listener is gone; a timeout or another
+	// uncertain result must not evict a live proxy's lock.
+	if lock != nil && lock.IsAlive() {
+		probe := lc.probe
+		if probe == nil {
+			probe = probeProxy
 		}
+		probeErr := probe(lock.Port)
+		if probeErr == nil {
+			if lc.port > 0 && lock.Port != lc.port {
+				return fmt.Errorf("proxy port mismatch: running on %d, requested %d. Either unset MOAT_PROXY_PORT, or stop all agents to restart the proxy", lock.Port, lc.port)
+			}
+			lc.port = lock.Port
+			lc.isOwner = lc.isOwner && lc.server != nil && lock.PID == os.Getpid() && lc.server.Port() == lock.Port && lc.startedAt.Equal(lock.StartedAt)
+			return nil
+		}
+		if !errors.Is(probeErr, syscall.ECONNREFUSED) {
+			return fmt.Errorf("checking live routing proxy on port %d: %w", lock.Port, probeErr)
+		}
+	}
+	if lock != nil && lc.port == 0 {
+		// Even dynamically allocated URLs must retain their advertised port.
 		lc.port = lock.Port
-		lc.isOwner = lc.isOwner && lc.server != nil && lock.PID == os.Getpid() && lc.server.Port() == lock.Port && lc.startedAt.Equal(lock.StartedAt)
-		return nil
 	}
 
 	// Clean up stale lock if exists
@@ -106,11 +121,15 @@ func (lc *Lifecycle) EnsureRunning() error {
 		_ = RemoveProxyLock(lc.dir)
 	}
 
-	// Release any failed owned listener before replacing the server.
-	if lc.server != nil && lc.isOwner {
+	// Every server pointer was created by this instance, including one whose
+	// lock could not be saved. Keep it reachable if shutdown needs a retry.
+	if lc.server != nil {
 		stopCtx, cancel := context.WithTimeout(context.Background(), time.Second)
-		_ = lc.server.Stop(stopCtx)
+		stopErr := lc.server.Stop(stopCtx)
 		cancel()
+		if stopErr != nil && !errors.Is(stopErr, net.ErrClosed) {
+			return fmt.Errorf("stopping previous routing listener: %w", stopErr)
+		}
 	}
 	lc.isOwner = false
 	lc.server = nil
@@ -147,7 +166,14 @@ func (lc *Lifecycle) EnsureRunning() error {
 		Port:      lc.port,
 		StartedAt: lc.startedAt,
 	}); err != nil {
-		_ = lc.server.Stop(context.Background())
+		stopCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+		stopErr := lc.server.Stop(stopCtx)
+		cancel()
+		if stopErr == nil || errors.Is(stopErr, net.ErrClosed) {
+			lc.server = nil
+		} else {
+			return fmt.Errorf("saving proxy lock: %w; stopping listener: %w", err, stopErr)
+		}
 		return fmt.Errorf("saving proxy lock: %w", err)
 	}
 
@@ -186,11 +212,11 @@ func (lc *Lifecycle) Stop(ctx context.Context) error {
 		return err
 	}
 	defer unlock()
-	if !lc.isOwner || lc.server == nil {
+	if lc.server == nil {
 		return nil
 	}
 
-	if err = lc.server.Stop(ctx); err != nil {
+	if err = lc.server.Stop(ctx); err != nil && !errors.Is(err, net.ErrClosed) {
 		return err
 	}
 
@@ -212,14 +238,14 @@ func (lc *Lifecycle) ShouldStop() bool {
 	return len(lc.routes.Agents()) == 0
 }
 
-// proxyListening is deliberately bounded; recovery must not stall run monitors.
-func proxyListening(port int) bool {
+// probeProxy distinguishes connection refusal from uncertain probe failures.
+func probeProxy(port int) error {
 	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 250*time.Millisecond)
 	if err != nil {
-		return false
+		return err
 	}
 	_ = conn.Close()
-	return true
+	return nil
 }
 
 // lockLifecycle serializes listener/lock-file transitions across managers and

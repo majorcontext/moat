@@ -124,6 +124,11 @@ func (rt *RouteTable) AddOwned(agent, containerID string, endpoints map[string]s
 			if owner.ContainerID != "" && owner.ContainerID != containerID {
 				return fmt.Errorf("routes for %q are owned by another container", agent)
 			}
+			// Legacy registrations have no ownership proof. Adopt only an
+			// exact endpoint match; a different binding may serve another run.
+			if owner.ContainerID == "" && !sameEndpoints(current, endpoints) {
+				return fmt.Errorf("routes for %q have different unowned endpoints", agent)
+			}
 			// Health checks normally find an unchanged registration. Avoid
 			// replacing either file unless the persisted registration needs repair.
 			if owner.ContainerID == containerID && sameEndpoints(owner.Endpoints, endpoints) && sameEndpoints(current, endpoints) {

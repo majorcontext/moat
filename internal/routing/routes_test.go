@@ -642,3 +642,96 @@ func TestOwnedRoutesUnchangedRegistrationDoesNotRewrite(t *testing.T) {
 		t.Fatal("missing route was not restored")
 	}
 }
+
+func TestOwnedRoutesLegacyAdoptionRequiresMatchingEndpoints(t *testing.T) {
+	for _, matching := range []bool{false, true} {
+		t.Run(fmt.Sprint(matching), func(t *testing.T) {
+			dir := t.TempDir()
+			rt, err := NewRouteTable(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			current := map[string]string{"web": "127.0.0.1:50001"}
+			requested := map[string]string{"web": "127.0.0.1:50002"}
+			if matching {
+				requested = current
+			}
+			if err := rt.Add("project", current); err != nil {
+				t.Fatal(err)
+			}
+			err = rt.AddOwned("project", "new", requested)
+			if matching && err != nil {
+				t.Fatal(err)
+			}
+			if !matching && err == nil {
+				t.Fatal("claimed legacy route with different endpoints")
+			}
+			if got := rt.Endpoints("project"); !sameEndpoints(got, current) {
+				t.Fatalf("changed legacy route: %v", got)
+			}
+			if !matching {
+				if _, err := os.Stat(filepath.Join(dir, "route-owners.json")); !os.IsNotExist(err) {
+					t.Fatalf("rejected claim wrote ownership: %v", err)
+				}
+			}
+			if err := rt.RemoveOwned("project", "new", current); err != nil {
+				t.Fatal(err)
+			}
+			if rt.AgentExists("project") == matching {
+				t.Fatal("cleanup ownership does not match adoption result")
+			}
+		})
+	}
+}
+
+func TestOwnedRoutesMalformedSidecarFailsClosed(t *testing.T) {
+	for _, operation := range []string{"add", "add-owned", "remove-owned", "remove"} {
+		t.Run(operation, func(t *testing.T) {
+			dir := t.TempDir()
+			rt, err := NewRouteTable(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			endpoints := map[string]string{"web": "127.0.0.1:50001"}
+			if err := rt.AddOwned("project", "owner", endpoints); err != nil {
+				t.Fatal(err)
+			}
+			malformed := []byte("{invalid ownership")
+			ownerPath := filepath.Join(dir, "route-owners.json")
+			if err := os.WriteFile(ownerPath, malformed, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			before, err := os.ReadFile(filepath.Join(dir, "routes.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			switch operation {
+			case "add":
+				err = rt.Add("project", map[string]string{"web": "127.0.0.1:50002"})
+			case "add-owned":
+				err = rt.AddOwned("project", "new", endpoints)
+			case "remove-owned":
+				err = rt.RemoveOwned("project", "owner", endpoints)
+			case "remove":
+				err = rt.Remove("project")
+			}
+			if err == nil {
+				t.Fatal("mutation accepted malformed ownership")
+			}
+			after, err := os.ReadFile(filepath.Join(dir, "routes.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(after) != string(before) {
+				t.Fatal("failed mutation changed routes")
+			}
+			ownerData, err := os.ReadFile(ownerPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(ownerData) != string(malformed) {
+				t.Fatal("failed mutation changed ownership")
+			}
+		})
+	}
+}

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -242,7 +244,7 @@ func TestProxyLifecycleOldOwnerStopPreservesReplacement(t *testing.T) {
 	if err := old.server.Stop(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	replacement, err := NewLifecycle(dir, old.Port())
+	replacement, err := NewLifecycle(dir, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -297,4 +299,70 @@ func TestProxyLifecycleConcurrentManagers(t *testing.T) {
 	if owners != 1 {
 		t.Fatalf("got %d owners, want 1", owners)
 	}
+}
+
+// Test helpers probe only temporary listeners created by this package.
+func proxyListening(port int) bool { return probeProxy(port) == nil }
+
+func TestLifecycleUncertainProbePreservesLiveOwner(t *testing.T) {
+	dir := t.TempDir()
+	owner, err := NewLifecycle(dir, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := owner.EnsureRunning(); err != nil {
+		t.Fatal(err)
+	}
+	defer owner.Stop(context.Background())
+	before, err := os.ReadFile(filepath.Join(dir, "proxy.lock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := NewLifecycle(dir, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other.probe = func(int) error { return os.ErrDeadlineExceeded }
+	if err := other.EnsureRunning(); err == nil {
+		t.Fatal("uncertain probe accepted")
+	}
+	after, err := os.ReadFile(filepath.Join(dir, "proxy.lock"))
+	if err != nil || string(after) != string(before) {
+		t.Fatalf("live lock changed: %v", err)
+	}
+	if other.server != nil || !proxyListening(owner.Port()) {
+		t.Fatal("uncertain probe replaced live listener")
+	}
+}
+
+func TestLifecycleFailedLockSaveReleasesListener(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses directory write restrictions")
+	}
+	dir := t.TempDir()
+	lc, err := NewLifecycle(dir, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The lifecycle lock can be opened, but proxy.lock cannot be created.
+	if err := os.WriteFile(filepath.Join(dir, "lifecycle.lock"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chmod(dir, 0o700)
+	if err := lc.EnsureRunning(); err == nil {
+		t.Fatal("expected lock save error")
+	}
+	if lc.server != nil || lc.IsOwner() || proxyListening(lc.Port()) {
+		t.Fatal("failed save leaked a listener")
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := lc.EnsureRunning(); err != nil {
+		t.Fatal(err)
+	}
+	defer lc.Stop(context.Background())
 }
