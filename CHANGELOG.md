@@ -4,7 +4,9 @@ Moat runs AI coding agents in isolated containers with credential injection, net
 
 Moat is pre-1.0. The CLI interface and `moat.yaml` schema may change between minor versions. Breaking changes are listed under **Breaking** headings below.
 
-## Unreleased
+## v0.9.4 — 2026-11-12
+
+Adds saved-conversation continuation for Pi and Codex, and fixes endpoint routes disappearing during long-running sessions. Active runs now recover lost routes and routing listeners automatically.
 
 ### Added
 
