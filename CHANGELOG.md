@@ -13,6 +13,7 @@ Moat is pre-1.0. The CLI interface and `moat.yaml` schema may change between min
 ### Fixed
 
 - Fix silently losing Codex transcripts when the session directory cannot be created — runs with transcript persistence enabled now fail with an error instead of starting without saved history. This also applies when persistence is enabled by default through an OpenAI grant. Check the reported directory's permissions and available disk space. ([#497](https://github.com/majorcontext/moat/pull/497))
+- Fix endpoint routes disappearing until a run was restarted — loading historical runs no longer deletes newer routes with the same name, and cleanup checks container ownership even when ports are reused. Active runs restore lost routes and routing listeners every 30 seconds; proxy takeover is serialized across processes. ([#498](https://github.com/majorcontext/moat/pull/498))
 
 ## v0.9.3 — 2026-11-10
 
