@@ -99,6 +99,13 @@ func (lc *Lifecycle) EnsureRunning() error {
 			probe = probeProxy
 		}
 		probeErr := probe(lock.Port)
+		// A dial racing listener shutdown can briefly return ECONNRESET on
+		// Linux. Retry only that transient result (at most three 250ms probes
+		// plus two 25ms pauses). A reset itself never authorizes takeover.
+		for attempt := 1; attempt < 3 && errors.Is(probeErr, syscall.ECONNRESET); attempt++ {
+			time.Sleep(25 * time.Millisecond)
+			probeErr = probe(lock.Port)
+		}
 		if probeErr == nil {
 			if lc.port > 0 && lock.Port != lc.port {
 				return fmt.Errorf("proxy port mismatch: running on %d, requested %d. Either unset MOAT_PROXY_PORT, or stop all agents to restart the proxy", lock.Port, lc.port)

@@ -2,12 +2,14 @@ package routing
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -365,4 +367,83 @@ func TestLifecycleFailedLockSaveReleasesListener(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer lc.Stop(context.Background())
+}
+
+// Linux can reset a connection during listener shutdown before subsequent
+// connections are refused. A reset alone must never authorize takeover.
+func TestLifecycleResetProbe(t *testing.T) {
+	reset := &net.OpError{Op: "dial", Net: "tcp", Err: syscall.ECONNRESET}
+	refused := &net.OpError{Op: "dial", Net: "tcp", Err: syscall.ECONNREFUSED}
+	for _, tc := range []struct {
+		name      string
+		results   []error
+		stopped   bool
+		wantOwner bool
+		wantErr   error
+	}{
+		{name: "reset then refused recovers", results: []error{reset, refused}, stopped: true, wantOwner: true},
+		{name: "reset then success preserves owner", results: []error{reset, nil}},
+		{name: "reset then timeout preserves lock", results: []error{reset, os.ErrDeadlineExceeded}, wantErr: os.ErrDeadlineExceeded},
+		{name: "persistent resets preserve lock", results: []error{reset, reset, reset}, wantErr: syscall.ECONNRESET},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			owner, err := NewLifecycle(dir, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := owner.EnsureRunning(); err != nil {
+				t.Fatal(err)
+			}
+			defer owner.Stop(context.Background())
+			port := owner.Port()
+			if tc.stopped {
+				if err := owner.server.Stop(context.Background()); err != nil {
+					t.Fatal(err)
+				}
+			}
+			before, err := os.ReadFile(filepath.Join(dir, "proxy.lock"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			other, err := NewLifecycle(dir, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer other.Stop(context.Background())
+			calls := 0
+			other.probe = func(gotPort int) error {
+				if gotPort != port {
+					t.Fatalf("probed port %d, want %d", gotPort, port)
+				}
+				if calls >= len(tc.results) {
+					t.Fatal("probe exceeded retry bound")
+				}
+				result := tc.results[calls]
+				calls++
+				return result
+			}
+			if err := other.EnsureRunning(); !errors.Is(err, tc.wantErr) {
+				t.Fatalf("EnsureRunning error = %v, want %v", err, tc.wantErr)
+			}
+			if calls != len(tc.results) {
+				t.Fatalf("probe calls = %d, want %d", calls, len(tc.results))
+			}
+			if other.IsOwner() != tc.wantOwner {
+				t.Fatalf("ownership = %v, want %v", other.IsOwner(), tc.wantOwner)
+			}
+			if !proxyListening(port) {
+				t.Fatal("expected listener on original advertised port")
+			}
+			if !tc.wantOwner {
+				after, err := os.ReadFile(filepath.Join(dir, "proxy.lock"))
+				if err != nil || string(after) != string(before) {
+					t.Fatalf("existing lock changed: %v", err)
+				}
+				if other.server != nil {
+					t.Fatal("started a replacement without confirmed refusal")
+				}
+			}
+		})
+	}
 }
