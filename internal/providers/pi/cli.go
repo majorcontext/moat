@@ -21,6 +21,7 @@ var (
 	piProviderFlag string
 	piModelFlag    string
 	piSyncLogsFlag bool
+	piContinue     bool
 )
 
 // Resolved by runPi (before RunProvider's closures fire) so GetCredentialGrant
@@ -111,6 +112,7 @@ Use 'moat list' to see running and recent runs.`,
 	}
 
 	cli.AddExecFlags(piCmd, &piFlags)
+	piCmd.Flags().BoolVarP(&piContinue, "continue", "c", false, "continue the most recent saved conversation for this workspace")
 	piCmd.Flags().StringVarP(&piPromptFlag, "prompt", "p", "", "run with prompt (non-interactive mode)")
 	piCmd.Flags().StringSliceVar(&piAllowedHosts, "allow-host", nil, "additional hosts to allow network access to")
 	piCmd.Flags().StringVar(&piProviderFlag, "provider", "", "model backend: anthropic, openai, or lunaroute (overrides pi.provider)")
@@ -133,7 +135,12 @@ func runPi(cmd *cobra.Command, args []string) error {
 		// Resolve the backend against the final (post-worktree) config and fail
 		// hard on a missing/ambiguous/unsupported grant before anything is
 		// created. Runs before GetCredentialGrant/BuildCommand read the globals.
-		Preflight:             resolvePiPreflight,
+		Preflight: func(cfg *config.Config) error {
+			if err := validatePiContinuation(cmd, cfg); err != nil {
+				return err
+			}
+			return resolvePiPreflight(cfg)
+		},
 		GetCredentialGrant:    func() string { return piResolvedProvider },
 		Dependencies:          DefaultDependencies(),
 		NetworkHosts:          NetworkHosts(),
@@ -166,6 +173,10 @@ func runPi(cmd *cobra.Command, args []string) error {
 
 // An omitted CLI flag preserves the YAML value; --sync-logs=false can disable it.
 func configurePiLogSync(cmd *cobra.Command, cfg *config.Config) {
+	if piContinue {
+		enabled := true
+		cfg.Pi.SyncLogs = &enabled
+	}
 	if cmd.Flags().Changed("sync-logs") {
 		syncLogs := piSyncLogsFlag
 		cfg.Pi.SyncLogs = &syncLogs
@@ -205,6 +216,9 @@ func resolvePiPreflight(cfg *config.Config) error {
 // BuildCommand closure so it is unit-testable.
 func buildPiCommand(promptFlag, initialPrompt string) []string {
 	c := []string{"--append-system-prompt", PiInitMountPath + "/" + ContextFileName}
+	if piContinue {
+		c = append(c, "--continue")
+	}
 	if promptFlag != "" {
 		c = append(c, "-p", promptFlag)
 	} else if initialPrompt != "" {
@@ -282,4 +296,20 @@ func piGrantsFromStore(providerOverride string, get func(credential.Provider) (*
 	}
 	g.LunaRoute = lunaroute != nil
 	return g, nil
+}
+
+func validatePiContinuation(cmd *cobra.Command, cfg *config.Config) error {
+	if !piContinue {
+		return nil
+	}
+	if cmd.Flags().Changed("sync-logs") {
+		if piSyncLogsFlag {
+			return nil
+		}
+		return fmt.Errorf("--continue requires saved sessions; remove --sync-logs=false")
+	}
+	if cfg != nil && cfg.Pi.SyncLogs != nil && !*cfg.Pi.SyncLogs {
+		return fmt.Errorf("--continue requires saved sessions; use --sync-logs or set pi.sync_logs: true")
+	}
+	return nil
 }
