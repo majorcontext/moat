@@ -571,7 +571,7 @@ postgres:
   description: PostgreSQL database
   type: service
   default: "17"
-  versions: ["14","15","16","17","18"]
+  versions: ["15","16","17","18"]
   service:
     image: "postgres"
     ports:
