@@ -2,6 +2,7 @@ package container
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -907,5 +908,12 @@ func TestDockerRuntimeUsesGVisor(t *testing.T) {
 		if got := r.UsesGVisor(); got != tt.want {
 			t.Errorf("UsesGVisor() with ociRuntime %q = %v, want %v", tt.oci, got, tt.want)
 		}
+	}
+}
+
+func TestDockerContainerStateMissing(t *testing.T) {
+	rt, _ := fakeDockerAPI(t, "bridge")
+	if _, err := rt.ContainerState(t.Context(), "missing"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("missing container: %v", err)
 	}
 }

@@ -34,6 +34,8 @@ type Metadata struct {
 	HostPorts      map[string]int `json:"host_ports,omitempty"`
 	ContainerID    string         `json:"container_id,omitempty"`
 	State          string         `json:"state,omitempty"`
+	CleanupPending bool           `json:"cleanup_pending,omitempty"`
+	KeepContainer  bool           `json:"keep_container,omitempty"`
 	Interactive    bool           `json:"interactive,omitempty"`
 	Clipboard      bool           `json:"clipboard,omitempty"` // Missing in older runs: leave bridging disabled on join.
 	CreatedAt      time.Time      `json:"created_at,omitempty"`
@@ -86,6 +88,16 @@ func NewRunStore(baseDir, runID string) (*RunStore, error) {
 		dir:   runDir,
 		runID: runID,
 	}, nil
+}
+
+// LoadRunStore opens the metadata for an existing run without creating its directory.
+func LoadRunStore(baseDir, runID string) (*RunStore, Metadata, error) {
+	store := &RunStore{dir: filepath.Join(baseDir, runID), runID: runID}
+	meta, err := store.LoadMetadata()
+	if err != nil {
+		return nil, Metadata{}, err
+	}
+	return store, meta, nil
 }
 
 // RunID returns the run identifier.

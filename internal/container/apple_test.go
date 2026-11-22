@@ -3,7 +3,9 @@ package container
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -484,5 +486,18 @@ func TestAppleSetupFirewallRejectsOutOfRangePorts(t *testing.T) {
 				t.Fatalf("SetupFirewall failed for the wrong reason: %v", err)
 			}
 		})
+	}
+}
+
+func TestAppleContainerStateMissing(t *testing.T) {
+	for _, script := range []string{"echo '[]'", "echo 'Error: notFound' >&2; exit 1"} {
+		path := filepath.Join(t.TempDir(), "container")
+		if err := os.WriteFile(path, []byte("#!/bin/sh\n"+script+"\n"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		rt := &AppleRuntime{containerBin: path}
+		if _, err := rt.ContainerState(t.Context(), "gone"); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("missing container: %v", err)
+		}
 	}
 }
