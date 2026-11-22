@@ -42,6 +42,11 @@ type AppleRuntime struct {
 	// can propagate terminal size changes. Protected by ptyMu.
 	ptyMu     sync.Mutex
 	activePTY map[string]*os.File
+
+	// launches tracks the CLI process that started each container attached.
+	// Protected by launchMu.
+	launchMu sync.Mutex
+	launches map[string]*appleLaunch
 }
 
 // Verify AppleRuntime satisfies the Runtime interface at compile time.
@@ -325,15 +330,128 @@ func (r *AppleRuntime) buildCreateArgs(cfg Config) ([]string, error) {
 
 // StartContainer starts a created or stopped container.
 func (r *AppleRuntime) StartContainer(ctx context.Context, containerID string) error {
-	cmd := exec.CommandContext(ctx, r.containerBin, "start", containerID)
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("starting container: %w: %s", err, stderr.String())
+	// The process is not bound to ctx: it must outlive the start request to
+	// deliver the guest's exit status. Killing it leaves the guest running.
+	cmd := exec.Command(r.containerBin, "start", "--attach", containerID)
+	stderr := &headBuffer{limit: 4096}
+	cmd.Stderr = stderr
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("starting container: %w", err)
 	}
-	return nil
+	launch := &appleLaunch{done: make(chan struct{}), kill: func() { _ = cmd.Process.Kill() }}
+	r.trackLaunch(containerID, launch)
+	go func() {
+		err := cmd.Wait()
+		launch.finish(err)
+	}()
+
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-launch.done:
+			if launch.code != 0 || !launch.known {
+				if r.neverStarted(ctx, containerID) {
+					r.dropLaunch(containerID)
+					return fmt.Errorf("starting container: %w: %s", launch.err, stderr.String())
+				}
+			}
+			return nil
+		case <-ctx.Done():
+			r.dropLaunch(containerID)
+			return ctx.Err()
+		case <-ticker.C:
+			if state, err := r.ContainerState(ctx, containerID); err == nil && state == "running" {
+				return nil
+			}
+		}
+	}
 }
+
+// appleLaunch is the CLI process that started a container attached. Apple's
+// inspect output has no exit status; only this process receives the guest's.
+type appleLaunch struct {
+	done  chan struct{}
+	kill  func()
+	code  int64
+	known bool  // the process exited with a status rather than a signal
+	err   error // the process's wait error, for start-failure messages
+}
+
+// finish records how the CLI process ended.
+func (l *appleLaunch) finish(err error) {
+	l.err = err
+	var exitErr *exec.ExitError
+	switch {
+	case err == nil:
+		l.known = true
+	case errors.As(err, &exitErr) && exitErr.ExitCode() >= 0:
+		l.code, l.known = int64(exitErr.ExitCode()), true
+	}
+	close(l.done)
+}
+
+func (r *AppleRuntime) trackLaunch(containerID string, l *appleLaunch) {
+	r.launchMu.Lock()
+	defer r.launchMu.Unlock()
+	if r.launches == nil {
+		r.launches = make(map[string]*appleLaunch)
+	}
+	r.launches[containerID] = l
+}
+
+func (r *AppleRuntime) launchFor(containerID string) *appleLaunch {
+	r.launchMu.Lock()
+	defer r.launchMu.Unlock()
+	return r.launches[containerID]
+}
+
+// dropLaunch forgets a container's CLI process and ends it if still running.
+func (r *AppleRuntime) dropLaunch(containerID string) {
+	r.launchMu.Lock()
+	l := r.launches[containerID]
+	delete(r.launches, containerID)
+	r.launchMu.Unlock()
+	if l != nil && l.kill != nil {
+		l.kill()
+	}
+}
+
+// neverStarted reports whether inspect shows the guest process did not
+// start. An inspect failure other than a missing container is not evidence.
+func (r *AppleRuntime) neverStarted(ctx context.Context, containerID string) bool {
+	probe, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(probe, r.containerBin, "inspect", containerID).Output()
+	if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			msg := string(exitErr.Stderr)
+			return strings.Contains(msg, "notFound") || strings.Contains(msg, "not found")
+		}
+		return false
+	}
+	info, err := parseAppleInspect(out)
+	if err != nil {
+		return false
+	}
+	return len(info) == 0 || info[0].neverStarted()
+}
+
+// headBuffer keeps the first limit bytes written and discards the rest.
+type headBuffer struct {
+	limit int
+	buf   []byte
+}
+
+func (b *headBuffer) Write(p []byte) (int, error) {
+	if room := b.limit - len(b.buf); room > 0 {
+		b.buf = append(b.buf, p[:min(room, len(p))]...)
+	}
+	return len(p), nil
+}
+
+func (b *headBuffer) String() string { return strings.TrimSpace(string(b.buf)) }
 
 // VolumeCreate is unsupported on the Apple container runtime.
 func (r *AppleRuntime) VolumeCreate(ctx context.Context, name string) error {
@@ -383,10 +501,49 @@ func (r *AppleRuntime) StopContainer(ctx context.Context, containerID string) er
 
 // WaitContainer blocks until the container exits and returns the exit code.
 func (r *AppleRuntime) WaitContainer(ctx context.Context, containerID string) (int64, error) {
-	// Always poll with inspect rather than using "container wait".
-	// Apple's "container wait" hangs indefinitely when a container is
-	// stopped or removed externally (e.g., via "moat stop" from another
-	// process), which blocks monitorContainerExit forever.
+	launch := r.launchFor(containerID)
+	if launch == nil {
+		// Another process started this container, so its exit status is
+		// not available here. Polling reports 0.
+		return r.waitByPolling(ctx, containerID)
+	}
+
+	// Poll alongside the launch process. Earlier CLI versions hung in
+	// "container wait" when a container was stopped or removed externally,
+	// so the inspect state bounds how long the launch process is trusted.
+	pollCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	type result struct {
+		code int64
+		err  error
+	}
+	polled := make(chan result, 1)
+	go func() {
+		code, err := r.waitByPolling(pollCtx, containerID)
+		polled <- result{code, err}
+	}()
+
+	var poll result
+	select {
+	case <-launch.done:
+	case poll = <-polled:
+		if poll.err != nil {
+			return poll.code, poll.err
+		}
+		// The guest has exited. Its status follows promptly.
+		select {
+		case <-launch.done:
+		case <-time.After(2 * time.Second):
+			return poll.code, nil
+		case <-ctx.Done():
+			return -1, ctx.Err()
+		}
+	}
+	if launch.known {
+		return launch.code, nil
+	}
+	// The launch process was lost without a status. Confirm the exit.
+	cancel()
 	return r.waitByPolling(ctx, containerID)
 }
 
@@ -454,6 +611,7 @@ func (r *AppleRuntime) RemoveContainer(ctx context.Context, containerID string) 
 		// The Apple container CLI returns errors like: Error: notFound: "failed to delete one or more containers: ["run_xxx"]"
 		stderrStr := stderr.String()
 		if strings.Contains(stderrStr, "notFound") || strings.Contains(stderrStr, "not found") {
+			r.dropLaunch(containerID)
 			return nil
 		}
 
@@ -466,6 +624,7 @@ func (r *AppleRuntime) RemoveContainer(ctx context.Context, containerID string) 
 
 		return fmt.Errorf("removing container: %w: %s", err, stderrStr)
 	}
+	r.dropLaunch(containerID)
 	return nil
 }
 
@@ -554,6 +713,15 @@ func (r *AppleRuntime) SupportsHostNetwork() bool {
 
 // Close is a no-op for Apple container (no persistent connection).
 func (r *AppleRuntime) Close() error {
+	r.launchMu.Lock()
+	launches := r.launches
+	r.launches = nil
+	r.launchMu.Unlock()
+	for _, l := range launches {
+		if l.kill != nil {
+			l.kill()
+		}
+	}
 	return nil
 }
 
@@ -1399,7 +1567,21 @@ func (r *AppleRuntime) StartAttached(ctx context.Context, containerID string, op
 	if opts.TTY {
 		return r.startAttachedWithPTY(ctx, cmd, containerID, opts)
 	}
-	return r.startAttachedWithPipes(ctx, cmd, opts)
+	return r.startAttachedWithPipes(ctx, cmd, containerID, opts)
+}
+
+// recordAttachedExit interprets the end of an attached CLI process. A guest
+// exit, with any status, is recorded for WaitContainer and is not an attach
+// error. A process that ended without starting the guest, or without a
+// status, is.
+func (r *AppleRuntime) recordAttachedExit(ctx context.Context, containerID string, waitErr error) error {
+	launch := &appleLaunch{done: make(chan struct{})}
+	launch.finish(waitErr)
+	if !launch.known || (launch.code != 0 && r.neverStarted(ctx, containerID)) {
+		return fmt.Errorf("starting container attached: %w", waitErr)
+	}
+	r.trackLaunch(containerID, launch)
+	return nil
 }
 
 // startAttachedWithPTY handles TTY mode using a PTY
@@ -1478,12 +1660,19 @@ func (r *AppleRuntime) startAttachedWithPTY(ctx context.Context, cmd *exec.Cmd, 
 		<-cmdDone //nolint:errcheck // reap the killed process; its exit error is expected
 		if err != nil {
 			result = err
+		} else {
+			// Stdin closed without an escape. The session ends here and,
+			// as before, counts as a clean exit although the guest status
+			// was not observed.
+			ended := &appleLaunch{done: make(chan struct{})}
+			ended.finish(nil)
+			r.trackLaunch(containerID, ended)
 		}
 	case err := <-cmdDone:
 		// Command finished normally
 		// Don't close PTY yet - wait for output to finish copying
-		if err != nil && ctx.Err() == nil {
-			result = fmt.Errorf("starting container attached: %w", err)
+		if ctx.Err() == nil {
+			result = r.recordAttachedExit(ctx, containerID, err)
 		}
 	case <-ctx.Done():
 		// Context canceled
@@ -1513,7 +1702,7 @@ func (r *AppleRuntime) startAttachedWithPTY(ctx context.Context, cmd *exec.Cmd, 
 }
 
 // startAttachedWithPipes handles non-TTY mode using regular pipes
-func (r *AppleRuntime) startAttachedWithPipes(ctx context.Context, cmd *exec.Cmd, opts AttachOptions) error {
+func (r *AppleRuntime) startAttachedWithPipes(ctx context.Context, cmd *exec.Cmd, containerID string, opts AttachOptions) error {
 	// For non-TTY mode, use regular pipes to capture stdout/stderr
 	stdout := opts.Stdout
 	if stdout == nil {
@@ -1536,12 +1725,8 @@ func (r *AppleRuntime) startAttachedWithPipes(ctx context.Context, cmd *exec.Cmd
 
 	// Wait for command to complete
 	err := cmd.Wait()
-	if err != nil && ctx.Err() == nil {
-		return fmt.Errorf("container attach: %w", err)
-	}
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
-
-	return nil
+	return r.recordAttachedExit(ctx, containerID, err)
 }

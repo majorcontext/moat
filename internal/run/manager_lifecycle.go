@@ -196,7 +196,9 @@ func (m *Manager) StartAttached(ctx context.Context, runID string, stdin io.Read
 	close(drained)
 	if !callerWillStop {
 		var code int64
-		if attachErr == nil && m.defaultRuntime().Type() == container.RuntimeDocker {
+		// A clean attach result means the guest exited; the runtime holds
+		// its status.
+		if attachErr == nil {
 			waitCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			code, attachErr = m.defaultRuntime().WaitContainer(waitCtx, containerID)
 			cancel()

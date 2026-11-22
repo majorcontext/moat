@@ -128,8 +128,8 @@ func TestLogsCapturedInDetachedMode(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Get: %v", err)
 		}
-		if currentRun.State != run.StateStopped {
-			t.Logf("Warning: run state is %s, expected stopped. Waiting longer...", currentRun.State)
+		if state := currentRun.GetState(); state != run.StateStopped {
+			t.Logf("Warning: run state is %s, expected stopped. Waiting longer...", state)
 			time.Sleep(3 * time.Second)
 		}
 
