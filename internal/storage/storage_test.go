@@ -812,3 +812,13 @@ func TestMetadata_BuildKitFields(t *testing.T) {
 		t.Errorf("NetworkID: got %q, want %q", loaded.NetworkID, original.NetworkID)
 	}
 }
+
+func TestLoadRunStoreDoesNotRecreateMissingDirectory(t *testing.T) {
+	base := t.TempDir()
+	if _, _, err := LoadRunStore(base, "gone"); !os.IsNotExist(err) {
+		t.Fatalf("loading missing run: got %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(base, "gone")); !os.IsNotExist(err) {
+		t.Fatalf("expected missing directory after lookup, got %v", err)
+	}
+}

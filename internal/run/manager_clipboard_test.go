@@ -89,7 +89,7 @@ func TestClipboardSettingSurvivesRunReload(t *testing.T) {
 			t.Fatal(err)
 		}
 		m := &Manager{runs: make(map[string]*Run)}
-		m.registerPersistedRun(StateRunning, false, true, meta, store, r.ID, nil)
+		m.registerPersistedRun(StateRunning, meta, store, r.ID, nil)
 		if m.runs[r.ID].Clipboard != enabled {
 			t.Fatalf("clipboard setting %v lost when loading run for join", enabled)
 		}

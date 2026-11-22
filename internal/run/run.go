@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/gofrs/flock"
 	"github.com/majorcontext/moat/internal/audit"
 	"github.com/majorcontext/moat/internal/config"
 	"github.com/majorcontext/moat/internal/credential"
@@ -43,11 +44,21 @@ var ErrRunNotFound = daemon.ErrRunNotFound
 
 // Run represents an agent execution environment.
 type Run struct {
+	attachNeedsStop bool          // attachment returned control to the explicit Stop path
+	attachDrained   chan struct{} // guarded by stateMu
+	startupDone     chan struct{} // assigned under Manager.mu and closed after startup setup
+
 	// inherited is immutable after construction and identifies runs loaded from disk.
-	inherited bool
-	ID        string
-	Name      string // Human-friendly name (e.g., "myapp" or "fluffy-chicken")
-	Workspace string
+	inherited      bool
+	owner          *flock.Flock // Held from creation through terminal cleanup or manager shutdown.
+	cleanupPending bool         // guarded by stateMu and persisted before resource removal
+	completionErr  error        // set before signaling exitCh
+	finishMu       sync.Mutex
+	signalExit     sync.Once
+	saveMu         sync.Mutex
+	ID             string
+	Name           string // Human-friendly name (e.g., "myapp" or "fluffy-chicken")
+	Workspace      string
 	// Worktree tracking (set when created via moat wt or --wt flag)
 	WorktreeBranch    string
 	WorktreePath      string
@@ -66,7 +77,7 @@ type Run struct {
 	Store             *storage.RunStore // Run data storage
 	logsCaptured      atomic.Bool       // Track if logs have been captured (for idempotency)
 	providerHooksDone atomic.Bool       // Track if provider stopped hooks have run (for idempotency)
-	exitCh            chan struct{}     // Closed when container exits (signaled by monitorContainerExit)
+	exitCh            chan struct{}     // Closed by the local exit monitor; nil for observations loaded from disk
 	AuditStore        *audit.Store      // Tamper-proof audit log
 	SnapEngine        *snapshot.Engine  // Snapshot engine for workspace protection
 	KeepContainer     bool              // If true, don't auto-remove container after run
@@ -208,6 +219,9 @@ func (r *Run) SaveMetadata() error {
 		return nil // No store configured
 	}
 
+	r.saveMu.Lock()
+	defer r.saveMu.Unlock()
+
 	// Snapshot stateMu-protected fields under the lock to avoid races between
 	// concurrent SaveMetadata calls (Stop / monitorContainerExit) and
 	// runProviderStoppedHooks writing ProviderMeta.
@@ -215,6 +229,7 @@ func (r *Run) SaveMetadata() error {
 	state := r.State
 	startedAt := r.StartedAt
 	stoppedAt := r.StoppedAt
+	pending := r.cleanupPending
 	errMsg := r.Error
 	providerMeta := maps.Clone(r.ProviderMeta)
 	hostPorts := maps.Clone(r.HostPorts)
@@ -232,6 +247,8 @@ func (r *Run) SaveMetadata() error {
 		ContainerID:         r.ContainerID,
 		State:               string(state),
 		Interactive:         r.Interactive,
+		KeepContainer:       r.KeepContainer,
+		CleanupPending:      pending,
 		Clipboard:           r.Clipboard,
 		CreatedAt:           r.CreatedAt,
 		StartedAt:           startedAt,

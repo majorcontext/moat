@@ -74,6 +74,11 @@ func getWorkspaceOwner(workspace string) (uid, gid int) {
 
 // Create initializes a new run without starting it.
 func (m *Manager) Create(ctx context.Context, opts Options) (resRun *Run, retErr error) {
+	if err := m.beginOperation(); err != nil {
+		return nil, err
+	}
+	defer m.activeOps.Done()
+
 	// Resolve agent name
 	agentName := opts.Name
 	if agentName == "" {
@@ -218,6 +223,19 @@ func (m *Manager) Create(ctx context.Context, opts Options) (resRun *Run, retErr
 	if opts.OnRunIDAssigned != nil {
 		opts.OnRunIDAssigned(r.ID, r.Name)
 	}
+	r.owner = ownerLock(runDir)
+	locked, lockErr := r.owner.TryLock()
+	if lockErr != nil {
+		return nil, fmt.Errorf("claiming new run %s: %w", r.ID, lockErr)
+	}
+	if !locked {
+		return nil, fmt.Errorf("new run %s already owned", r.ID)
+	}
+	defer func() {
+		if retErr != nil {
+			r.releaseOwner()
+		}
+	}()
 	// Remove the empty run dir if Create fails before successfully returning —
 	// otherwise we'd leak `~/.moat/runs/<id>/` directories with no metadata.json
 	// that don't surface in `moat list` or `moat clean`. Set to false on

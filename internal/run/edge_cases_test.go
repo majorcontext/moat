@@ -419,13 +419,13 @@ func TestStopHandlesContainerStopError(t *testing.T) {
 	m.runs[r.ID] = r
 	m.mu.Unlock()
 
-	// Stop should not return error even though StopContainer failed
+	// A transport error is not proof of exit.
 	err := m.Stop(context.Background(), r.ID)
-	if err != nil {
-		t.Fatalf("Stop should succeed despite container stop error: %v", err)
+	if err == nil {
+		t.Fatal("Stop succeeded despite still-running container")
 	}
-	if r.GetState() != StateStopped {
-		t.Errorf("state should be stopped, got %s", r.GetState())
+	if r.GetState() != StateRunning {
+		t.Errorf("state should be running, got %s", r.GetState())
 	}
 }
 
@@ -1091,7 +1091,8 @@ func TestMonitorContainerExitWaitError(t *testing.T) {
 	}
 
 	rt := &flexibleRuntime{
-		done: make(chan struct{}),
+		states: map[string]string{"ctr-wait": "exited"},
+		done:   make(chan struct{}),
 		waitFn: func(_ context.Context, _ string) (int64, error) {
 			return 0, errors.New("connection lost to container runtime")
 		},

@@ -2,6 +2,7 @@ package run
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -18,16 +19,6 @@ import (
 	"github.com/majorcontext/moat/internal/routing"
 	"github.com/majorcontext/moat/internal/serialdev"
 	"github.com/majorcontext/moat/internal/storage"
-)
-
-// Timing constants for run lifecycle operations.
-const (
-	// containerStartDelay is how long to wait after StartAttached begins before
-	// updating run state to "running". This delay ensures the container process
-	// has started and the TTY is attached before we report it as running.
-	// The value is chosen to be long enough for the attach to establish but
-	// short enough to not noticeably delay state updates.
-	containerStartDelay = 100 * time.Millisecond
 )
 
 // Aliases to the shared hostnames package so existing callsites in this file
@@ -63,6 +54,8 @@ type Manager struct {
 	// monitorWg tracks active monitorContainerExit goroutines.
 	// Close() waits on this (with a timeout) after canceling monitorCtx.
 	monitorWg sync.WaitGroup
+	activeOps sync.WaitGroup // startup and attach calls that can still register monitors
+	closing   bool           // guarded by mu
 
 	// serialEnum and serialPinPath back the Create gate's device resolution;
 	// nil / "" mean the real USB enumeration and the default pin store. Tests
@@ -297,39 +290,51 @@ func (m *Manager) RoutingPort() int {
 	return m.proxyLifecycle.Port()
 }
 
+// beginOperation closes the admission race between an operation that can
+// finalize a run or register monitors and a concurrent Manager.Close.
+func (m *Manager) beginOperation() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.closing {
+		return errors.New("run manager is closing")
+	}
+	m.activeOps.Add(1)
+	return nil
+}
+
 // Close releases manager resources.
 // It cancels monitor goroutines and waits (with a bounded timeout) for them
 // to finish capturing logs and updating state before closing the runtime.
 func (m *Manager) Close() error {
+	m.mu.Lock()
+	m.closing = true
+	m.mu.Unlock()
 	// Cancel the manager context.
 	if m.cancel != nil {
 		m.cancel()
 	}
 
-	// Cancel monitor goroutines so WaitContainer unblocks. This prevents
-	// Close() from deadlocking when the Docker daemon is slow to report
-	// container exit (e.g., on custom networks with service dependencies).
-	// See https://github.com/majorcontext/moat/issues/315
-	if m.monitorCancel != nil {
-		m.monitorCancel()
-	}
-
-	// Wait for monitor goroutines to finish with a bounded timeout.
-	// Normally monitors complete quickly after context cancellation.
-	// The timeout is a safety net for cases where even a canceled
-	// WaitContainer doesn't return (e.g., Docker daemon unresponsive).
-	monitorDone := make(chan struct{})
+	// Closing admission under mu prevents new operations from racing these
+	// waits. A timeout bounds the caller, while the goroutine retains the
+	// runtime and leases until the last in-flight operation returns.
+	done := make(chan error, 1)
 	go func() {
+		m.activeOps.Wait()
+		if m.monitorCancel != nil {
+			m.monitorCancel()
+		}
 		m.monitorWg.Wait()
-		close(monitorDone)
+		done <- m.closeResources()
 	}()
 	select {
-	case <-monitorDone:
-		// All monitors finished cleanly.
+	case err := <-done:
+		return err
 	case <-time.After(10 * time.Second):
-		log.Warn("timed out waiting for container monitors to finish; proceeding with shutdown")
+		return fmt.Errorf("timed out draining run manager; shutdown continues in background")
 	}
+}
 
+func (m *Manager) closeResources() error {
 	// Stop all proxy/SSH servers and unregister runs from daemon,
 	// with a 10-second overall timeout.
 	closeCtx, closeCancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -337,6 +342,9 @@ func (m *Manager) Close() error {
 
 	m.mu.RLock()
 	for _, r := range m.runs {
+		if r.inherited {
+			continue
+		}
 		if err := r.stopProxyServer(closeCtx); err != nil {
 			log.Debug("failed to stop proxy during manager close", "run", r.ID, "error", err)
 		}
@@ -348,6 +356,7 @@ func (m *Manager) Close() error {
 		if err := r.stopSSHAgentServer(); err != nil {
 			log.Debug("failed to stop SSH agent during manager close", "run", r.ID, "error", err)
 		}
+		r.releaseOwner()
 	}
 	m.mu.RUnlock()
 

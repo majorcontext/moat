@@ -1193,6 +1193,9 @@ func (r *DockerRuntime) RemoveImage(ctx context.Context, id string) error {
 // Returns an error if the container doesn't exist.
 func (r *DockerRuntime) ContainerState(ctx context.Context, containerID string) (string, error) {
 	inspect, err := r.cli.ContainerInspect(ctx, containerID)
+	if errdefs.IsNotFound(err) {
+		return "", fmt.Errorf("container %s: %w", containerID, os.ErrNotExist)
+	}
 	if err != nil {
 		return "", fmt.Errorf("inspecting container: %w", err)
 	}

@@ -6,7 +6,7 @@ package run
 import (
 	"context"
 	"errors"
-	"fmt"
+	"os"
 	"path/filepath"
 	"time"
 
@@ -15,11 +15,8 @@ import (
 	"github.com/majorcontext/moat/internal/log"
 )
 
-// monitorContainerExit watches for container exit and captures logs.
-// This runs in the background for ALL runs to ensure logs are captured,
-// exitCh is closed, and resources are cleaned up regardless of which path
-// (interactive, non-interactive, Stop) caused the container to exit.
-// It's safe to call multiple times - captureLogs is idempotent.
+// monitorContainerExit runs once for a container started by Manager.Start.
+// It records completion, signals local waiters, and releases run resources.
 //
 // The ctx parameter controls the WaitContainer call. Close() cancels this
 // context to unblock the monitor when the manager is shutting down, preventing
@@ -30,52 +27,41 @@ func (m *Manager) monitorContainerExit(ctx context.Context, r *Run) {
 	rt, rtErr := m.runtimeForRun(r)
 	if rtErr != nil {
 		log.Debug("cannot resolve runtime for container monitor", "run", r.ID, "error", rtErr)
-		r.SetStateFailedAt("runtime unavailable: "+rtErr.Error(), time.Now())
-		_ = r.SaveMetadata()
-		close(r.exitCh)
+		r.notifyExit(rtErr)
+		r.releaseOwner()
 		return
 	}
 
-	// Wait for container to exit. This is the ONLY place that calls
-	// WaitContainer to avoid race conditions. The context is typically
+	// This is the sole waiter on the live container. The context is typically
 	// monitorCtx, which Close() cancels to unblock stuck monitors.
 	exitCode, err := rt.WaitContainer(ctx, r.ContainerID)
-
-	// CRITICAL: Capture logs IMMEDIATELY after container exits, BEFORE signaling.
-	// Docker may start removing/cleaning the container at any moment after exit.
-	// We must get the logs while the container is still in "exited" state.
-	m.captureLogs(r)
-
-	// Run provider stopped hooks (e.g., Claude session ID extraction).
-	// Must happen after captureLogs and before SaveMetadata.
-	runProviderStoppedHooks(r)
-
-	// Update run state BEFORE signaling exitCh so that Wait() reads
-	// the final state (including r.Error) when it unblocks.
-	currentState := r.GetState()
-	if currentState == StateRunning || currentState == StateStarting {
-		if err != nil || exitCode != 0 {
-			errMsg := ""
-			if err != nil {
-				errMsg = err.Error()
-			} else {
-				errMsg = fmt.Sprintf("exit code %d", exitCode)
-			}
-			r.SetStateFailedAt(errMsg, time.Now())
-		} else {
-			r.SetStateWithTime(StateStopped, time.Now())
+	for err != nil {
+		if ctx.Err() != nil {
+			r.notifyExit(ctx.Err())
+			return // Close releases the owner lock after all work drains.
 		}
+		if state := r.GetState(); state == StateStopped || state == StateFailed {
+			break
+		}
+		probe, cancel := context.WithTimeout(ctx, 5*time.Second)
+		state, inspectErr := rt.ContainerState(probe, r.ContainerID)
+		cancel()
+		if errors.Is(inspectErr, os.ErrNotExist) || (inspectErr == nil && containerExited(state)) {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			r.notifyExit(ctx.Err())
+			return
+		case <-r.exitCh:
+			return
+		case <-time.After(250 * time.Millisecond):
+		}
+		exitCode, err = rt.WaitContainer(ctx, r.ContainerID)
 	}
-
-	_ = r.SaveMetadata()
-
-	// Signal that container has exited (logs captured, state updated)
-	close(r.exitCh)
-
-	// Clean up all resources (30-second timeout for cleanup operations)
-	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cleanupCancel()
-	m.cleanupResources(cleanupCtx, r)
+	if finalErr := m.finishRun(r, exitCode, err); finalErr != nil {
+		log.Warn("finalizing run", "run", r.ID, "error", finalErr)
+	}
 }
 
 // monitorProxyHealth repairs endpoint routing and checks the credential proxy

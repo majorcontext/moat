@@ -1336,13 +1336,18 @@ func BuildCreateArgs(cfg Config) ([]string, error) {
 // Returns an error if the container doesn't exist.
 func (r *AppleRuntime) ContainerState(ctx context.Context, containerID string) (string, error) {
 	cmd := exec.CommandContext(ctx, r.containerBin, "inspect", containerID)
-	var stdout bytes.Buffer
+	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
-
+	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
+		if ctx.Err() != nil {
+			return "", ctx.Err()
+		}
+		if strings.Contains(stderr.String(), "notFound") || strings.Contains(stderr.String(), "not found") {
+			return "", fmt.Errorf("container %s: %w", containerID, os.ErrNotExist)
+		}
 		return "", fmt.Errorf("inspecting container %s: %w", containerID, err)
 	}
-
 	// Apple's inspect returns an array of container info objects
 	info, err := parseAppleInspect(stdout.Bytes())
 	if err != nil {
@@ -1350,7 +1355,7 @@ func (r *AppleRuntime) ContainerState(ctx context.Context, containerID string) (
 	}
 
 	if len(info) == 0 {
-		return "", fmt.Errorf("container %s not found", containerID)
+		return "", fmt.Errorf("container %s not found: %w", containerID, os.ErrNotExist)
 	}
 
 	return info[0].state(), nil
