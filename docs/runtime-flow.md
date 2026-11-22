@@ -224,10 +224,9 @@ flowchart TD
 
     SIG["signal.Notify<br/>(SIGINT, SIGTERM, SIGWINCH)"]
 
-    SIG --> SA["go manager.StartAttached()<br/>(blocks until container exits)"]
-    SA --> RESIZE["go sleep(200ms) then<br/>ResizeTTY()"]
-
-    RESIZE --> LOOP["Event loop"]
+    SIG --> SIZE["Measure guest dimensions<br/>allowing for the status bar"]
+    SIZE --> SA["Launch manager.StartAttached()<br/>with current guest dimensions"]
+    SA --> LOOP["Event loop"]
 
     LOOP --> |SIGWINCH| WINCH["Resize status bar + TTY"]
     WINCH --> LOOP

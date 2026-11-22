@@ -5,6 +5,7 @@ package e2e
 
 import (
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -170,25 +171,25 @@ func TestLogsCapturedInInteractiveMode(t *testing.T) {
 		workspace := createTestWorkspace(t)
 
 		// Create an interactive run (mirrors real usage: moat run -i)
-		// Note: We only set Interactive=true. TTY allocation is determined by
-		// StartAttached based on whether stdin is a real terminal.
+		size := container.TTYSize{Width: 80, Height: 24}
 		r, err := mgr.Create(ctx, run.Options{
 			Name:        "test-logs-interactive",
 			Workspace:   workspace,
 			Cmd:         []string{"sh", "-c", "echo 'interactive log 1'; echo 'interactive log 2'"},
 			Interactive: true,
+			Terminal:    &size,
 		})
 		if err != nil {
 			t.Fatalf("Create: %v", err)
 		}
 		defer mgr.Destroy(context.Background(), r.ID)
 
-		// StartAttached simulates interactive mode
-		// We can't truly test interactive mode in automated tests, but we can
-		// verify that StartAttached captures logs when the container exits
+		input, writer := io.Pipe()
+		defer func() { _ = writer.Close() }()
+		defer func() { _ = input.Close() }()
 		doneCh := make(chan error, 1)
 		go func() {
-			doneCh <- mgr.StartAttached(ctx, r.ID, os.Stdin, os.Stdout, os.Stderr)
+			doneCh <- mgr.StartAttached(ctx, r.ID, input, os.Stdout, os.Stderr, size)
 		}()
 
 		// Wait for completion

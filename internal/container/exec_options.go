@@ -2,7 +2,7 @@ package container
 
 import "io"
 
-// TTYSize is a terminal dimension update for an interactive exec session.
+// TTYSize is the dimensions of a guest terminal.
 type TTYSize struct {
 	Width  uint
 	Height uint

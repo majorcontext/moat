@@ -82,7 +82,7 @@ func (m *Manager) Start(ctx context.Context, runID string) error {
 // This is required for TUI applications (like Codex CLI) that need the terminal
 // connected before the process starts to properly detect terminal capabilities.
 // Unlike Start + Attach, this ensures the TTY is ready when the container command begins.
-func (m *Manager) StartAttached(ctx context.Context, runID string, stdin io.Reader, stdout, stderr io.Writer) error {
+func (m *Manager) StartAttached(ctx context.Context, runID string, stdin io.Reader, stdout, stderr io.Writer, size container.TTYSize) error {
 	r, err := m.beginStart(runID)
 	if err != nil {
 		return err
@@ -100,12 +100,6 @@ func (m *Manager) StartAttached(ctx context.Context, runID string, stdin io.Read
 	r.stateMu.Unlock()
 	containerID := r.ContainerID
 	setLogContext(r)
-
-	// Start with attachment - this ensures TTY is connected before process starts.
-	// TTY mode must match how the container was created (see CreateContainer in
-	// docker.go and apple.go). Both runtimes only enable TTY when os.Stdin is a
-	// real terminal, so we use the same check here.
-	useTTY := term.IsTerminal(os.Stdin)
 
 	// For interactive mode, tee output to a buffer so we can capture logs.
 	// This is necessary because:
@@ -128,38 +122,12 @@ func (m *Manager) StartAttached(ctx context.Context, runID string, stdin io.Read
 	}
 
 	attachOpts := container.AttachOptions{
-		Stdin:  stdin,
-		Stdout: teeStdout,
-		Stderr: teeStderr,
-		TTY:    useTTY,
-	}
-
-	// Pass initial terminal size so the container can be resized immediately
-	// after starting, before the process queries terminal dimensions.
-	//
-	// In interactive mode the CLI reserves the bottom row for a status bar
-	// (see internal/tui.Writer). Subtract 1 from the reported height so the
-	// child renders in rows 1..height-1 and can't collide with the footer
-	// slot. Subsequent ResizeTTY calls from the CLI use the same adjustment.
-	//
-	// Predicate note: this site checks r.Interactive while the CLI's
-	// containerTTYHeight helper checks statusWriter != nil. They're
-	// equivalent today because both are gated by term.IsTerminal(os.Stdout)
-	// and exec.go only constructs a statusWriter when r.Interactive is true.
-	// If a future caller invokes StartAttached for an Interactive run in a
-	// non-TTY context, this branch is unreached (the outer term.IsTerminal
-	// guard fails first), so the predicates stay consistent.
-	if useTTY && term.IsTerminal(os.Stdout) {
-		width, height := term.GetSize(os.Stdout)
-		if width > 0 && height > 0 {
-			if r.Interactive && height > 1 {
-				height--
-			}
-			// #nosec G115 -- width is validated positive above
-			attachOpts.InitialWidth = uint(width)
-			// #nosec G115 -- height is validated positive above (and only decremented when > 1)
-			attachOpts.InitialHeight = uint(height)
-		}
+		Stdin:         stdin,
+		Stdout:        teeStdout,
+		Stderr:        teeStderr,
+		TTY:           r.tty,
+		InitialWidth:  size.Width,
+		InitialHeight: size.Height,
 	}
 
 	// Channel to receive the attach result
