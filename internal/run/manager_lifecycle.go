@@ -4,7 +4,6 @@ package run
 // Wait, and Destroy.
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -17,6 +16,7 @@ import (
 	"github.com/majorcontext/moat/internal/container"
 	"github.com/majorcontext/moat/internal/log"
 	"github.com/majorcontext/moat/internal/snapshot"
+	"github.com/majorcontext/moat/internal/storage"
 	"github.com/majorcontext/moat/internal/term"
 	"github.com/majorcontext/moat/internal/ui"
 )
@@ -101,23 +101,17 @@ func (m *Manager) StartAttached(ctx context.Context, runID string, stdin io.Read
 	containerID := r.ContainerID
 	setLogContext(r)
 
-	// For interactive mode, tee output to a buffer so we can capture logs.
-	// This is necessary because:
-	// 1. TTY mode: output goes through PTY, not container logs
-	// 2. Non-TTY interactive: we may still want to capture for tests/programmatic use
-	var logBuffer bytes.Buffer
-	var teeStdout, teeStderr io.Writer
-	teeStdout = stdout
-	teeStderr = stderr
-
-	if r.Interactive && r.Store != nil {
-		// Tee stdout and stderr to capture for logs.jsonl
-		teeStdout = io.MultiWriter(stdout, &logBuffer)
+	// Apple delivers interactive output only through this attachment, so it
+	// is streamed to logs.jsonl as it arrives. Docker keeps runtime logs in
+	// every mode, and captureLogs reads those after exit.
+	teeStdout, teeStderr := stdout, stderr
+	logs := m.openAttachedLog(r)
+	if logs != nil {
+		defer logs.Close()
+		teeStdout = &logTee{out: stdout, log: logs}
+		teeStderr = teeStdout
 		if stderr != stdout {
-			teeStderr = io.MultiWriter(stderr, &logBuffer)
-		} else {
-			// stdout and stderr are the same writer - don't duplicate
-			teeStderr = teeStdout
+			teeStderr = &logTee{out: stderr, log: logs.Stream()}
 		}
 	}
 
@@ -188,22 +182,11 @@ func (m *Manager) StartAttached(ctx context.Context, runID string, stdin io.Read
 
 	// Cancellation and terminal escape actions are followed by an explicit Stop.
 	callerWillStop := attachCtx.Err() != nil || term.IsEscapeError(attachErr)
-	// For Apple containers in interactive mode, write captured output directly to logs.jsonl.
-	// (Apple TTY output doesn't go through container runtime logs — captureLogs() returns
-	// early for Apple interactive runs, so this is the only path that writes logs.)
-	// Runs unconditionally: even on escape-stop the buffer holds all output up to that point.
-	if r.Interactive && r.Store != nil && container.RuntimeType(r.Runtime) == container.RuntimeApple {
-		// Use CompareAndSwap to ensure single write
-		if r.logsCaptured.CompareAndSwap(false, true) {
-			if lw, err := r.Store.LogWriter(); err == nil {
-				if logBuffer.Len() > 0 {
-					_, _ = lw.Write(logBuffer.Bytes())
-				}
-				lw.Close()
-			} else {
-				// Failed to create file - reset flag so captureLogs can try
-				r.logsCaptured.Store(false)
-			}
+	// The attachment has returned all output. Flush the final partial line
+	// before anything waiting on the drain reads the log.
+	if logs != nil {
+		if err := logs.Close(); err != nil {
+			log.Warn("failed to finish interactive log", "runID", r.ID, "error", err)
 		}
 	}
 
@@ -238,6 +221,39 @@ func (m *Manager) StartAttached(ctx context.Context, runID string, stdin io.Read
 	}
 
 	return attachErr
+}
+
+// openAttachedLog claims log capture for an Apple interactive run and opens
+// its log. It returns nil when StartAttached is not the capture path.
+func (m *Manager) openAttachedLog(r *Run) *storage.LogWriter {
+	if !r.Interactive || r.Store == nil || container.RuntimeType(r.Runtime) != container.RuntimeApple {
+		return nil
+	}
+	if !r.logsCaptured.CompareAndSwap(false, true) {
+		return nil
+	}
+	lw, err := r.Store.LogWriter()
+	if err != nil {
+		r.logsCaptured.Store(false)
+		log.Warn("failed to open interactive log", "runID", r.ID, "error", err)
+		return nil
+	}
+	return lw
+}
+
+// logTee copies attached output to the run log. The session's own output
+// decides the result, so a failed log write cannot interrupt the terminal.
+type logTee struct {
+	out io.Writer
+	log io.Writer
+}
+
+func (t *logTee) Write(p []byte) (int, error) {
+	n, err := t.out.Write(p)
+	if n > 0 {
+		_, _ = t.log.Write(p[:n])
+	}
+	return n, err
 }
 
 // Stop terminates a running run.

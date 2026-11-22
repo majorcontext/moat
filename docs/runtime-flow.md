@@ -253,21 +253,16 @@ flowchart TD
     SA["manager.StartAttached()"]
     SA --> SS["state = Starting"]
     SS --> LOG["Set log context"]
-    LOG --> TTY{"stdin is terminal?"}
-    TTY -->|yes| USTY["useTTY = true"]
-    TTY -->|no| USTN["useTTY = false"]
+    LOG --> TEE
 
-    USTY --> TEE
-    USTN --> TEE
-
-    TEE{"interactive +<br/>has store?"}
-    TEE -->|yes| TEEW["Tee stdout/stderr<br/>to logBuffer"]
+    TEE{"Apple + interactive +<br/>has store?"}
+    TEE -->|yes| TEEW["Open logs.jsonl<br/>Tee stdout/stderr to it<br/>line by line"]
     TEE -->|no| AOPTS
     TEEW --> AOPTS
 
-    AOPTS["Build AttachOptions<br/>(stdin, stdout, stderr, TTY,<br/>initial terminal size)"]
+    AOPTS["Build AttachOptions<br/>(stdin, stdout, stderr,<br/>TTY mode fixed at create,<br/>current terminal size)"]
     AOPTS --> GORTN["go runtime.StartAttached()"]
-    GORTN --> DELAY["sleep(100ms)"]
+    GORTN --> DELAY["await running state<br/>or early attach result"]
     DELAY --> RUN["state = Running"]
     RUN --> PB{"ports?"}
     PB -->|yes| PBG["GetPortBindings()<br/>Register routes"]
@@ -281,7 +276,7 @@ flowchart TD
 
     WAIT["await attachDone"]
     WAIT --> LOGS{"Apple +<br/>interactive?"}
-    LOGS -->|yes| WLOGS["Write logBuffer<br/>to logs.jsonl"]
+    LOGS -->|yes| WLOGS["Flush final partial line<br/>Close logs.jsonl"]
     LOGS -->|no| CAP
     WLOGS --> CAP
 
