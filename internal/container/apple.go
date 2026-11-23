@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	goruntime "runtime"
@@ -335,6 +336,10 @@ func (r *AppleRuntime) StartContainer(ctx context.Context, containerID string) e
 	cmd := exec.Command(r.containerBin, "start", "--attach", containerID)
 	stderr := &headBuffer{limit: 4096}
 	cmd.Stderr = stderr
+	// The CLI forwards signals it receives to the guest. Its own process
+	// group keeps a terminal's Ctrl+C from reaching the guest directly, so
+	// only Stop ends the run.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("starting container: %w", err)
 	}
@@ -350,11 +355,9 @@ func (r *AppleRuntime) StartContainer(ctx context.Context, containerID string) e
 	for {
 		select {
 		case <-launch.done:
-			if launch.code != 0 || !launch.known {
-				if r.neverStarted(ctx, containerID) {
-					r.dropLaunch(containerID)
-					return fmt.Errorf("starting container: %w: %s", launch.err, stderr.String())
-				}
+			if (launch.code != 0 || !launch.known) && !r.guestStarted(ctx, containerID) {
+				r.dropLaunch(containerID)
+				return fmt.Errorf("starting container: %w: %s", launch.err, strings.TrimSpace(stderr.String()))
 			}
 			return nil
 		case <-ctx.Done():
@@ -417,25 +420,37 @@ func (r *AppleRuntime) dropLaunch(containerID string) {
 	}
 }
 
-// neverStarted reports whether inspect shows the guest process did not
-// start. An inspect failure other than a missing container is not evidence.
-func (r *AppleRuntime) neverStarted(ctx context.Context, containerID string) bool {
-	probe, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-	defer cancel()
-	out, err := exec.CommandContext(probe, r.containerBin, "inspect", containerID).Output()
-	if err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			msg := string(exitErr.Stderr)
-			return strings.Contains(msg, "notFound") || strings.Contains(msg, "not found")
+// guestStarted reports whether inspect shows that the guest process started.
+// It is asked only after the CLI process failed, to tell a guest that exited
+// with a status from a start that failed. Only a recorded start time counts:
+// a missing container, a persistent inspect failure, and the pre-1.0 schema
+// (which has no start time) all report false, so the CLI's own error is
+// reported rather than mistaken for the guest's status.
+func (r *AppleRuntime) guestStarted(ctx context.Context, containerID string) bool {
+	for attempt := 0; attempt < 3; attempt++ {
+		if attempt > 0 {
+			time.Sleep(200 * time.Millisecond)
 		}
-		return false
+		probe, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		out, err := exec.CommandContext(probe, r.containerBin, "inspect", containerID).Output()
+		cancel()
+		if err != nil {
+			var exitErr *exec.ExitError
+			if errors.As(err, &exitErr) {
+				msg := string(exitErr.Stderr)
+				if strings.Contains(msg, "notFound") || strings.Contains(msg, "not found") {
+					return false
+				}
+			}
+			continue // transient inspect failure
+		}
+		info, err := parseAppleInspect(out)
+		if err != nil {
+			continue
+		}
+		return len(info) > 0 && info[0].started()
 	}
-	info, err := parseAppleInspect(out)
-	if err != nil {
-		return false
-	}
-	return len(info) == 0 || info[0].neverStarted()
+	return false
 }
 
 // headBuffer keeps the first limit bytes written and discards the rest.
@@ -539,13 +554,34 @@ func (r *AppleRuntime) WaitContainer(ctx context.Context, containerID string) (i
 			return -1, ctx.Err()
 		}
 	}
-	if launch.known {
+	cancel()
+	if !launch.known {
+		// The launch process was lost without a status. Confirm the exit.
+		return r.waitByPolling(ctx, containerID)
+	}
+	// The CLI's status is the guest's only if the guest has exited. Inspect
+	// can lag the CLI briefly; a container still running after the grace
+	// period means the CLI ended on its own, and its status says nothing
+	// about the guest.
+	confirm, cancelConfirm := context.WithTimeout(ctx, launchExitGrace)
+	_, err := r.waitByPolling(confirm, containerID)
+	cancelConfirm()
+	if err == nil {
 		return launch.code, nil
 	}
-	// The launch process was lost without a status. Confirm the exit.
-	cancel()
+	if ctx.Err() != nil {
+		return -1, ctx.Err()
+	}
+	if confirm.Err() == nil {
+		return -1, err
+	}
+	log.Debug("apple launch process ended while the container is still running", "container", containerID, "code", launch.code)
 	return r.waitByPolling(ctx, containerID)
 }
+
+// launchExitGrace is how long inspect may keep reporting a container as
+// running after its launch process has returned the guest's status.
+var launchExitGrace = 5 * time.Second
 
 // waitByPolling polls the container status until it exits.
 func (r *AppleRuntime) waitByPolling(ctx context.Context, containerID string) (int64, error) {
@@ -1577,7 +1613,7 @@ func (r *AppleRuntime) StartAttached(ctx context.Context, containerID string, op
 func (r *AppleRuntime) recordAttachedExit(ctx context.Context, containerID string, waitErr error) error {
 	launch := &appleLaunch{done: make(chan struct{})}
 	launch.finish(waitErr)
-	if !launch.known || (launch.code != 0 && r.neverStarted(ctx, containerID)) {
+	if !launch.known || (launch.code != 0 && !r.guestStarted(ctx, containerID)) {
 		return fmt.Errorf("starting container attached: %w", waitErr)
 	}
 	r.trackLaunch(containerID, launch)

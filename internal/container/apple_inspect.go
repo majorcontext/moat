@@ -30,9 +30,8 @@ type appleStatus struct {
 	Networks []appleNetwork
 
 	// StartedDate is set once the guest process has started. Only the 1.0.0
-	// object form reports it; Structured records that form was seen.
+	// object form reports it.
 	StartedDate string
-	Structured  bool
 }
 
 // UnmarshalJSON decodes either the legacy string status or the 1.0.0 object.
@@ -59,7 +58,6 @@ func (s *appleStatus) UnmarshalJSON(data []byte) error {
 	s.State = obj.State
 	s.Networks = obj.Networks
 	s.StartedDate = obj.StartedDate
-	s.Structured = true
 	return nil
 }
 
@@ -88,10 +86,10 @@ type appleInspectInfo struct {
 // state returns the container state ("running", "stopped", "exited", ...).
 func (i appleInspectInfo) state() string { return i.Status.State }
 
-// neverStarted reports positive evidence that the guest process did not
-// start. The legacy schema carries no start time, so it never reports true.
-func (i appleInspectInfo) neverStarted() bool {
-	return i.Status.Structured && i.Status.StartedDate == ""
+// started reports whether the runtime recorded a start time for the guest
+// process. The pre-1.0 schema carries none, so it never reports true.
+func (i appleInspectInfo) started() bool {
+	return i.Status.StartedDate != ""
 }
 
 // networks returns the network attachments, preferring the 1.0.0 location
