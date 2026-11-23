@@ -243,8 +243,10 @@ type LogEntry struct {
 
 // maxLogLineBytes bounds the raw text of one log entry. Output that goes
 // longer without a newline, such as a full-screen TUI, continues in the next
-// entry, so a writer never holds more than this per stream.
-const maxLogLineBytes = 32 * 1024
+// entry, so a writer never holds more than this per stream. Lines up to
+// this length are stored whole; it matches the longest entry earlier
+// versions could read back.
+const maxLogLineBytes = 64 * 1024
 
 // maxLogEntryBytes is the largest encoded entry ReadLogs accepts. JSON
 // escaping expands control and invalid bytes up to sixfold.
@@ -257,7 +259,8 @@ type LogWriter struct {
 	mu      sync.Mutex
 	file    *os.File
 	closed  bool
-	streams []*logStream
+	primary *logStream   // lines written through Write
+	streams []*logStream // every stream, primary first, for the final flush
 }
 
 // logStream assembles lines for one source so that partial lines from
@@ -269,14 +272,15 @@ type logStream struct {
 
 func newLogWriter(file *os.File) *LogWriter {
 	w := &LogWriter{file: file}
-	w.streams = []*logStream{{w: w}}
+	w.primary = &logStream{w: w}
+	w.streams = []*logStream{w.primary}
 	return w
 }
 
 // Write implements io.Writer. Each completed line becomes one entry stamped
 // with the time it completed.
 func (w *LogWriter) Write(p []byte) (int, error) {
-	return w.streams[0].Write(p)
+	return w.primary.Write(p)
 }
 
 // Stream returns a writer for a second source, such as stderr, that shares

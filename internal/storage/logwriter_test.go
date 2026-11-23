@@ -138,7 +138,7 @@ func TestLogWriterBoundsUnterminatedOutput(t *testing.T) {
 	chunk := []byte(strings.Repeat("\x1b[2J", 1024))
 	for i := 0; i < 64; i++ {
 		w.Write(chunk)
-		if got := len(w.streams[0].pending); got > maxLogLineBytes {
+		if got := len(w.primary.pending); got > maxLogLineBytes {
 			t.Fatalf("pending grew to %d bytes, over the %d limit", got, maxLogLineBytes)
 		}
 	}
