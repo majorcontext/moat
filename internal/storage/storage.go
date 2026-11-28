@@ -4,13 +4,17 @@ package storage
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/majorcontext/moat/internal/config"
 )
@@ -237,37 +241,141 @@ type LogEntry struct {
 	Line      string    `json:"line"`
 }
 
-// LogWriter wraps writes to add timestamps.
+// maxLogLineBytes bounds the raw text of one log entry. Output that goes
+// longer without a newline, such as a full-screen TUI, continues in the next
+// entry, so a writer never holds more than this per stream. Lines up to
+// this length are stored whole; it matches the longest entry earlier
+// versions could read back.
+const maxLogLineBytes = 64 * 1024
+
+// maxLogEntryBytes is the largest encoded entry ReadLogs accepts. JSON
+// escaping expands control and invalid bytes up to sixfold.
+const maxLogEntryBytes = 8 * maxLogLineBytes
+
+// LogWriter appends timestamped lines to a log file. It assembles lines
+// across Write calls, so callers can stream output as it arrives. Close
+// writes any final line that has no trailing newline.
 type LogWriter struct {
-	file *os.File
-	mu   sync.Mutex
+	mu      sync.Mutex
+	file    *os.File
+	closed  bool
+	primary *logStream   // lines written through Write
+	streams []*logStream // every stream, primary first, for the final flush
 }
 
-// Write implements io.Writer, adding timestamps to each line.
-func (w *LogWriter) Write(p []byte) (n int, err error) {
+// logStream assembles lines for one source so that partial lines from
+// different sources are not joined.
+type logStream struct {
+	w       *LogWriter
+	pending []byte
+}
+
+func newLogWriter(file *os.File) *LogWriter {
+	w := &LogWriter{file: file}
+	w.primary = &logStream{w: w}
+	w.streams = []*logStream{w.primary}
+	return w
+}
+
+// Write implements io.Writer. Each completed line becomes one entry stamped
+// with the time it completed.
+func (w *LogWriter) Write(p []byte) (int, error) {
+	return w.primary.Write(p)
+}
+
+// Stream returns a writer for a second source, such as stderr, that shares
+// the file and entry ordering but assembles its own lines.
+func (w *LogWriter) Stream() io.Writer {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-
-	lines := bufio.NewScanner(strings.NewReader(string(p)))
-	for lines.Scan() {
-		entry := LogEntry{
-			Timestamp: time.Now().UTC(),
-			Line:      lines.Text(),
-		}
-		data, _ := json.Marshal(entry)
-		if _, err := w.file.Write(data); err != nil {
-			return 0, err
-		}
-		if _, err := w.file.Write([]byte("\n")); err != nil {
-			return 0, err
-		}
-	}
-	return len(p), nil
+	s := &logStream{w: w}
+	w.streams = append(w.streams, s)
+	return s
 }
 
-// Close closes the underlying file.
+func (s *logStream) Write(p []byte) (int, error) {
+	w := s.w
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.closed {
+		return 0, os.ErrClosed
+	}
+
+	n := len(p)
+	for len(p) > 0 {
+		room := maxLogLineBytes - len(s.pending)
+		// Look one byte past the limit so a line of exactly the limit is
+		// not split from its newline.
+		look := p
+		if len(look) > room+1 {
+			look = look[:room+1]
+		}
+		if i := bytes.IndexByte(look, '\n'); i >= 0 {
+			s.pending = append(s.pending, p[:i]...)
+			if err := w.writeEntry(bytes.TrimSuffix(s.pending, []byte{'\r'})); err != nil {
+				return 0, err
+			}
+			s.pending = s.pending[:0]
+			p = p[i+1:]
+			continue
+		}
+		if len(look) <= room {
+			s.pending = append(s.pending, look...)
+			break
+		}
+		s.pending = append(s.pending, p[:room]...)
+		p = p[room:]
+		cut := completeRunePrefix(s.pending)
+		if err := w.writeEntry(s.pending[:cut]); err != nil {
+			return 0, err
+		}
+		s.pending = append(s.pending[:0], s.pending[cut:]...)
+	}
+	return n, nil
+}
+
+// completeRunePrefix returns the length of b without a trailing incomplete
+// UTF-8 sequence, so splitting a long line does not corrupt a character.
+func completeRunePrefix(b []byte) int {
+	for i := len(b) - 1; i >= 0 && i >= len(b)-utf8.UTFMax; i-- {
+		if utf8.RuneStart(b[i]) {
+			if i > 0 && !utf8.FullRune(b[i:]) {
+				return i
+			}
+			break
+		}
+	}
+	return len(b)
+}
+
+// writeEntry appends one entry with a single write. Callers hold w.mu.
+func (w *LogWriter) writeEntry(line []byte) error {
+	data, err := json.Marshal(LogEntry{Timestamp: time.Now().UTC(), Line: string(line)})
+	if err != nil {
+		return err
+	}
+	_, err = w.file.Write(append(data, '\n'))
+	return err
+}
+
+// Close writes any unterminated final lines and closes the file. Later
+// calls do nothing.
 func (w *LogWriter) Close() error {
-	return w.file.Close()
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.closed {
+		return nil
+	}
+	w.closed = true
+	// Each stream is flushed even if another's write fails.
+	var errs []error
+	for _, s := range w.streams {
+		if len(s.pending) > 0 {
+			errs = append(errs, w.writeEntry(bytes.TrimSuffix(s.pending, []byte{'\r'})))
+		}
+		s.pending = nil
+	}
+	return errors.Join(append(errs, w.file.Close())...)
 }
 
 // LogWriter returns a writer that timestamps log entries.
@@ -280,7 +388,7 @@ func (s *RunStore) LogWriter() (*LogWriter, error) {
 	if err != nil {
 		return nil, fmt.Errorf("opening log file: %w", err)
 	}
-	return &LogWriter{file: f}, nil
+	return newLogWriter(f), nil
 }
 
 // JoinLogWriter returns a timestamped writer for a joined agent's console,
@@ -294,7 +402,7 @@ func (s *RunStore) JoinLogWriter(index int) (*LogWriter, error) {
 	if err != nil {
 		return nil, fmt.Errorf("opening join log file: %w", err)
 	}
-	return &LogWriter{file: f}, nil
+	return newLogWriter(f), nil
 }
 
 // ReadLogs reads log entries with offset and limit.
@@ -310,6 +418,7 @@ func (s *RunStore) ReadLogs(offset, limit int) ([]LogEntry, error) {
 
 	var entries []LogEntry
 	scanner := bufio.NewScanner(f)
+	scanner.Buffer(nil, maxLogEntryBytes)
 	lineNum := 0
 	for scanner.Scan() {
 		if lineNum < offset {

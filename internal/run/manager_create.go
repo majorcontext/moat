@@ -205,6 +205,7 @@ func (m *Manager) Create(ctx context.Context, opts Options) (resRun *Run, retErr
 		State:         StateCreated,
 		KeepContainer: opts.KeepContainer,
 		Interactive:   opts.Interactive,
+		tty:           opts.Interactive && opts.Terminal != nil,
 		CreatedAt:     time.Now(),
 		exitCh:        make(chan struct{}),
 	}
@@ -2382,6 +2383,7 @@ region = %s
 		GroupAdd:     groupAdd,
 		Privileged:   privileged,
 		Interactive:  opts.Interactive,
+		Terminal:     opts.Terminal,
 		HasMoatUser:  needsCustomImage, // moat-built images have moatuser; base images don't
 		MemoryMB:     memoryMB,
 		CPUs:         cpus,

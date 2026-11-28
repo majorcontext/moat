@@ -6,10 +6,13 @@ package e2e
 import (
 	"bytes"
 	"context"
+	"fmt"
+	"io"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/majorcontext/moat/internal/container"
 	"github.com/majorcontext/moat/internal/run"
 	"github.com/majorcontext/moat/internal/tui"
 )
@@ -23,9 +26,8 @@ import (
 // ready marker is detected. This ensures the footer is maintained and
 // alt screen transitions are detected from the start.
 //
-// Note: In test mode, stdin is not a real TTY, so containers run without
-// TTY allocation. The Apple CLI uses pipes instead of PTY, so ResizeTTY
-// and PTY-specific behavior can't be tested here (see unit tests instead).
+// The writer tests below use pipes. TestForegroundTerminal exercises both
+// pipes and an explicitly allocated guest PTY.
 // =============================================================================
 
 // TestAppleTUIWriterPassthrough verifies that container output flows through
@@ -69,7 +71,7 @@ func TestAppleTUIWriterPassthrough(t *testing.T) {
 	defer writer.Cleanup()
 
 	// Route container output through the tui.Writer
-	err = mgr.StartAttached(ctx, r.ID, strings.NewReader(""), writer, &bytes.Buffer{})
+	err = mgr.StartAttached(ctx, r.ID, strings.NewReader(""), writer, &bytes.Buffer{}, container.TTYSize{})
 	if err != nil {
 		t.Fatalf("StartAttached: %v", err)
 	}
@@ -128,7 +130,7 @@ func TestAppleTUIWriterAltScreenDuringInit(t *testing.T) {
 	_ = writer.Setup()
 	defer writer.Cleanup()
 
-	err = mgr.StartAttached(ctx, r.ID, strings.NewReader(""), writer, &bytes.Buffer{})
+	err = mgr.StartAttached(ctx, r.ID, strings.NewReader(""), writer, &bytes.Buffer{}, container.TTYSize{})
 	if err != nil {
 		t.Fatalf("StartAttached: %v", err)
 	}
@@ -190,7 +192,7 @@ func TestAppleTUIWriterMultipleWrites(t *testing.T) {
 	_ = writer.Setup()
 	defer writer.Cleanup()
 
-	err = mgr.StartAttached(ctx, r.ID, strings.NewReader(""), writer, &bytes.Buffer{})
+	err = mgr.StartAttached(ctx, r.ID, strings.NewReader(""), writer, &bytes.Buffer{}, container.TTYSize{})
 	if err != nil {
 		t.Fatalf("StartAttached: %v", err)
 	}
@@ -204,4 +206,59 @@ func TestAppleTUIWriterMultipleWrites(t *testing.T) {
 			t.Errorf("Missing %q in output", expected)
 		}
 	}
+}
+
+// Exercise guest terminal allocation and piped input from a headless caller.
+func TestForegroundTerminal(t *testing.T) {
+	testOnAllRuntimes(t, func(t *testing.T, rt container.Runtime) {
+		for _, tc := range []struct {
+			name     string
+			terminal *container.TTYSize
+			script   string
+			want     string
+		}{
+			{"tty", &container.TTYSize{Width: 93, Height: 31}, "echo guest-size=$(stty size)", "guest-size=31 93"},
+			{"pipe", nil, "test ! -t 0 && read -r line && echo received-$line", "received-input"},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				ctx, cancel := context.WithTimeout(t.Context(), testTimeout)
+				defer cancel()
+				script := tc.script
+				if tc.terminal != nil && rt.Type() == container.RuntimeApple {
+					// Apple's CLI issues its first guest resize after process.start.
+					script = `for i in $(seq 1 100); do s=$(stty size 2>/dev/null); [ "$s" = "31 93" ] && break; sleep 0.02; done; echo guest-size="$s"`
+				}
+				id, err := rt.CreateContainer(ctx, container.Config{
+					Name: fmt.Sprintf("moat-terminal-%d", time.Now().UnixNano()), Image: "alpine:latest",
+					Interactive: true, Terminal: tc.terminal, Cmd: []string{"sh", "-c", script},
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer func() {
+					if err := rt.RemoveContainer(context.Background(), id); err != nil {
+						t.Error(err)
+					}
+				}()
+				var stdout, stderr bytes.Buffer
+				opts := container.AttachOptions{Stdout: &stdout, Stderr: &stderr}
+				if tc.terminal != nil {
+					opts.TTY = true
+					input, writer := io.Pipe()
+					defer func() { _ = writer.Close() }()
+					defer func() { _ = input.Close() }()
+					opts.Stdin = input
+					opts.InitialWidth, opts.InitialHeight = tc.terminal.Width, tc.terminal.Height
+				} else {
+					opts.Stdin = strings.NewReader("input\n")
+				}
+				if err := rt.StartAttached(ctx, id, opts); err != nil {
+					t.Fatalf("attach: %v, stderr %s", err, stderr.String())
+				}
+				if got := strings.TrimSpace(stdout.String()); !strings.Contains(got, tc.want) {
+					t.Fatalf("stdout = %q, want %q; stderr = %q", got, tc.want, stderr.String())
+				}
+			})
+		}
+	})
 }

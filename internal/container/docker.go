@@ -32,7 +32,6 @@ import (
 	"github.com/majorcontext/moat/internal/container/output"
 	"github.com/majorcontext/moat/internal/id"
 	"github.com/majorcontext/moat/internal/log"
-	"github.com/majorcontext/moat/internal/term"
 	"github.com/majorcontext/moat/internal/ui"
 )
 
@@ -352,10 +351,11 @@ func (r *DockerRuntime) CreateContainer(ctx context.Context, cfg Config) (string
 		}
 	}
 
-	// Only use TTY mode if os.Stdin is a real terminal.
-	// Docker returns "the input device is not a TTY" when you try to use
-	// TTY mode with non-TTY stdin (e.g., piped input, tests).
-	useTTY := cfg.Interactive && term.IsTerminal(os.Stdin)
+	useTTY := cfg.Interactive && cfg.Terminal != nil
+	var consoleSize [2]uint
+	if useTTY {
+		consoleSize = [2]uint{cfg.Terminal.Height, cfg.Terminal.Width}
+	}
 
 	// Configure DNS servers for Docker containers.
 	// On macOS/Windows without custom DNS, leave unset so Docker's built-in
@@ -395,16 +395,20 @@ func (r *DockerRuntime) CreateContainer(ctx context.Context, cfg Config) (string
 
 	resp, err := r.cli.ContainerCreate(ctx,
 		&container.Config{
-			Image:        cfg.Image,
-			Cmd:          cfg.Cmd,
-			WorkingDir:   cfg.WorkingDir,
-			Env:          cfg.Env,
-			User:         cfg.User,
-			Tty:          useTTY,
-			OpenStdin:    cfg.Interactive,
+			Image:      cfg.Image,
+			Cmd:        cfg.Cmd,
+			WorkingDir: cfg.WorkingDir,
+			Env:        cfg.Env,
+			User:       cfg.User,
+			Tty:        useTTY,
+			OpenStdin:  cfg.Interactive,
+			// Deliver pipe EOF to the guest and drain its output on the
+			// original attachment before the daemon closes the connection.
+			StdinOnce:    cfg.Interactive && !useTTY,
 			ExposedPorts: exposedPorts,
 		},
 		&container.HostConfig{
+			ConsoleSize:  consoleSize,
 			Runtime:      r.ociRuntime, // "runsc" or "runc" or ""
 			Mounts:       mounts,
 			NetworkMode:  networkMode,
@@ -1274,9 +1278,7 @@ func (r *DockerRuntime) StartAttached(ctx context.Context, containerID string, o
 		return fmt.Errorf("starting container: %w", err)
 	}
 
-	// Resize TTY immediately if initial size was provided.
-	// This ensures the container process sees the correct terminal dimensions
-	// from the very start, before it has a chance to query and cache the size.
+	// Refresh the create-time size in case the host terminal changed during setup.
 	if opts.TTY && opts.InitialWidth > 0 && opts.InitialHeight > 0 {
 		if err := r.ResizeTTY(ctx, containerID, opts.InitialHeight, opts.InitialWidth); err != nil {
 			// Log but don't fail - the container has started successfully

@@ -14,6 +14,7 @@ import (
 	"github.com/gofrs/flock"
 	"github.com/majorcontext/moat/internal/audit"
 	"github.com/majorcontext/moat/internal/config"
+	"github.com/majorcontext/moat/internal/container"
 	"github.com/majorcontext/moat/internal/credential"
 	"github.com/majorcontext/moat/internal/daemon"
 	"github.com/majorcontext/moat/internal/id"
@@ -44,6 +45,7 @@ var ErrRunNotFound = daemon.ErrRunNotFound
 
 // Run represents an agent execution environment.
 type Run struct {
+	tty             bool          // Fixed when the primary container is created.
 	attachNeedsStop bool          // attachment returned control to the explicit Stop path
 	attachDrained   chan struct{} // guarded by stateMu
 	startupDone     chan struct{} // assigned under Manager.mu and closed after startup setup
@@ -190,13 +192,14 @@ type Options struct {
 	Name          string // Optional explicit name (--name flag or from config)
 	Workspace     string
 	Grants        []string
-	Cmd           []string       // Command to run (default: /bin/bash)
-	Config        *config.Config // Optional moat.yaml config
-	Env           []string       // Additional environment variables (KEY=VALUE)
-	Rebuild       bool           // Force rebuild of container image (ignores cache)
-	KeepContainer bool           // If true, don't auto-remove container after run
-	Interactive   bool           // Keep stdin open for interactive input
-	Clipboard     bool           // Enable host clipboard bridging
+	Cmd           []string           // Command to run (default: /bin/bash)
+	Config        *config.Config     // Optional moat.yaml config
+	Env           []string           // Additional environment variables (KEY=VALUE)
+	Rebuild       bool               // Force rebuild of container image (ignores cache)
+	KeepContainer bool               // If true, don't auto-remove container after run
+	Terminal      *container.TTYSize // Non-nil requests a guest TTY for interactive input.
+	Interactive   bool               // Keep stdin open for interactive input
+	Clipboard     bool               // Enable host clipboard bridging
 	// WorkspaceMode is the resolved workspace mode (bind|volume). Empty == bind.
 	WorkspaceMode config.WorkspaceMode
 

@@ -344,7 +344,7 @@ func runJoinInteractive(ctx context.Context, manager *run.Manager, r *run.Run, c
 	if term.IsTerminal(os.Stdout) {
 		if w, h := term.GetSize(os.Stdout); w > 0 && h > 0 {
 			// Reserve the footer row.
-			ch := containerTTYHeight(statusWriter, h)
+			ch := containerTTYHeight(statusWriter != nil, h)
 			initialW, initialH = uint(w), uint(ch) // #nosec G115
 		}
 	}
@@ -382,7 +382,7 @@ func runJoinInteractive(ctx context.Context, manager *run.Manager, r *run.Run, c
 			return container.TTYSize{}, false
 		}
 		_ = statusWriter.Resize(w, h)
-		ch := containerTTYHeight(statusWriter, h)
+		ch := containerTTYHeight(statusWriter != nil, h)
 		return container.TTYSize{Width: uint(w), Height: uint(ch)}, true // #nosec G115
 	}
 	go resizePump(done, sigCh, onWinch, resize)

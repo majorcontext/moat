@@ -338,9 +338,8 @@ type AttachOptions struct {
 	Stderr io.Writer // If non-nil, receive stderr from container (may be same as Stdout)
 	TTY    bool      // If true, use TTY mode (raw terminal)
 
-	// InitialWidth and InitialHeight set the initial terminal size for TTY mode.
-	// If both are > 0, the TTY is resized immediately after the container starts,
-	// before the process has a chance to query terminal dimensions.
+	// InitialWidth and InitialHeight give the current guest size at attachment.
+	// Apple propagates the initial resize after starting the guest process.
 	InitialWidth  uint
 	InitialHeight uint
 }
@@ -368,6 +367,7 @@ type Config struct {
 	CapAdd       []string       // Linux capabilities to add (e.g., "NET_ADMIN")
 	GroupAdd     []string       // Supplementary group IDs for the container process (e.g., "999" for docker group)
 	Privileged   bool           // If true, run container in privileged mode (required for Docker-in-Docker)
+	Terminal     *TTYSize       // Non-nil allocates a guest TTY, with optional initial dimensions.
 	Interactive  bool           // If true, container will be attached interactively (Apple runtime: uses exec workaround; Docker: handled natively)
 	HasMoatUser  bool           // If true, image has moatuser (moat-built images); used for exec --user in Apple containers
 	MemoryMB     int            // Memory limit in megabytes (both Docker and Apple)

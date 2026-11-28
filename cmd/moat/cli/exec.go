@@ -14,6 +14,7 @@ import (
 
 	intcli "github.com/majorcontext/moat/internal/cli"
 	"github.com/majorcontext/moat/internal/config"
+	"github.com/majorcontext/moat/internal/container"
 	"github.com/majorcontext/moat/internal/log"
 	"github.com/majorcontext/moat/internal/run"
 	"github.com/majorcontext/moat/internal/snapshot"
@@ -25,17 +26,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// Timing constants for interactive execution behavior
-const (
-	// ttyStartupDelay is how long to wait before resizing TTY after container starts.
-	// This allows the container process to initialize before we resize.
-	ttyStartupDelay = 200 * time.Millisecond
-
-	// defaultRingBytes is the default byte budget for the always-on TUI debug ring
-	// buffer. ~5–15 minutes of typical terminal output. Override with
-	// MOAT_TTY_RING_BYTES.
-	defaultRingBytes = 8 * 1024 * 1024
-)
+// defaultRingBytes is the byte budget for the always-on TUI debug ring.
+const defaultRingBytes = 8 * 1024 * 1024
 
 // Re-export types from internal/cli for backward compatibility
 // with code in cmd/moat/cli that uses these types.
@@ -92,11 +84,22 @@ func executeRunWrapper(ctx context.Context, opts intcli.ExecOptions) (*intcli.Ex
 // view of the terminal one row shorter prevents it from drawing on (or
 // scrolling content over) the footer line. Paired with DECSTBM ownership in
 // tui.Writer to fully isolate the child from moat's chrome.
-func containerTTYHeight(statusWriter *tui.Writer, actual int) int {
-	if statusWriter != nil && actual > 1 {
+func containerTTYHeight(footer bool, actual int) int {
+	if footer && actual > 1 {
 		return actual - 1
 	}
 	return actual
+}
+
+// foregroundTTYSize measures the guest area, excluding the footer when visible.
+func foregroundTTYSize(footer bool) container.TTYSize {
+	width, height := term.GetSize(os.Stdout)
+	if width <= 0 || height <= 0 {
+		return container.TTYSize{}
+	}
+	height = containerTTYHeight(footer, height)
+	// #nosec G115 -- dimensions are positive above.
+	return container.TTYSize{Width: uint(width), Height: uint(height)}
 }
 
 // setupStatusBar creates a status bar for interactive container sessions.
@@ -301,6 +304,11 @@ func ExecuteRun(ctx context.Context, opts intcli.ExecOptions) (*run.Run, error) 
 		Interactive:   opts.Interactive,
 		Clipboard:     clipboard,
 		WorkspaceMode: wsMode,
+	}
+
+	if opts.Interactive && term.IsTerminal(os.Stdin) {
+		size := foregroundTTYSize(true)
+		runOpts.Terminal = &size
 	}
 
 	// Print the run ID as soon as it is allocated, before the image build.
@@ -606,28 +614,10 @@ func RunInteractiveAttached(ctx context.Context, manager *run.Manager, r *run.Ru
 	defer attachCancel()
 
 	// Start with attachment - this ensures TTY is connected before process starts
+	size := foregroundTTYSize(statusWriter != nil)
 	attachDone := make(chan error, 1)
 	go func() {
-		attachDone <- manager.StartAttached(attachCtx, r.ID, stdin, stdout, os.Stderr)
-	}()
-
-	// Give container a moment to start, then resize TTY to match terminal.
-	// Note: We don't call statusWriter.Resize() here because Setup() already
-	// configured the scroll region and status bar with the correct dimensions.
-	// Calling Resize() again can interfere with the shell's cursor positioning
-	// during initialization. The status bar will be resized on SIGWINCH events.
-	go func() {
-		time.Sleep(ttyStartupDelay)
-		if term.IsTerminal(os.Stdout) {
-			width, height := term.GetSize(os.Stdout)
-			if width > 0 && height > 0 {
-				h := containerTTYHeight(statusWriter, height)
-				// #nosec G115 -- width/height are validated positive above
-				if err := manager.ResizeTTY(ctx, r.ID, uint(h), uint(width)); err != nil {
-					log.Debug("failed to resize TTY", "error", err)
-				}
-			}
-		}
+		attachDone <- manager.StartAttached(attachCtx, r.ID, stdin, stdout, os.Stderr, size)
 	}()
 
 	for {
@@ -647,7 +637,7 @@ func RunInteractiveAttached(ctx context.Context, manager *run.Manager, r *run.Ru
 						statusWriter.SetJoinedCount(manager.AttachedCount(r.ID))
 						_ = statusWriter.Resize(width, height)
 						// Also resize container TTY, reserving the footer row.
-						h := containerTTYHeight(statusWriter, height)
+						h := containerTTYHeight(statusWriter != nil, height)
 						// #nosec G115 -- width/height are validated positive above
 						_ = manager.ResizeTTY(ctx, r.ID, uint(h), uint(width))
 					}
@@ -798,7 +788,7 @@ func resetTUI(ctx context.Context, manager *run.Manager, r *run.Run, statusWrite
 
 	if term.IsTerminal(os.Stdout) {
 		if width, height := term.GetSize(os.Stdout); width > 0 && height > 0 {
-			h := containerTTYHeight(statusWriter, height)
+			h := containerTTYHeight(statusWriter != nil, height)
 			// #nosec G115 -- width/height validated positive
 			if err := manager.ResizeTTY(ctx, r.ID, uint(h), uint(width)); err != nil {
 				log.Debug("post-reset resize nudge failed", "error", err)
