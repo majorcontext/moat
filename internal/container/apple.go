@@ -22,7 +22,6 @@ import (
 	"github.com/creack/pty"
 	"github.com/majorcontext/moat/internal/container/output"
 	"github.com/majorcontext/moat/internal/log"
-	"github.com/majorcontext/moat/internal/term"
 	"github.com/majorcontext/moat/internal/ui"
 )
 
@@ -209,15 +208,10 @@ func (r *AppleRuntime) CreateContainer(ctx context.Context, cfg Config) (string,
 func (r *AppleRuntime) buildCreateArgs(cfg Config) ([]string, error) {
 	args := []string{"create"}
 
-	// Interactive mode flags
-	// Apple's container CLI requires a real PTY when using -t (TTY) flag.
-	// We only add -t if os.Stdin is an actual terminal. This allows programmatic
-	// use (tests, scripts) to work with -i alone, while real interactive sessions
-	// get full TTY support.
 	if cfg.Interactive {
-		args = append(args, "-i") // Keep stdin open
-		if term.IsTerminal(os.Stdin) {
-			args = append(args, "-t") // Allocate TTY only if we have a real terminal
+		args = append(args, "-i")
+		if cfg.Terminal != nil {
+			args = append(args, "-t")
 		}
 	}
 
@@ -1412,7 +1406,11 @@ func (r *AppleRuntime) StartAttached(ctx context.Context, containerID string, op
 func (r *AppleRuntime) startAttachedWithPTY(ctx context.Context, cmd *exec.Cmd, containerID string, opts AttachOptions) error {
 	// Create a PTY for the command. This gives the Apple container CLI
 	// real PTY file descriptors while allowing us to intercept output.
-	ptmx, err := pty.Start(cmd)
+	var size *pty.Winsize
+	if opts.InitialWidth > 0 && opts.InitialHeight > 0 {
+		size = &pty.Winsize{Rows: uint16(opts.InitialHeight), Cols: uint16(opts.InitialWidth)} // #nosec G115 -- terminal dimensions
+	}
+	ptmx, err := pty.StartWithSize(cmd, size)
 	if err != nil {
 		return fmt.Errorf("starting container with pty: %w", err)
 	}
@@ -1430,27 +1428,6 @@ func (r *AppleRuntime) startAttachedWithPTY(ctx context.Context, cmd *exec.Cmd, 
 		delete(r.activePTY, containerID)
 		r.ptyMu.Unlock()
 	}()
-
-	// Set PTY size. Prefer explicit initial size from opts, fall back to querying terminal.
-	if opts.TTY {
-		var width, height uint
-		if opts.InitialWidth > 0 && opts.InitialHeight > 0 {
-			width, height = opts.InitialWidth, opts.InitialHeight
-		} else if term.IsTerminal(os.Stdout) {
-			w, h := term.GetSize(os.Stdout)
-			if w > 0 && h > 0 {
-				// #nosec G115 -- width/height are validated positive above
-				width, height = uint(w), uint(h)
-			}
-		}
-		if width > 0 && height > 0 {
-			// #nosec G115 -- width/height are validated positive above and come from terminal
-			_ = pty.Setsize(ptmx, &pty.Winsize{
-				Rows: uint16(height), // #nosec G115
-				Cols: uint16(width),  // #nosec G115
-			})
-		}
-	}
 
 	// Create a cancellable context for the copy goroutines
 	copyCtx, cancelCopy := context.WithCancel(ctx)
