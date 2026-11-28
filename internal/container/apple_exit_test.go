@@ -16,7 +16,8 @@ import (
 // keeps the guest running while it exists, and <id>.fail makes the start fail
 // before the guest process runs. <id>.crash ends the CLI with that status
 // while the guest keeps running, <id>.legacy selects the pre-1.0 inspect
-// schema, and <id>.noinspect makes inspect fail.
+// schema, <id>.noinspect makes inspect fail, and <id>.rmnotfound makes rm report
+// a missing container.
 func fakeAppleCLI(t *testing.T) (*AppleRuntime, string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -53,6 +54,11 @@ inspect)
 	fi
 	;;
 rm)
+	id="$3"
+	if [ -f "$d/$id.rmnotfound" ]; then
+		echo 'Error: notFound: "failed to delete one or more containers"' >&2
+		exit 1
+	fi
 	exit 0
 	;;
 esac
@@ -302,5 +308,74 @@ func TestAppleLaunchRunsInOwnProcessGroup(t *testing.T) {
 	}
 	if pgid == syscall.Getpgrp() {
 		t.Errorf("launch process shares moat's process group %d", pgid)
+	}
+}
+
+// Starting a container again must end the earlier launch process, and the
+// new launch supplies the status.
+func TestAppleRestartReplacesLaunch(t *testing.T) {
+	rt, dir := fakeAppleCLI(t)
+	writeFile(t, dir, "ctr.code", "3")
+	writeFile(t, dir, "ctr.hold", "")
+	if err := rt.StartContainer(t.Context(), "ctr"); err != nil {
+		t.Fatalf("first StartContainer: %v", err)
+	}
+	first := rt.launchFor("ctr")
+
+	if err := rt.StartContainer(t.Context(), "ctr"); err != nil {
+		t.Fatalf("second StartContainer: %v", err)
+	}
+	second := rt.launchFor("ctr")
+	if second == first {
+		t.Fatal("second start did not replace the launch")
+	}
+	select {
+	case <-first.done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the first launch process was left running")
+	}
+	if first.known {
+		t.Errorf("first launch ended with status %d, want it killed", first.code)
+	}
+
+	if err := os.Remove(filepath.Join(dir, "ctr.hold")); err != nil {
+		t.Fatal(err)
+	}
+	if code, err := rt.WaitContainer(t.Context(), "ctr"); err != nil || code != 3 {
+		t.Errorf("WaitContainer = %d, %v; want 3, nil", code, err)
+	}
+}
+
+// Removing a container ends and forgets its launch, whether or not the
+// runtime still has the container.
+func TestAppleRemoveDropsLaunch(t *testing.T) {
+	for _, tc := range []struct{ name, marker string }{
+		{"removed", ""},
+		{"already gone", "ctr.rmnotfound"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rt, dir := fakeAppleCLI(t)
+			writeFile(t, dir, "ctr.code", "0")
+			writeFile(t, dir, "ctr.hold", "")
+			if tc.marker != "" {
+				writeFile(t, dir, tc.marker, "")
+			}
+			if err := rt.StartContainer(t.Context(), "ctr"); err != nil {
+				t.Fatalf("StartContainer: %v", err)
+			}
+			launch := rt.launchFor("ctr")
+
+			if err := rt.RemoveContainer(t.Context(), "ctr"); err != nil {
+				t.Fatalf("RemoveContainer: %v", err)
+			}
+			if rt.launchFor("ctr") != nil {
+				t.Error("launch still tracked after removal")
+			}
+			select {
+			case <-launch.done:
+			case <-time.After(5 * time.Second):
+				t.Fatal("launch process left running after removal")
+			}
+		})
 	}
 }

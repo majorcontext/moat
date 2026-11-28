@@ -400,6 +400,11 @@ func (r *AppleRuntime) trackLaunch(containerID string, l *appleLaunch) {
 	if r.launches == nil {
 		r.launches = make(map[string]*appleLaunch)
 	}
+	// A container started again replaces its earlier launch; end that
+	// process so nothing is left holding it.
+	if old := r.launches[containerID]; old != nil && old != l && old.kill != nil {
+		old.kill()
+	}
 	r.launches[containerID] = l
 }
 
@@ -429,7 +434,13 @@ func (r *AppleRuntime) dropLaunch(containerID string) {
 func (r *AppleRuntime) guestStarted(ctx context.Context, containerID string) bool {
 	for attempt := 0; attempt < 3; attempt++ {
 		if attempt > 0 {
-			time.Sleep(200 * time.Millisecond)
+			// The probe itself outlives a canceled caller, but a canceled
+			// caller does not wait for retries.
+			select {
+			case <-ctx.Done():
+				return false
+			case <-time.After(200 * time.Millisecond):
+			}
 		}
 		probe, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		out, err := exec.CommandContext(probe, r.containerBin, "inspect", containerID).Output()
