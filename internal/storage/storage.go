@@ -367,14 +367,15 @@ func (w *LogWriter) Close() error {
 		return nil
 	}
 	w.closed = true
-	var flushErr error
+	// Each stream is flushed even if another's write fails.
+	var errs []error
 	for _, s := range w.streams {
-		if len(s.pending) > 0 && flushErr == nil {
-			flushErr = w.writeEntry(s.pending)
+		if len(s.pending) > 0 {
+			errs = append(errs, w.writeEntry(bytes.TrimSuffix(s.pending, []byte{'\r'})))
 		}
 		s.pending = nil
 	}
-	return errors.Join(flushErr, w.file.Close())
+	return errors.Join(append(errs, w.file.Close())...)
 }
 
 // LogWriter returns a writer that timestamps log entries.

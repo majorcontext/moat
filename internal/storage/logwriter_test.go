@@ -199,3 +199,27 @@ func TestLogWriterConcurrentStreams(t *testing.T) {
 		t.Errorf("got %d out and %d err lines, want %d each", next["out"], next["err"], perStream)
 	}
 }
+
+func TestLogWriterSplitsLineOneByteOverLimit(t *testing.T) {
+	s, w := newTestLogWriter(t)
+
+	exact := strings.Repeat("a", maxLogLineBytes)
+	w.Write([]byte(exact + "b\nnext\n"))
+
+	assertLines(t, readLines(t, s), []string{exact, "b", "next"})
+}
+
+// Close stores a final line the same way Write stores a terminated one, for
+// every stream.
+func TestLogWriterCloseTrimsCarriageReturnOnEveryStream(t *testing.T) {
+	s, w := newTestLogWriter(t)
+	stderr := w.Stream()
+
+	w.Write([]byte("out line\r\nout prompt\r"))
+	stderr.Write([]byte("err prompt\r"))
+	if err := w.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	assertLines(t, readLines(t, s), []string{"out line", "out prompt", "err prompt"})
+}
